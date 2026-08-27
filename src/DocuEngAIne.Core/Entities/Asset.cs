@@ -13,6 +13,9 @@ public class Asset : EntityBase, ITenantScoped
     public string? Notes { get; set; }
     public string? Status { get; set; } = "Active";
 
+    public Guid? CompanyId { get; set; }
+    public Company? Company { get; set; }
+
     public Guid AssetTypeId { get; set; }
     public AssetType AssetType { get; set; } = null!;
 

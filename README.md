@@ -31,6 +31,8 @@ tests/                      # xUnit + EF InMemory tests
 ## Domain Model
 
 - **Tenant** — isolation boundary; seeded from the Entra `tid` claim on first login.
+- **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs.
+- **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry and PSA/RMM sync. Secrets live in Key Vault names only.
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
 - **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
 - **Document** — KB articles with full-text search and **versioning**.
@@ -155,6 +157,36 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 | GET | `/api/tenant/settings` | Tenant settings |
 | POST | `/api/tenant/onboard` | Onboard tenant from Entra `tid` |
 
+### Companies
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/companies` | List companies (`q` search) |
+| GET | `/api/companies/{id}` | Company detail + related counts/lists |
+| GET | `/api/companies/{id}/summary` | Related counts/lists only |
+| POST | `/api/companies` | Create company |
+| PUT | `/api/companies/{id}` | Update company |
+| DELETE | `/api/companies/{id}` | Delete company |
+
+### MCP / Integrations
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/mcp/servers` | List MCP servers |
+| GET | `/api/mcp/servers/{id}` | MCP server detail |
+| POST | `/api/mcp/servers` | Register MCP server |
+| PUT | `/api/mcp/servers/{id}` | Update MCP server |
+| DELETE | `/api/mcp/servers/{id}` | Delete MCP server |
+| GET | `/api/integrations` | List integration connections |
+| GET | `/api/integrations/{id}` | Integration connection detail |
+| POST | `/api/integrations` | Create connection (Halo, NinjaOne, UniFi, Blackpoint, CustomMcp) |
+| PUT | `/api/integrations/{id}` | Update connection |
+| DELETE | `/api/integrations/{id}` | Delete connection |
+| POST | `/api/integrations/{id}/test` | Test MCP/config |
+| POST | `/api/integrations/{id}/sync` | Sync (payload upsert or gated live pull) |
+| GET | `/api/integrations/{id}/runs` | Recent sync runs |
+| GET | `/api/integrations/{id}/mappings` | External→local mappings |
+
 ### Assets
 
 | Method | Path | Description |
@@ -223,8 +255,23 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 
 ## Next Steps
 
-- [ ] Add Azure AI Search + Azure OpenAI RAG over documents, assets, runbooks
-- [ ] Add asset relationship graph
-- [ ] Add Microsoft Graph discovery (Entra devices, Intune devices)
-- [ ] Add client portal for external read-only viewers
+See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.md).
+
+### Phase 2A (now) ✅
+- [x] Company (client space) distinct from Entra tenant
+- [x] MCP server registry + IntegrationConnection (Key Vault secrets)
+- [x] HaloPSA + NinjaOne sync via payload/MCP path (`SyncFromPayload` + test/sync endpoints)
+- [x] SPA: Companies + Integrations
+- [x] Company overview related lists (assets/docs/runbooks/Keeper)
+- [x] GET MCP server and integration by id; SQL cascade fix
+
+> Hand-written migrations `20260827214500_Phase2Integrations` and `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
+
+### Later
+- [ ] Asset relationship graph
+- [ ] Azure AI Search + Azure OpenAI RAG
+- [ ] UniFi / Blackpoint as MCP connectors
+- [ ] Expirations + flags
+- [ ] Client portal
 - [ ] Switch SQL auth to managed identity
+- [ ] One-time Hudu export migration (passwords → Keeper only)

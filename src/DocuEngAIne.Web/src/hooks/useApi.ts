@@ -2,6 +2,92 @@ import useSWR from 'swr'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+export type RelatedListItem = {
+  id: string
+  name: string
+  updatedAt?: string
+}
+
+export type CompanyCounts = {
+  assets: number
+  documents: number
+  runbooks: number
+  keeperLinks: number
+}
+
+export type Company = {
+  id: string
+  name: string
+  slug: string
+  companyNumber?: string | null
+  primaryDomain?: string | null
+  address?: string | null
+  city?: string | null
+  state?: string | null
+  phone?: string | null
+  website?: string | null
+  notes?: string | null
+  hoursOfOperation?: string | null
+  isActive?: boolean
+  portalEnabled?: boolean
+  haloClientId?: string | null
+  ninjaOrganizationId?: string | null
+  counts?: CompanyCounts | null
+  assets?: RelatedListItem[] | null
+  documents?: RelatedListItem[] | null
+  runbooks?: RelatedListItem[] | null
+  keeperLinks?: RelatedListItem[] | null
+}
+
+export type CreateCompanyInput = {
+  name: string
+  slug: string
+  haloClientId?: string | null
+  ninjaOrganizationId?: string | null
+}
+
+export type McpTransport = 'Http' | 'Sse' | 'Stdio'
+
+export type McpServer = {
+  id: string
+  name: string
+  transport: string
+  endpointUrl?: string | null
+  command?: string | null
+  authSecretName?: string | null
+  enabled?: boolean
+}
+
+export type CreateMcpServerInput = {
+  name: string
+  transport: McpTransport
+  endpointUrl?: string | null
+  authSecretName?: string | null
+  enabled: boolean
+}
+
+export type IntegrationConnection = {
+  id: string
+  provider: string
+  displayName?: string | null
+  status?: string | null
+  lastSyncAt?: string | null
+  lastError?: string | null
+  mcpServerId?: string | null
+  authSecretName?: string | null
+  isEnabled?: boolean
+}
+
+export type IntegrationProvider = 'Halo' | 'NinjaOne' | 'CustomMcp'
+
+export type CreateIntegrationInput = {
+  provider: IntegrationProvider
+  displayName: string
+  authSecretName?: string | null
+  mcpServerId?: string | null
+  isEnabled?: boolean
+}
+
 export function useProfile() {
   return useSWR('/api/me', fetcher)
 }
@@ -20,4 +106,64 @@ export function useRunbooks() {
 
 export function useKeeperLinks() {
   return useSWR('/api/keeper', fetcher)
+}
+
+export function useCompanies(q?: string) {
+  const term = q?.trim()
+  const key = term ? `/api/companies?q=${encodeURIComponent(term)}` : '/api/companies'
+  return useSWR<Company[]>(key, fetcher)
+}
+
+export function useCompany(id: string | undefined) {
+  return useSWR<Company>(id ? `/api/companies/${id}` : null, fetcher)
+}
+
+export function useMcpServers() {
+  return useSWR<McpServer[]>('/api/mcp/servers', fetcher)
+}
+
+export function useIntegrations() {
+  return useSWR<IntegrationConnection[]>('/api/integrations', fetcher)
+}
+
+async function postJson<T>(url: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    throw new Error(text || `Request failed (${res.status})`)
+  }
+  if (!text) {
+    return undefined as T
+  }
+  return JSON.parse(text) as T
+}
+
+export function createCompany(input: CreateCompanyInput) {
+  return postJson<Company>('/api/companies', input)
+}
+
+export function createMcpServer(input: CreateMcpServerInput) {
+  return postJson<McpServer>('/api/mcp/servers', input)
+}
+
+export function createIntegration(input: CreateIntegrationInput) {
+  return postJson<IntegrationConnection>('/api/integrations', input)
+}
+
+export function testIntegration(id: string) {
+  return postJson<{ ok?: boolean; message?: string }>(`/api/integrations/${id}/test`)
+}
+
+export function syncIntegration(id: string) {
+  return postJson<{
+    status?: string
+    errorSummary?: string
+    itemsCreated?: number
+    itemsUpdated?: number
+    itemsSkipped?: number
+  }>(`/api/integrations/${id}/sync`, {})
 }

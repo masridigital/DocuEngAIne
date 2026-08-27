@@ -71,7 +71,7 @@ public static class AssetEndpoints
                 .OrderBy(a => a.Name)
                 .ToListAsync(cancellationToken);
 
-            return Results.Ok(assets.Select(a => new { a.Id, a.Name, a.Location, a.Status, AssetType = a.AssetType?.Name }));
+            return Results.Ok(assets.Select(a => new { a.Id, a.Name, a.Location, a.Status, a.CompanyId, AssetType = a.AssetType?.Name }));
         });
 
         group.MapGet("/{id:guid}", async (
@@ -98,6 +98,9 @@ public static class AssetEndpoints
             ICurrentUser user,
             CancellationToken cancellationToken) =>
         {
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
+
             var asset = new Asset
             {
                 TenantId = user.TenantId!.Value,
@@ -106,6 +109,7 @@ public static class AssetEndpoints
                 Notes = request.Notes,
                 Status = request.Status ?? "Active",
                 AssetTypeId = request.AssetTypeId,
+                CompanyId = request.CompanyId,
             };
 
             db.Assets.Add(asset);
@@ -126,6 +130,11 @@ public static class AssetEndpoints
 
             if (asset is null)
                 return Results.NotFound();
+
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
+            if (request.CompanyId is Guid companyId)
+                asset.CompanyId = companyId;
 
             asset.Name = request.Name ?? asset.Name;
             asset.Location = request.Location ?? asset.Location;
@@ -167,6 +176,7 @@ public static class AssetEndpoints
             asset.Location,
             asset.Status,
             asset.Notes,
+            asset.CompanyId,
             AssetType = new { asset.AssetType?.Id, asset.AssetType?.Name },
             Fields = asset.CustomFieldValues.Select(v => new
             {
@@ -180,5 +190,5 @@ public static class AssetEndpoints
 
 public record CreateAssetTypeRequest(string Name, string? Description, string? Icon, List<AssetTypeFieldRequest>? Fields);
 public record AssetTypeFieldRequest(string Name, string Type, bool IsRequired);
-public record CreateAssetRequest(string Name, Guid AssetTypeId, string? Location, string? Notes, string? Status);
-public record UpdateAssetRequest(string? Name, Guid? AssetTypeId, string? Location, string? Notes, string? Status);
+public record CreateAssetRequest(string Name, Guid AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null);
+public record UpdateAssetRequest(string? Name, Guid? AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null);

@@ -10,10 +10,12 @@ export function Layout() {
         <Link to="/" className="brand">DocuEngAIne</Link>
         <nav className="app-nav">
           <NavLink to="/" end>Dashboard</NavLink>
+          <NavLink to="/companies">Companies</NavLink>
           <NavLink to="/assets">Assets</NavLink>
           <NavLink to="/documents">Docs</NavLink>
           <NavLink to="/runbooks">Runbooks</NavLink>
           <NavLink to="/keeper">Keeper</NavLink>
+          <NavLink to="/integrations">Integrations</NavLink>
         </nav>
         <div className="profile">
           {isLoading ? '…' : profile?.displayName ?? profile?.email ?? 'Guest'}

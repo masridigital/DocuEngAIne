@@ -1,6 +1,7 @@
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
+using DocuEngAIne.Infrastructure.Integrations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,6 +18,9 @@ public static class DependencyInjection
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<IResourceAuthorizationService, ResourceAuthorizationService>();
         services.AddScoped<IAuditService, AuditService>();
+        services.AddHttpClient(nameof(HttpMcpClient));
+        services.AddScoped<IMcpClient, HttpMcpClient>();
+        services.AddScoped<IIntegrationSyncService, IntegrationSyncService>();
 
         var connectionString = configuration.GetConnectionString("DocuEngAIne");
         if (string.IsNullOrWhiteSpace(connectionString))

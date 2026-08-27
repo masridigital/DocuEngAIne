@@ -33,7 +33,7 @@ public static class DocumentEndpoints
 
             var docs = await query
                 .OrderBy(d => d.Title)
-                .Select(d => new { d.Id, d.Title, d.Slug, d.Summary, d.Tags, d.UpdatedAt })
+                .Select(d => new { d.Id, d.Title, d.Slug, d.Summary, d.Tags, d.CompanyId, d.UpdatedAt })
                 .ToListAsync(cancellationToken);
 
             return Results.Ok(docs);
@@ -58,6 +58,7 @@ public static class DocumentEndpoints
                 doc.Summary,
                 doc.Content,
                 doc.Tags,
+                doc.CompanyId,
                 doc.IsPublished,
                 doc.UpdatedAt,
             });
@@ -69,6 +70,9 @@ public static class DocumentEndpoints
             ICurrentUser user,
             CancellationToken cancellationToken) =>
         {
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
+
             var doc = new Document
             {
                 TenantId = user.TenantId!.Value,
@@ -78,6 +82,7 @@ public static class DocumentEndpoints
                 Content = request.Content,
                 Tags = request.Tags,
                 IsPublished = request.IsPublished,
+                CompanyId = request.CompanyId,
             };
 
             db.Documents.Add(doc);
@@ -99,6 +104,11 @@ public static class DocumentEndpoints
 
             if (doc is null)
                 return Results.NotFound();
+
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
+            if (request.CompanyId is Guid companyId)
+                doc.CompanyId = companyId;
 
             var nextVersionNumber = (doc.Versions.Max(v => (int?)v.VersionNumber) ?? 0) + 1;
 
@@ -235,7 +245,8 @@ public record CreateDocumentRequest(
     string? Summary,
     string? Content,
     string? Tags,
-    bool IsPublished = true);
+    bool IsPublished = true,
+    Guid? CompanyId = null);
 
 public record UpdateDocumentRequest(
     string? Title,
@@ -244,6 +255,7 @@ public record UpdateDocumentRequest(
     string? Content,
     string? Tags,
     bool? IsPublished,
-    string? ChangeNote);
+    string? ChangeNote,
+    Guid? CompanyId = null);
 
 public record RestoreVersionRequest(Guid VersionId);
