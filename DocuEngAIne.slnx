@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/DocuEngAIne.Api/DocuEngAIne.Api.csproj" />
+    <Project Path="src/DocuEngAIne.Core/DocuEngAIne.Core.csproj" />
+    <Project Path="src/DocuEngAIne.Infrastructure/DocuEngAIne.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/DocuEngAIne.Tests/DocuEngAIne.Tests.csproj" />
+  </Folder>
+</Solution>

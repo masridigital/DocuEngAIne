@@ -1,0 +1,120 @@
+name: Azure Deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+      - 'infra/**'
+      - '.github/workflows/azure-deploy.yml'
+
+env:
+  DOTNET_VERSION: '10.0.x'
+  AZURE_RG: 'rg-docuengaine-prod'
+  AZURE_LOCATION: 'eastus'
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test --no-build --configuration Release --verbosity normal
+
+      - name: Publish
+        if: github.ref == 'refs/heads/main'
+        run: dotnet publish src/DocuEngAIne.Api/DocuEngAIne.Api.csproj -c Release -o ./publish --no-restore
+
+      - name: Upload artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-publish
+          path: ./publish
+          retention-days: 1
+
+  infra:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Create resource group
+        run: |
+          az group create \
+            --name ${{ env.AZURE_RG }} \
+            --location ${{ env.AZURE_LOCATION }}
+
+      - name: Deploy Bicep
+        uses: azure/arm-deploy@v2
+        with:
+          subscriptionId: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+          resourceGroupName: ${{ env.AZURE_RG }}
+          template: ./infra/main.bicep
+          parameters: |
+            {
+              "environment": "prod",
+              "sqlAdminLogin": "${{ secrets.SQL_ADMIN_LOGIN }}",
+              "sqlAdminPassword": "${{ secrets.SQL_ADMIN_PASSWORD }}",
+              "entraAuthority": "${{ secrets.ENTRA_AUTHORITY }}",
+              "entraAudience": "${{ secrets.ENTRA_AUDIENCE }}"
+            }
+          failOnStdErr: false
+
+  deploy-api:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: infra
+    steps:
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: api-publish
+          path: ./publish
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Package publish folder
+        run: |
+          cd ./publish
+          zip -r ../publish.zip .
+          cd ..
+
+      - name: Deploy to App Service
+        run: |
+          az webapp deployment source config-zip \
+            --resource-group ${{ env.AZURE_RG }} \
+            --name docuengaine-prod-app \
+            --src ./publish.zip
+        env:
+          AZURE_CORE_OUTPUT: none
+
+      - name: Cleanup artifact
+        uses: geekyeggo/delete-artifact@v4
+        with:
+          name: api-publish
+          failOnError: false
