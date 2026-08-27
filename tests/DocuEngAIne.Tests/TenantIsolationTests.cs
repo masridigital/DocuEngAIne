@@ -8,13 +8,13 @@ namespace DocuEngAIne.Tests;
 
 public class TenantIsolationTests
 {
-    private static DocuEngAIneDbContext CreateContext(Guid tenantId)
+    private static DocuEngAIneDbContext CreateContext(Guid tenantId, UserRole role = UserRole.Owner, string? objectId = null)
     {
         var options = new DbContextOptionsBuilder<DocuEngAIneDbContext>()
             .UseInMemoryDatabase(databaseName: Guid.NewGuid().ToString())
             .Options;
 
-        var user = new FakeCurrentUser { TenantId = tenantId };
+        var user = new FakeCurrentUser { TenantId = tenantId, ObjectId = objectId ?? Guid.NewGuid().ToString(), Role = role };
         return new DocuEngAIneDbContext(options, user);
     }
 
@@ -66,16 +66,5 @@ public class TenantIsolationTests
         await context.SaveChangesAsync();
 
         Assert.Equal(tenantId, asset.TenantId);
-    }
-
-    private class FakeCurrentUser : ICurrentUser
-    {
-        public bool IsAuthenticated { get; set; } = true;
-        public string? ObjectId { get; set; }
-        public string? Email { get; set; }
-        public string? DisplayName { get; set; }
-        public Guid? TenantId { get; set; }
-
-        public bool HasRole(UserRole role) => true;
     }
 }

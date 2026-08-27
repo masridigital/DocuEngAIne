@@ -94,10 +94,25 @@ public static class DocumentEndpoints
         {
             var doc = await db.Documents
                 .ForTenant(user)
+                .Include(d => d.Versions.OrderByDescending(v => v.VersionNumber).Take(1))
                 .FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
 
             if (doc is null)
                 return Results.NotFound();
+
+            var nextVersionNumber = (doc.Versions.Max(v => (int?)v.VersionNumber) ?? 0) + 1;
+
+            db.DocumentVersions.Add(new DocumentVersion
+            {
+                DocumentId = doc.Id,
+                VersionNumber = nextVersionNumber,
+                Title = doc.Title,
+                Slug = doc.Slug,
+                Summary = doc.Summary,
+                Content = doc.Content,
+                Tags = doc.Tags,
+                ChangeNote = request.ChangeNote,
+            });
 
             doc.Title = request.Title ?? doc.Title;
             doc.Slug = request.Slug ?? doc.Slug;
@@ -128,6 +143,88 @@ public static class DocumentEndpoints
             return Results.NoContent();
         });
 
+        group.MapGet("/{id:guid}/versions", async (
+            Guid id,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            CancellationToken cancellationToken) =>
+        {
+            var versions = await db.DocumentVersions
+                .AsNoTracking()
+                .Where(v => v.DocumentId == id)
+                .OrderByDescending(v => v.VersionNumber)
+                .Select(v => new { v.Id, v.VersionNumber, v.ChangeNote, v.Title, v.CreatedAt })
+                .ToListAsync(cancellationToken);
+
+            return Results.Ok(versions);
+        });
+
+        group.MapGet("/{id:guid}/versions/{versionId:guid}", async (
+            Guid id,
+            Guid versionId,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            CancellationToken cancellationToken) =>
+        {
+            var version = await db.DocumentVersions
+                .AsNoTracking()
+                .FirstOrDefaultAsync(v => v.DocumentId == id && v.Id == versionId, cancellationToken);
+
+            return version is null ? Results.NotFound() : Results.Ok(new
+            {
+                version.Id,
+                version.VersionNumber,
+                version.Title,
+                version.Slug,
+                version.Summary,
+                version.Content,
+                version.Tags,
+                version.ChangeNote,
+                version.CreatedAt,
+            });
+        });
+
+        group.MapPost("/{id:guid}/restore", async (
+            Guid id,
+            [FromBody] RestoreVersionRequest request,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            CancellationToken cancellationToken) =>
+        {
+            var doc = await db.Documents.ForTenant(user).FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
+            if (doc is null)
+                return Results.NotFound();
+
+            var version = await db.DocumentVersions
+                .FirstOrDefaultAsync(v => v.DocumentId == id && v.Id == request.VersionId, cancellationToken);
+
+            if (version is null)
+                return Results.NotFound();
+
+            var nextVersionNumber = (await db.DocumentVersions.Where(v => v.DocumentId == id).MaxAsync(v => (int?)v.VersionNumber, cancellationToken) ?? 0) + 1;
+
+            db.DocumentVersions.Add(new DocumentVersion
+            {
+                DocumentId = doc.Id,
+                VersionNumber = nextVersionNumber,
+                Title = doc.Title,
+                Slug = doc.Slug,
+                Summary = doc.Summary,
+                Content = doc.Content,
+                Tags = doc.Tags,
+                ChangeNote = $"Restore before version {version.VersionNumber}",
+            });
+
+            doc.Title = version.Title;
+            doc.Slug = version.Slug;
+            doc.Summary = version.Summary;
+            doc.Content = version.Content;
+            doc.Tags = version.Tags;
+
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.NoContent();
+        });
+
         return app;
     }
 }
@@ -146,4 +243,7 @@ public record UpdateDocumentRequest(
     string? Summary,
     string? Content,
     string? Tags,
-    bool? IsPublished);
+    bool? IsPublished,
+    string? ChangeNote);
+
+public record RestoreVersionRequest(Guid VersionId);

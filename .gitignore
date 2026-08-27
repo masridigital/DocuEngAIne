@@ -483,3 +483,9 @@ $RECYCLE.BIN/
 
 # Bicep compiled output
 infra/*.json
+
+# Generated SPA output
+src/DocuEngAIne.Api/wwwroot/
+
+# Claude plan artifacts
+.claude/

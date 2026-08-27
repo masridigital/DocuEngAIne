@@ -61,5 +61,12 @@ app.MapHealthChecks("/api/health/ready", new Microsoft.AspNetCore.Diagnostics.He
 app.MapTenantEndpoints();
 app.MapAssetEndpoints();
 app.MapDocumentEndpoints();
+app.MapKeeperLinkEndpoints();
+app.MapRunbookEndpoints();
+app.MapProfileEndpoints();
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.MapFallbackToFile("index.html");
 
 app.Run();

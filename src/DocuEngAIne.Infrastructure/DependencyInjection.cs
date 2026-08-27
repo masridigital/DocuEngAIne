@@ -1,8 +1,6 @@
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
-using DocuEngAIne.Infrastructure.Security;
-using Microsoft.AspNetCore.DataProtection;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,7 +15,8 @@ public static class DependencyInjection
     {
         services.AddHttpContextAccessor();
         services.AddScoped<ICurrentUser, CurrentUser>();
-        services.AddScoped<ISecretEncryptionService, DataProtectorSecretEncryptionService>();
+        services.AddScoped<IResourceAuthorizationService, ResourceAuthorizationService>();
+        services.AddScoped<IAuditService, AuditService>();
 
         var connectionString = configuration.GetConnectionString("DocuEngAIne");
         if (string.IsNullOrWhiteSpace(connectionString))
@@ -36,7 +35,6 @@ public static class DependencyInjection
         });
 
         services.AddDocuEngAIneAuthentication(configuration);
-        services.AddDataProtection();
 
         return services;
     }

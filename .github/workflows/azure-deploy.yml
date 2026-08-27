@@ -13,6 +13,7 @@ on:
 
 env:
   DOTNET_VERSION: '10.0.x'
+  NODE_VERSION: '22'
   AZURE_RG: 'rg-docuengaine-prod'
   AZURE_LOCATION: 'eastus'
 
@@ -26,6 +27,19 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: src/DocuEngAIne.Web/package-lock.json
+
+      - name: Install and build SPA
+        working-directory: src/DocuEngAIne.Web
+        run: |
+          npm ci
+          npm run build
 
       - name: Restore
         run: dotnet restore

@@ -22,8 +22,12 @@ public class DocuEngAIneDbContext : DbContext
     public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
     public DbSet<Document> Documents => Set<Document>();
+    public DbSet<DocumentVersion> DocumentVersions => Set<DocumentVersion>();
     public DbSet<AssetDocumentLink> AssetDocumentLinks => Set<AssetDocumentLink>();
-    public DbSet<EncryptedSecret> EncryptedSecrets => Set<EncryptedSecret>();
+    public DbSet<KeeperLink> KeeperLinks => Set<KeeperLink>();
+    public DbSet<Runbook> Runbooks => Set<Runbook>();
+    public DbSet<RunbookStep> RunbookSteps => Set<RunbookStep>();
+    public DbSet<ResourceRoleAssignment> ResourceRoleAssignments => Set<ResourceRoleAssignment>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)

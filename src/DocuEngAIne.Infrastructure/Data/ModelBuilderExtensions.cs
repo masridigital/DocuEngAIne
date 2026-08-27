@@ -16,7 +16,9 @@ public static class ModelBuilderExtensions
             t.HasMany(x => x.AssetTypes).WithOne(a => a.Tenant).HasForeignKey(a => a.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.Assets).WithOne(a => a.Tenant).HasForeignKey(a => a.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.Documents).WithOne(d => d.Tenant).HasForeignKey(d => d.TenantId).OnDelete(DeleteBehavior.Cascade);
-            t.HasMany(x => x.Secrets).WithOne(s => s.Tenant).HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Cascade);
+            t.HasMany(x => x.KeeperLinks).WithOne(s => s.Tenant).HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Cascade);
+            t.HasMany(x => x.Runbooks).WithOne(r => r.Tenant).HasForeignKey(r => r.TenantId).OnDelete(DeleteBehavior.Cascade);
+            t.HasMany(x => x.ResourceRoleAssignments).WithOne(r => r.Tenant).HasForeignKey(r => r.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<User>(u =>
@@ -53,6 +55,12 @@ public static class ModelBuilderExtensions
             d.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
             d.HasIndex(x => x.Tags);
             d.HasMany(x => x.LinkedAssets).WithOne(l => l.Document).HasForeignKey(l => l.DocumentId).OnDelete(DeleteBehavior.Cascade);
+            d.HasMany(x => x.Versions).WithOne(v => v.Document).HasForeignKey(v => v.DocumentId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DocumentVersion>(v =>
+        {
+            v.HasIndex(x => new { x.DocumentId, x.VersionNumber });
         });
 
         modelBuilder.Entity<AssetDocumentLink>(l =>
@@ -60,9 +68,25 @@ public static class ModelBuilderExtensions
             l.HasIndex(x => new { x.AssetId, x.DocumentId }).IsUnique();
         });
 
-        modelBuilder.Entity<EncryptedSecret>(s =>
+        modelBuilder.Entity<KeeperLink>(k =>
         {
-            s.HasIndex(x => new { x.TenantId, x.Name });
+            k.HasIndex(x => new { x.TenantId, x.Name });
+        });
+
+        modelBuilder.Entity<Runbook>(r =>
+        {
+            r.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
+            r.HasMany(x => x.Steps).WithOne(s => s.Runbook).HasForeignKey(s => s.RunbookId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RunbookStep>(s =>
+        {
+            s.HasIndex(x => new { x.RunbookId, x.Order }).IsUnique();
+        });
+
+        modelBuilder.Entity<ResourceRoleAssignment>(r =>
+        {
+            r.HasIndex(x => new { x.TenantId, x.UserId, x.ResourceType, x.ResourceId }).IsUnique();
         });
 
         modelBuilder.Entity<AuditLog>(a =>
