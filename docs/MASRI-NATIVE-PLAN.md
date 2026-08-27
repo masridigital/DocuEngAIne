@@ -241,3 +241,29 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Global expirations | Phase 2C dashboard widget. | later | |
 | Client portal | Phase 2C. Keeper reveal only, never local secrets. | later | |
 | Passwords (global) | Tenant-wide KeeperLink list. No vault. | skip | Phase1 links exist. |
+
+## 9b. Live verify 2026-08-27 (`masri.huducloud.com`)
+
+Read-only. Active companies: **1** (ExampleCo). Archived: **0**. Configured integrations: **0** of **32**.
+
+Hudu company list is `/c` (not `/companies`). Create form fields: Name*, Parent, Logo, Nickname, Company ID Number, Type, Address 1/2, City, Country, State, Postal, Phone, Fax, Website.
+
+**Already on Company (correction):** Phone, Website, CompanyNumber, Address, City, State, Notes, HoursOfOperation. Missing vs that form: Type, Parent, Logo, Nickname, Fax, Country, Postal.
+
+| Hudu job | Result vs DocuEngAIne |
+|---|---|
+| Company CRUD + tenant silo | COVERED |
+| Halo/Ninja org matching + test/sync/runs | COVERED |
+| MCP servers | COVERED (Masri extra) |
+| Company home related lists | COVERED this slice (assets/docs/runbooks/Keeper by CompanyId). Not Hudu tab chrome. |
+| Company type / archive tab / A–Z filter / flags | NOT YET (IsActive exists; no archive UX) |
+| Parent company, logo | NOT YET |
+| Halo/Ninja layout mapping + skip/overwrite toggles | NOT YET (needed before live sync) |
+| UniFi local user/password | INTENTIONAL: Key Vault secret name only |
+| 32-vendor catalog, in-app secrets, portal | INTENTIONAL SKIP |
+| Asset-layout mapping per remote object | NOT YET (use AssetType as ops needs it) |
+
+Hudu bugs in this tenant (do not copy): `/c/{id}/expirations` 500 (global expirations works, 7 rows); `/c/{id}/kba` 500 (use `/kba?company_id=`); Filters button on company list did not open.
+
+Expirations in Hudu are date fields on asset layouts, rolled up globally. Process templates (admin, 0) vs per-company processes (ExampleCo has 2, ad-hoc). Flags = named colored labels. Alerts/workflows = none configured.
+
