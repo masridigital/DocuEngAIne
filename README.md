@@ -223,8 +223,19 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 
 ## Next Steps
 
-- [ ] Add Azure AI Search + Azure OpenAI RAG over documents, assets, runbooks
-- [ ] Add asset relationship graph
-- [ ] Add Microsoft Graph discovery (Entra devices, Intune devices)
-- [ ] Add client portal for external read-only viewers
+See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.md).
+
+### Phase 2A (now)
+- [ ] Company (client space) distinct from Entra tenant
+- [ ] MCP server registry + IntegrationConnection (Key Vault secrets)
+- [ ] HaloPSA + NinjaOne sync via StackJack/Composio MCP
+- [ ] SPA: Companies + Integrations
+
+### Later
+- [ ] Asset relationship graph
+- [ ] Azure AI Search + Azure OpenAI RAG
+- [ ] UniFi / Blackpoint as MCP connectors
+- [ ] Expirations + flags
+- [ ] Client portal
 - [ ] Switch SQL auth to managed identity
+- [ ] One-time Hudu export migration (passwords → Keeper only)
