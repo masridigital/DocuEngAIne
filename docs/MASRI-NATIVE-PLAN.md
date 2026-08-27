@@ -195,9 +195,49 @@ Keep README direction: Azure AI Search + OpenAI RAG over documents, assets, runb
 
 ## 8. Immediate next engineering tasks
 
-Phase 2A is on `feature/integrations-mcp` (PR #1): Company, MCP registry, IntegrationConnection, payload sync, SPA Companies/Integrations, hand-written `Phase2Integrations` migration.
+Phase 2A is on `feature/integrations-mcp` (PR #1): Company, MCP registry, IntegrationConnection, payload sync, SPA Companies/Integrations, SQL cascade-safe FKs, company related summary.
 
 Next:
-1. On a machine with the .NET SDK: `dotnet test` and `dotnet ef migrations add Phase2IntegrationsReconcile` if the snapshot needs regen
-2. Wire StackJack MCP credentials in Key Vault and a live Halo/Ninja company pull
-3. Phase 2B: expirations + flags; UniFi/Blackpoint MCP connectors
+1. Wire StackJack MCP credentials in Key Vault and a live Halo/Ninja company pull
+2. CompanyId on document/runbook/Keeper create-edit (assets already accept it)
+3. Phase 2B: UniFi + Blackpoint MCP; sync schedules + SyncRun UI; Halo/Ninja deep links
+4. Phase 2C: relationship graph, expirations + flags, Azure AI Search, client portal, Hudu export import (passwords → Keeper only)
+5. `dotnet ef migrations add Phase2IntegrationsReconcile` if the model snapshot still needs regen after the hand-written Phase 2 migrations
+
+## 9. Hudu ↔ DocuEngAIne verification matrix
+
+Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is capability shipped, not pixel parity.
+
+| Hudu job | Masri approach | Status | Verify notes |
+|---|---|---|---|
+| Top nav — Dashboard | Masri hub (assets/docs/runbooks/Keeper). Recents/expirations later. Not Magic Dash. | Phase1 | Open `/`. No Hudu widgets. |
+| Top nav — Companies | `Company` client space ≠ Entra tenant. `/companies`. | Phase2A | List + detail. Halo/Ninja IDs shown. |
+| Top nav — Global views | Tenant-wide Assets/Docs/Runbooks/Keeper lists. | Phase1 | Cross-company filter later. |
+| Top nav — Central KB | Tenant-wide Documents. Folders/public later. | Phase1 | `/documents` is MSP-wide, not Hudu folders. |
+| Top nav — My Vault | Do not replicate. Keeper is the vault. | skip | No password/TOTP tables. |
+| Top nav — Admin | Entra + RBAC + audit. Azure for SMTP/license. | Phase1 | Users/roles/audit exist. Layouts UI later. |
+| Company home | Overview + related counts/lists (assets, docs, runbooks, Keeper). | Phase2A | `/companies/:id`. Not Hudu tab chrome. |
+| Company passwords | `KeeperLink` filtered by `CompanyId`. Reveal audits. | Phase2A | Links only. Open in Keeper. |
+| Company processes | Runbooks filtered by `CompanyId`. Run history later. | Phase2A | Same Runbook model; no Hudu completion UI. |
+| Company KB | Documents filtered by `CompanyId`. | Phase2A | Same Document model as central KB. |
+| Company photos | Blob storage later. | later | |
+| Company IPAM | UniFi/MCP owns live network. No IPAM product line day one. | later | |
+| Company racks | Defer unless a tenant demands it. | later | |
+| Company websites | Asset layout + expiration later. | later | |
+| Company expirations | Phase 2C widget on assets/docs. | later | |
+| Company portal | Entra external ID / magic-link read-only. | later | |
+| Company related items | `ResourceLink` graph later. This slice is company-scoped lists. | later | Lists ≠ relationship graph. |
+| Company museum | Novelty. Skip. | skip | |
+| Asset layouts (all types) | One `AssetType` + `FieldDefinition` model. Map from Halo/Ninja. Do not clone 32 layouts. | Phase1 | Create types as ops needs them. |
+| Admin (users, groups, layouts, API, import/export, SMTP, license) | Entra + Azure. Import only for Hudu migration. | later | Audit is Phase1. |
+| Integrations — Halo | `IntegrationConnection` + payload/MCP sync → `Company`. Secret **name** only. Halo is SoR. | Phase2A | Test/sync endpoints. GET by id. |
+| Integrations — NinjaOne | Same path → `Company` + Computer Assets. Secret **name** only. | Phase2A | Same sync service by provider. |
+| Integrations — UniFi | MCP connector, not a Hudu form. | later | |
+| Integrations — M365 / Intune | Graph or MCP when ops needs it. | later | |
+| Integrations — Blackpoint | First-class Masri MCP later. | later | |
+| Integrations — 32-tile catalog | MCP registry; add on demand. | skip | |
+| Hudu Bridge / Hudini / leaderboard | Skip. Masri AI = our RAG + MCP later. | skip | |
+| Central KB folders / public share | Tags now. Folders/share later. | later | Distinct from company-filtered docs. |
+| Global expirations | Phase 2C dashboard widget. | later | |
+| Client portal | Phase 2C. Keeper reveal only, never local secrets. | later | |
+| Passwords (global) | Tenant-wide KeeperLink list. No vault. | skip | Phase1 links exist. |

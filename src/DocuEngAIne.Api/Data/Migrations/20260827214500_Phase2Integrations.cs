@@ -1,4 +1,6 @@
 using System;
+using DocuEngAIne.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -6,6 +8,8 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace DocuEngAIne.Api.Data.Migrations
 {
     /// <inheritdoc />
+    [DbContext(typeof(DocuEngAIneDbContext))]
+    [Migration("20260827214500_Phase2Integrations")]
     public class Phase2Integrations : Migration
     {
         /// <inheritdoc />

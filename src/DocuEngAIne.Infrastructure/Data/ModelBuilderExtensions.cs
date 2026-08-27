@@ -52,11 +52,14 @@ public static class ModelBuilderExtensions
         {
             m.HasIndex(x => new { x.IntegrationConnectionId, x.ExternalType, x.ExternalId }).IsUnique();
             m.HasIndex(x => new { x.TenantId, x.LocalEntityType, x.LocalEntityId });
+            // Restrict: IntegrationConnection already cascades from Tenant — SQL Server forbids multiple cascade paths.
+            m.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<SyncRun>(s =>
         {
             s.HasIndex(x => new { x.IntegrationConnectionId, x.StartedAt });
+            s.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<User>(u =>

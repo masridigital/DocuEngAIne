@@ -26,6 +26,12 @@ public static class IntegrationEndpoints
             return Results.Ok(items.Select(MapServer));
         });
 
+        group.MapGet("/{id:guid}", async (Guid id, DocuEngAIneDbContext db, ICurrentUser user, CancellationToken ct) =>
+        {
+            var server = await db.McpServers.ForTenant(user).AsNoTracking().FirstOrDefaultAsync(s => s.Id == id, ct);
+            return server is null ? Results.NotFound() : Results.Ok(MapServer(server));
+        });
+
         group.MapPost("", async (
             [FromBody] CreateMcpServerRequest request,
             DocuEngAIneDbContext db,
@@ -97,6 +103,13 @@ public static class IntegrationEndpoints
             var items = await db.IntegrationConnections.ForTenant(user).AsNoTracking()
                 .OrderBy(i => i.DisplayName).ToListAsync(ct);
             return Results.Ok(items.Select(MapIntegration));
+        });
+
+        group.MapGet("/{id:guid}", async (Guid id, DocuEngAIneDbContext db, ICurrentUser user, CancellationToken ct) =>
+        {
+            var connection = await db.IntegrationConnections.ForTenant(user).AsNoTracking()
+                .FirstOrDefaultAsync(i => i.Id == id, ct);
+            return connection is null ? Results.NotFound() : Results.Ok(MapIntegration(connection));
         });
 
         group.MapPost("", async (
