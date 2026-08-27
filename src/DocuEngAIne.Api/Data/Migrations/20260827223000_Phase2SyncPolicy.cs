@@ -26,7 +26,7 @@ namespace DocuEngAIne.Api.Data.Migrations
                 table: "IntegrationConnections",
                 type: "bit",
                 nullable: false,
-                defaultValue: true);
+                defaultValue: false);
 
             migrationBuilder.AddColumn<bool>(
                 name: "SkipLocations",

@@ -23,8 +23,8 @@ public class IntegrationConnection : EntityBase, ITenantScoped
 
     /// <summary>Skip inactive remote accounts. Default on (safe).</summary>
     public bool SkipInactive { get; set; } = true;
-    /// <summary>Skip contacts on later live pull. Default on (safe).</summary>
-    public bool SkipContacts { get; set; } = true;
+    /// <summary>Skip contacts on later live pull. Default off (match Hudu).</summary>
+    public bool SkipContacts { get; set; }
     /// <summary>Skip locations/sites. Default off (import them).</summary>
     public bool SkipLocations { get; set; }
     /// <summary>Skip assets. Ninja skip-devices maps here when Provider is NinjaOne. Default off.</summary>

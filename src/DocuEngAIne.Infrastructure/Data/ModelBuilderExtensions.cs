@@ -44,7 +44,7 @@ public static class ModelBuilderExtensions
         {
             i.HasIndex(x => new { x.TenantId, x.Provider, x.DisplayName });
             i.Property(x => x.SkipInactive).HasDefaultValue(true);
-            i.Property(x => x.SkipContacts).HasDefaultValue(true);
+            i.Property(x => x.SkipContacts).HasDefaultValue(false);
             i.Property(x => x.SkipLocations).HasDefaultValue(false);
             i.Property(x => x.SkipAssets).HasDefaultValue(false);
             i.Property(x => x.AutoUpdateAssetNames).HasDefaultValue(false);
