@@ -131,6 +131,12 @@ public static class IntegrationEndpoints
                 McpServerId = request.McpServerId,
                 IsEnabled = request.IsEnabled ?? true,
                 Status = IntegrationStatus.Disconnected,
+                SkipInactive = request.SkipInactive ?? true,
+                SkipContacts = request.SkipContacts ?? false,
+                SkipLocations = request.SkipLocations ?? false,
+                SkipAssets = request.SkipAssets ?? false,
+                AutoUpdateAssetNames = request.AutoUpdateAssetNames ?? false,
+                UpdateCompanyDetails = request.UpdateCompanyDetails ?? false,
             };
             db.IntegrationConnections.Add(connection);
             await db.SaveChangesAsync(ct);
@@ -155,6 +161,18 @@ public static class IntegrationEndpoints
                 connection.McpServerId = request.McpServerId;
             if (request.IsEnabled.HasValue)
                 connection.IsEnabled = request.IsEnabled.Value;
+            if (request.SkipInactive.HasValue)
+                connection.SkipInactive = request.SkipInactive.Value;
+            if (request.SkipContacts.HasValue)
+                connection.SkipContacts = request.SkipContacts.Value;
+            if (request.SkipLocations.HasValue)
+                connection.SkipLocations = request.SkipLocations.Value;
+            if (request.SkipAssets.HasValue)
+                connection.SkipAssets = request.SkipAssets.Value;
+            if (request.AutoUpdateAssetNames.HasValue)
+                connection.AutoUpdateAssetNames = request.AutoUpdateAssetNames.Value;
+            if (request.UpdateCompanyDetails.HasValue)
+                connection.UpdateCompanyDetails = request.UpdateCompanyDetails.Value;
             await db.SaveChangesAsync(ct);
             return Results.NoContent();
         });
@@ -187,7 +205,7 @@ public static class IntegrationEndpoints
             if (request?.Companies is { Count: > 0 })
             {
                 var run = await sync.SyncFromPayloadAsync(id, request.Companies.Select(c =>
-                    new ExternalCompanyDto(c.ExternalId, c.Name, c.Slug, c.PrimaryDomain, c.City, c.State, c.Website)).ToList(), ct);
+                    new ExternalCompanyDto(c.ExternalId, c.Name, c.Slug, c.PrimaryDomain, c.City, c.State, c.Website, c.Address, c.IsInactive)).ToList(), ct);
                 return Results.Ok(MapRun(run));
             }
 
@@ -268,6 +286,12 @@ public static class IntegrationEndpoints
         i.LastSyncAt,
         i.LastError,
         i.IsEnabled,
+        i.SkipInactive,
+        i.SkipContacts,
+        i.SkipLocations,
+        i.SkipAssets,
+        i.AutoUpdateAssetNames,
+        i.UpdateCompanyDetails,
         i.CreatedAt,
         i.UpdatedAt,
     };
@@ -312,14 +336,26 @@ public record CreateIntegrationRequest(
     string? ConfigJson = null,
     string? AuthSecretName = null,
     Guid? McpServerId = null,
-    bool? IsEnabled = null);
+    bool? IsEnabled = null,
+    bool? SkipInactive = null,
+    bool? SkipContacts = null,
+    bool? SkipLocations = null,
+    bool? SkipAssets = null,
+    bool? AutoUpdateAssetNames = null,
+    bool? UpdateCompanyDetails = null);
 
 public record UpdateIntegrationRequest(
     string? DisplayName = null,
     string? ConfigJson = null,
     string? AuthSecretName = null,
     Guid? McpServerId = null,
-    bool? IsEnabled = null);
+    bool? IsEnabled = null,
+    bool? SkipInactive = null,
+    bool? SkipContacts = null,
+    bool? SkipLocations = null,
+    bool? SkipAssets = null,
+    bool? AutoUpdateAssetNames = null,
+    bool? UpdateCompanyDetails = null);
 
 public record SyncPayloadRequest(List<SyncCompanyDto>? Companies = null);
 
@@ -330,4 +366,6 @@ public record SyncCompanyDto(
     string? PrimaryDomain = null,
     string? City = null,
     string? State = null,
-    string? Website = null);
+    string? Website = null,
+    string? Address = null,
+    bool? IsInactive = null);

@@ -84,4 +84,113 @@ public class IntegrationSyncTests
         var forB = await b.McpServers.ForTenant(new FakeCurrentUser { TenantId = tenantB }).ToListAsync();
         Assert.Empty(forB);
     }
+
+    private static async Task<(IntegrationConnection Connection, Company Company)> SeedMappedCompany(
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool updateCompanyDetails)
+    {
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.Halo,
+            DisplayName = "Halo",
+            AuthSecretName = "halo-secret",
+            UpdateCompanyDetails = updateCompanyDetails,
+        };
+        db.IntegrationConnections.Add(connection);
+        var company = new Company
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "Local Name",
+            Slug = "local-name",
+            Address = "1 Main",
+            City = "Austin",
+            State = "TX",
+            Website = "https://local.example",
+            PrimaryDomain = "local.example",
+        };
+        db.Companies.Add(company);
+        await db.SaveChangesAsync();
+        db.IntegrationMappings.Add(new IntegrationMapping
+        {
+            TenantId = user.TenantId!.Value,
+            IntegrationConnectionId = connection.Id,
+            ExternalId = "halo-100",
+            ExternalType = "company",
+            LocalEntityType = nameof(Company),
+            LocalEntityId = company.Id,
+        });
+        await db.SaveChangesAsync();
+        return (connection, company);
+    }
+
+    [Fact]
+    public async Task SyncFromPayload_Preserves_Company_Name_When_UpdateCompanyDetails_False()
+    {
+        var (db, user, sync) = Create();
+        var (connection, _) = await SeedMappedCompany(db, user, updateCompanyDetails: false);
+
+        var run = await sync.SyncFromPayloadAsync(connection.Id, [
+            new ExternalCompanyDto("halo-100", "Remote Name", PrimaryDomain: "remote.example", City: "Dallas", State: "TX", Website: "https://remote.example", Address: "2 Remote")
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsUpdated);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("Local Name", company.Name);
+        Assert.Equal("1 Main", company.Address);
+        Assert.Equal("Austin", company.City);
+        Assert.Equal("TX", company.State);
+        Assert.Equal("https://local.example", company.Website);
+        Assert.Equal("local.example", company.PrimaryDomain);
+        Assert.Equal("halo-100", company.HaloClientId);
+    }
+
+    [Fact]
+    public async Task SyncFromPayload_Updates_Company_Name_When_UpdateCompanyDetails_True()
+    {
+        var (db, user, sync) = Create();
+        var (connection, _) = await SeedMappedCompany(db, user, updateCompanyDetails: true);
+
+        var run = await sync.SyncFromPayloadAsync(connection.Id, [
+            new ExternalCompanyDto("halo-100", "Remote Name", PrimaryDomain: "remote.example", City: "Dallas", State: "TX", Website: "https://remote.example", Address: "2 Remote")
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsUpdated);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("Remote Name", company.Name);
+        Assert.Equal("Dallas", company.City);
+        Assert.Equal("TX", company.State);
+        Assert.Equal("https://remote.example", company.Website);
+        Assert.Equal("remote.example", company.PrimaryDomain);
+        Assert.Equal("2 Remote", company.Address);
+        Assert.Equal("halo-100", company.HaloClientId);
+    }
+
+    [Fact]
+    public async Task SyncFromPayload_Skips_Inactive_When_SkipInactive_True()
+    {
+        var (db, user, sync) = Create();
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.Halo,
+            DisplayName = "Halo",
+            AuthSecretName = "halo-secret",
+            SkipInactive = true,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncFromPayloadAsync(connection.Id, [
+            new ExternalCompanyDto("halo-1", "DeadCo", IsInactive: true),
+            new ExternalCompanyDto("halo-2", "LiveCo", IsInactive: false),
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsSkipped);
+        Assert.Equal(1, run.ItemsCreated);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("LiveCo", company.Name);
+    }
 }

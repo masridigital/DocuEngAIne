@@ -43,6 +43,12 @@ public static class ModelBuilderExtensions
         modelBuilder.Entity<IntegrationConnection>(i =>
         {
             i.HasIndex(x => new { x.TenantId, x.Provider, x.DisplayName });
+            i.Property(x => x.SkipInactive).HasDefaultValue(true);
+            i.Property(x => x.SkipContacts).HasDefaultValue(true);
+            i.Property(x => x.SkipLocations).HasDefaultValue(false);
+            i.Property(x => x.SkipAssets).HasDefaultValue(false);
+            i.Property(x => x.AutoUpdateAssetNames).HasDefaultValue(false);
+            i.Property(x => x.UpdateCompanyDetails).HasDefaultValue(false);
             i.HasOne(x => x.McpServer).WithMany(m => m.Integrations).HasForeignKey(x => x.McpServerId).OnDelete(DeleteBehavior.SetNull);
             i.HasMany(x => x.Mappings).WithOne(m => m.IntegrationConnection).HasForeignKey(m => m.IntegrationConnectionId).OnDelete(DeleteBehavior.Cascade);
             i.HasMany(x => x.SyncRuns).WithOne(s => s.IntegrationConnection).HasForeignKey(s => s.IntegrationConnectionId).OnDelete(DeleteBehavior.Cascade);

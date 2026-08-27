@@ -110,8 +110,16 @@ public class IntegrationSyncService : IIntegrationSyncService
 
         try
         {
+            // SkipContacts/SkipLocations/SkipAssets/AutoUpdateAssetNames document intent for
+            // later live Halo/Ninja pulls. v1 payload upsert is companies only.
             foreach (var dto in companies)
             {
+                if (connection.SkipInactive && dto.IsInactive == true)
+                {
+                    run.ItemsSkipped++;
+                    continue;
+                }
+
                 var mapping = await _db.IntegrationMappings.ForTenant(_user)
                     .FirstOrDefaultAsync(m =>
                         m.IntegrationConnectionId == connection.Id
@@ -134,6 +142,7 @@ public class IntegrationSyncService : IIntegrationSyncService
                         City = dto.City,
                         State = dto.State,
                         Website = dto.Website,
+                        Address = dto.Address,
                         HaloClientId = connection.Provider == IntegrationProvider.Halo ? dto.ExternalId : null,
                         NinjaOrganizationId = connection.Provider == IntegrationProvider.NinjaOne ? dto.ExternalId : null,
                     };
@@ -155,14 +164,20 @@ public class IntegrationSyncService : IIntegrationSyncService
                 {
                     company = await _db.Companies.ForTenant(_user)
                         .FirstAsync(c => c.Id == mapping.LocalEntityId, cancellationToken);
-                    company.Name = dto.Name;
-                    company.PrimaryDomain = dto.PrimaryDomain ?? company.PrimaryDomain;
-                    company.City = dto.City ?? company.City;
-                    company.State = dto.State ?? company.State;
-                    company.Website = dto.Website ?? company.Website;
-                    if (connection.Provider == IntegrationProvider.Halo)
+                    if (connection.UpdateCompanyDetails)
+                    {
+                        company.Name = dto.Name;
+                        company.PrimaryDomain = dto.PrimaryDomain ?? company.PrimaryDomain;
+                        company.City = dto.City ?? company.City;
+                        company.State = dto.State ?? company.State;
+                        company.Website = dto.Website ?? company.Website;
+                        company.Address = dto.Address ?? company.Address;
+                    }
+                    if (connection.Provider == IntegrationProvider.Halo
+                        && (connection.UpdateCompanyDetails || string.IsNullOrEmpty(company.HaloClientId)))
                         company.HaloClientId = dto.ExternalId;
-                    if (connection.Provider == IntegrationProvider.NinjaOne)
+                    if (connection.Provider == IntegrationProvider.NinjaOne
+                        && (connection.UpdateCompanyDetails || string.IsNullOrEmpty(company.NinjaOrganizationId)))
                         company.NinjaOrganizationId = dto.ExternalId;
                     run.ItemsUpdated++;
                 }

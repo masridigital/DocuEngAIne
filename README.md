@@ -177,15 +177,17 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 | POST | `/api/mcp/servers` | Register MCP server |
 | PUT | `/api/mcp/servers/{id}` | Update MCP server |
 | DELETE | `/api/mcp/servers/{id}` | Delete MCP server |
-| GET | `/api/integrations` | List integration connections |
-| GET | `/api/integrations/{id}` | Integration connection detail |
-| POST | `/api/integrations` | Create connection (Halo, NinjaOne, UniFi, Blackpoint, CustomMcp) |
-| PUT | `/api/integrations/{id}` | Update connection |
+| GET | `/api/integrations` | List connections (includes sync-policy bools) |
+| GET | `/api/integrations/{id}` | Connection detail (includes sync-policy bools) |
+| POST | `/api/integrations` | Create connection (Halo, NinjaOne, UniFi, Blackpoint, CustomMcp) plus sync-policy bools |
+| PUT | `/api/integrations/{id}` | Update connection and sync-policy bools |
 | DELETE | `/api/integrations/{id}` | Delete connection |
 | POST | `/api/integrations/{id}/test` | Test MCP/config |
 | POST | `/api/integrations/{id}/sync` | Sync (payload upsert or gated live pull) |
 | GET | `/api/integrations/{id}/runs` | Recent sync runs |
 | GET | `/api/integrations/{id}/mappings` | External→local mappings |
+
+Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipContacts` false, `SkipLocations` false, `SkipAssets` false (Ninja skip-devices), `AutoUpdateAssetNames` false, `UpdateCompanyDetails` false (refuse overwrite).
 
 ### Assets
 
@@ -264,8 +266,10 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] SPA: Companies + Integrations
 - [x] Company overview related lists (assets/docs/runbooks/Keeper)
 - [x] GET MCP server and integration by id; SQL cascade fix
+- [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 
-> Hand-written migrations `20260827214500_Phase2Integrations` and `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), and `20260827223000_Phase2SyncPolicy`. Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
+
 
 ### Later
 - [ ] Asset relationship graph

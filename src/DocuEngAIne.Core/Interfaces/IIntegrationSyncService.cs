@@ -16,4 +16,6 @@ public record ExternalCompanyDto(
     string? PrimaryDomain = null,
     string? City = null,
     string? State = null,
-    string? Website = null);
+    string? Website = null,
+    string? Address = null,
+    bool? IsInactive = null);

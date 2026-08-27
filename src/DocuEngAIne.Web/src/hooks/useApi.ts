@@ -66,6 +66,15 @@ export type CreateMcpServerInput = {
   enabled: boolean
 }
 
+export type SyncPolicy = {
+  skipInactive: boolean
+  skipContacts: boolean
+  skipLocations: boolean
+  skipAssets: boolean
+  autoUpdateAssetNames: boolean
+  updateCompanyDetails: boolean
+}
+
 export type IntegrationConnection = {
   id: string
   provider: string
@@ -76,7 +85,7 @@ export type IntegrationConnection = {
   mcpServerId?: string | null
   authSecretName?: string | null
   isEnabled?: boolean
-}
+} & Partial<SyncPolicy>
 
 export type IntegrationProvider = 'Halo' | 'NinjaOne' | 'CustomMcp'
 
@@ -86,7 +95,14 @@ export type CreateIntegrationInput = {
   authSecretName?: string | null
   mcpServerId?: string | null
   isEnabled?: boolean
-}
+} & Partial<SyncPolicy>
+
+export type UpdateIntegrationInput = {
+  displayName?: string | null
+  authSecretName?: string | null
+  mcpServerId?: string | null
+  isEnabled?: boolean
+} & Partial<SyncPolicy>
 
 export function useProfile() {
   return useSWR('/api/me', fetcher)
@@ -152,6 +168,22 @@ export function createMcpServer(input: CreateMcpServerInput) {
 
 export function createIntegration(input: CreateIntegrationInput) {
   return postJson<IntegrationConnection>('/api/integrations', input)
+}
+
+async function putJson(url: string, body: unknown): Promise<void> {
+  const res = await fetch(url, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  const text = await res.text()
+  if (!res.ok) {
+    throw new Error(text || `Request failed (${res.status})`)
+  }
+}
+
+export function updateIntegration(id: string, input: UpdateIntegrationInput) {
+  return putJson(`/api/integrations/${id}`, input)
 }
 
 export function testIntegration(id: string) {

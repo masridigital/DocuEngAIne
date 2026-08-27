@@ -4,11 +4,22 @@ import {
   createMcpServer,
   syncIntegration,
   testIntegration,
+  updateIntegration,
   useIntegrations,
   useMcpServers,
+  type IntegrationConnection,
   type IntegrationProvider,
   type McpTransport,
 } from '../hooks/useApi'
+
+const defaultPolicy = {
+  skipInactive: true,
+  skipContacts: false,
+  skipLocations: false,
+  skipAssets: false,
+  autoUpdateAssetNames: false,
+  updateCompanyDetails: false,
+}
 
 function formatTimestamp(value?: string | null) {
   if (!value) return '—'
@@ -32,6 +43,13 @@ export function IntegrationsPage() {
   const [provider, setProvider] = useState<IntegrationProvider>('Halo')
   const [mcpServerId, setMcpServerId] = useState('')
   const [authSecretName, setAuthSecretName] = useState('')
+  const [skipInactive, setSkipInactive] = useState(defaultPolicy.skipInactive)
+  const [skipContacts, setSkipContacts] = useState(defaultPolicy.skipContacts)
+  const [skipLocations, setSkipLocations] = useState(defaultPolicy.skipLocations)
+  const [skipAssets, setSkipAssets] = useState(defaultPolicy.skipAssets)
+  const [autoUpdateAssetNames, setAutoUpdateAssetNames] = useState(defaultPolicy.autoUpdateAssetNames)
+  const [updateCompanyDetails, setUpdateCompanyDetails] = useState(defaultPolicy.updateCompanyDetails)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   const [message, setMessage] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -65,6 +83,34 @@ export function IntegrationsPage() {
     }
   }
 
+  function startEdit(i: IntegrationConnection) {
+    setEditingId(i.id)
+    setProvider((i.provider as IntegrationProvider) || 'Halo')
+    setMcpServerId(i.mcpServerId || '')
+    setAuthSecretName(i.authSecretName || '')
+    setSkipInactive(i.skipInactive ?? defaultPolicy.skipInactive)
+    setSkipContacts(i.skipContacts ?? defaultPolicy.skipContacts)
+    setSkipLocations(i.skipLocations ?? defaultPolicy.skipLocations)
+    setSkipAssets(i.skipAssets ?? defaultPolicy.skipAssets)
+    setAutoUpdateAssetNames(i.autoUpdateAssetNames ?? defaultPolicy.autoUpdateAssetNames)
+    setUpdateCompanyDetails(i.updateCompanyDetails ?? defaultPolicy.updateCompanyDetails)
+    setMessage(null)
+    setErrorMessage(null)
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+    setProvider('Halo')
+    setMcpServerId('')
+    setAuthSecretName('')
+    setSkipInactive(defaultPolicy.skipInactive)
+    setSkipContacts(defaultPolicy.skipContacts)
+    setSkipLocations(defaultPolicy.skipLocations)
+    setSkipAssets(defaultPolicy.skipAssets)
+    setAutoUpdateAssetNames(defaultPolicy.autoUpdateAssetNames)
+    setUpdateCompanyDetails(defaultPolicy.updateCompanyDetails)
+  }
+
   async function onCreateIntegration(e: FormEvent) {
     e.preventDefault()
     setMessage(null)
@@ -78,20 +124,46 @@ export function IntegrationsPage() {
       const selectedServer = servers.find((s) => s.id === mcpServerId)
       const displayName =
         provider === 'CustomMcp' ? (selectedServer?.name ?? 'Custom MCP') : provider
-      await createIntegration({
-        provider,
-        displayName,
-        authSecretName: authSecretName.trim() || null,
-        mcpServerId: provider === 'CustomMcp' ? mcpServerId : null,
-        isEnabled: true,
-      })
+      const policy = {
+        skipInactive,
+        skipContacts,
+        skipLocations,
+        skipAssets,
+        autoUpdateAssetNames,
+        updateCompanyDetails,
+      }
+      if (editingId) {
+        await updateIntegration(editingId, {
+          displayName,
+          authSecretName: authSecretName.trim() || null,
+          mcpServerId: provider === 'CustomMcp' ? mcpServerId : null,
+          ...policy,
+        })
+        setMessage('Integration updated.')
+      } else {
+        await createIntegration({
+          provider,
+          displayName,
+          authSecretName: authSecretName.trim() || null,
+          mcpServerId: provider === 'CustomMcp' ? mcpServerId : null,
+          isEnabled: true,
+          ...policy,
+        })
+        setMessage('Integration added.')
+      }
       setProvider('Halo')
       setMcpServerId('')
       setAuthSecretName('')
-      setMessage('Integration added.')
+      setSkipInactive(defaultPolicy.skipInactive)
+      setSkipContacts(defaultPolicy.skipContacts)
+      setSkipLocations(defaultPolicy.skipLocations)
+      setSkipAssets(defaultPolicy.skipAssets)
+      setAutoUpdateAssetNames(defaultPolicy.autoUpdateAssetNames)
+      setUpdateCompanyDetails(defaultPolicy.updateCompanyDetails)
+      setEditingId(null)
       await mutateIntegrations()
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : 'Failed to add integration.')
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to save integration.')
     } finally {
       setBusy(false)
     }
@@ -240,6 +312,9 @@ export function IntegrationsPage() {
                     <button className="btn btn-secondary" type="button" disabled={actionId === i.id} onClick={() => onSync(i.id)}>
                       Sync
                     </button>
+                    <button className="btn btn-secondary" type="button" onClick={() => startEdit(i)}>
+                      Edit
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -247,12 +322,14 @@ export function IntegrationsPage() {
           </table>
         )}
 
+        <p>Sync policy defaults skip inactive accounts and contacts and refuse overwriting company details.</p>
         <form className="form-grid" onSubmit={onCreateIntegration}>
           <label>
             Provider
             <select
               className="input"
               value={provider}
+              disabled={!!editingId}
               onChange={(e) => setProvider(e.target.value as IntegrationProvider)}
             >
               <option value="Halo">Halo</option>
@@ -275,7 +352,34 @@ export function IntegrationsPage() {
             Auth secret name (optional)
             <input className="input" value={authSecretName} onChange={(e) => setAuthSecretName(e.target.value)} />
           </label>
-          <button className="btn" type="submit" disabled={busy}>Add connection</button>
+          <label className="check-label">
+            <input type="checkbox" checked={skipInactive} onChange={(e) => setSkipInactive(e.target.checked)} />
+            Skip inactive accounts
+          </label>
+          <label className="check-label">
+            <input type="checkbox" checked={skipContacts} onChange={(e) => setSkipContacts(e.target.checked)} />
+            Skip contacts
+          </label>
+          <label className="check-label">
+            <input type="checkbox" checked={skipLocations} onChange={(e) => setSkipLocations(e.target.checked)} />
+            Skip locations
+          </label>
+          <label className="check-label">
+            <input type="checkbox" checked={skipAssets} onChange={(e) => setSkipAssets(e.target.checked)} />
+            Skip assets / devices
+          </label>
+          <label className="check-label">
+            <input type="checkbox" checked={autoUpdateAssetNames} onChange={(e) => setAutoUpdateAssetNames(e.target.checked)} />
+            Auto-update asset names
+          </label>
+          <label className="check-label">
+            <input type="checkbox" checked={updateCompanyDetails} onChange={(e) => setUpdateCompanyDetails(e.target.checked)} />
+            Update basic company details
+          </label>
+          <button className="btn" type="submit" disabled={busy}>{editingId ? 'Save connection' : 'Add connection'}</button>
+          {editingId && (
+            <button className="btn btn-secondary" type="button" disabled={busy} onClick={cancelEdit}>Cancel</button>
+          )}
         </form>
       </section>
     </div>

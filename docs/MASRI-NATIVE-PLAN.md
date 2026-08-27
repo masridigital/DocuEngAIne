@@ -232,6 +232,7 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Admin (users, groups, layouts, API, import/export, SMTP, license) | Entra + Azure. Import only for Hudu migration. | later | Audit is Phase1. |
 | Integrations — Halo | `IntegrationConnection` + payload/MCP sync → `Company`. Secret **name** only. Halo is SoR. | Phase2A | Test/sync endpoints. GET by id. |
 | Integrations — NinjaOne | Same path → `Company` + Computer Assets. Secret **name** only. | Phase2A | Same sync service by provider. |
+| Integrations — sync scope toggles | Typed bools on `IntegrationConnection` (not a 32-tile form). Skip inactive/contacts/locations/assets; auto-update names; refuse company overwrite by default. | Phase2A | GET/POST/PUT `/api/integrations`. Honored in `SyncFromPayload`. |
 | Integrations — UniFi | MCP connector, not a Hudu form. | later | |
 | Integrations — M365 / Intune | Graph or MCP when ops needs it. | later | |
 | Integrations — Blackpoint | First-class Masri MCP later. | later | |
@@ -258,7 +259,7 @@ Hudu company list is `/c` (not `/companies`). Create form fields: Name*, Parent,
 | Company home related lists | COVERED this slice (assets/docs/runbooks/Keeper by CompanyId). Not Hudu tab chrome. |
 | Company type / archive tab / A–Z filter / flags | NOT YET (IsActive exists; no archive UX) |
 | Parent company, logo | NOT YET |
-| Halo/Ninja layout mapping + skip/overwrite toggles | NOT YET (needed before live sync) |
+| Halo/Ninja skip/overwrite toggles | COVERED this slice (`IntegrationConnection` sync-policy bools; defaults refuse company overwrite). Layout mapping still later. |
 | UniFi local user/password | INTENTIONAL: Key Vault secret name only |
 | 32-vendor catalog, in-app secrets, portal | INTENTIONAL SKIP |
 | Asset-layout mapping per remote object | NOT YET (use AssetType as ops needs it) |

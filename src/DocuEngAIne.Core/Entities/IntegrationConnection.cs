@@ -21,6 +21,19 @@ public class IntegrationConnection : EntityBase, ITenantScoped
     public string? LastError { get; set; }
     public bool IsEnabled { get; set; } = true;
 
+    /// <summary>Skip inactive remote accounts. Default on (safe).</summary>
+    public bool SkipInactive { get; set; } = true;
+    /// <summary>Skip contacts on later live pull. Default on (safe).</summary>
+    public bool SkipContacts { get; set; } = true;
+    /// <summary>Skip locations/sites. Default off (import them).</summary>
+    public bool SkipLocations { get; set; }
+    /// <summary>Skip assets. Ninja skip-devices maps here when Provider is NinjaOne. Default off.</summary>
+    public bool SkipAssets { get; set; }
+    /// <summary>Overwrite local asset names from the remote. Default off.</summary>
+    public bool AutoUpdateAssetNames { get; set; }
+    /// <summary>Overwrite Name/Address/City/State/Website/PrimaryDomain on mapped companies. Default off (refuse clobber).</summary>
+    public bool UpdateCompanyDetails { get; set; }
+
     public ICollection<IntegrationMapping> Mappings { get; set; } = [];
     public ICollection<SyncRun> SyncRuns { get; set; } = [];
 }
