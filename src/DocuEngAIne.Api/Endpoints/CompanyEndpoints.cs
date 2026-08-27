@@ -8,6 +8,8 @@ namespace DocuEngAIne.Api.Endpoints;
 
 public static class CompanyEndpoints
 {
+    public const int RelatedTake = 8;
+
     public static IEndpointRouteBuilder MapCompanyEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/companies").RequireAuthorization();
@@ -30,7 +32,7 @@ public static class CompanyEndpoints
             }
 
             var items = await query.OrderBy(c => c.Name).ToListAsync(cancellationToken);
-            return Results.Ok(items.Select(Map));
+            return Results.Ok(items.Select(c => Map(c)));
         });
 
         group.MapGet("/{id:guid}", async (
@@ -41,7 +43,26 @@ public static class CompanyEndpoints
         {
             var company = await db.Companies.ForTenant(user).AsNoTracking()
                 .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
-            return company is null ? Results.NotFound() : Results.Ok(Map(company));
+            if (company is null)
+                return Results.NotFound();
+
+            var related = await LoadRelatedAsync(db, user, id, RelatedTake, cancellationToken);
+            return Results.Ok(Map(company, related));
+        });
+
+        group.MapGet("/{id:guid}/summary", async (
+            Guid id,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            CancellationToken cancellationToken) =>
+        {
+            var exists = await db.Companies.ForTenant(user).AsNoTracking()
+                .AnyAsync(c => c.Id == id, cancellationToken);
+            if (!exists)
+                return Results.NotFound();
+
+            var related = await LoadRelatedAsync(db, user, id, RelatedTake, cancellationToken);
+            return Results.Ok(MapRelated(related));
         });
 
         group.MapPost("", async (
@@ -129,28 +150,92 @@ public static class CompanyEndpoints
         return app;
     }
 
-    private static object Map(Company c) => new
+    public static async Task<CompanyRelatedSnapshot> LoadRelatedAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        Guid companyId,
+        int take = RelatedTake,
+        CancellationToken cancellationToken = default)
     {
-        c.Id,
-        c.Name,
-        c.Slug,
-        c.CompanyNumber,
-        c.PrimaryDomain,
-        c.Address,
-        c.City,
-        c.State,
-        c.Phone,
-        c.Website,
-        c.Notes,
-        c.HoursOfOperation,
-        c.IsActive,
-        c.PortalEnabled,
-        c.HaloClientId,
-        c.NinjaOrganizationId,
-        c.CreatedAt,
-        c.UpdatedAt,
+        var assetsQ = db.Assets.ForTenant(user).AsNoTracking().Where(a => a.CompanyId == companyId);
+        var docsQ = db.Documents.ForTenant(user).AsNoTracking().Where(d => d.CompanyId == companyId);
+        var runbooksQ = db.Runbooks.ForTenant(user).AsNoTracking().Where(r => r.CompanyId == companyId);
+        var keeperQ = db.KeeperLinks.ForTenant(user).AsNoTracking().Where(k => k.CompanyId == companyId);
+
+        return new CompanyRelatedSnapshot(
+            await assetsQ.CountAsync(cancellationToken),
+            await assetsQ.OrderByDescending(a => a.UpdatedAt).Take(take)
+                .Select(a => new RelatedListItem(a.Id, a.Name, a.UpdatedAt)).ToListAsync(cancellationToken),
+            await docsQ.CountAsync(cancellationToken),
+            await docsQ.OrderByDescending(d => d.UpdatedAt).Take(take)
+                .Select(d => new RelatedListItem(d.Id, d.Title, d.UpdatedAt)).ToListAsync(cancellationToken),
+            await runbooksQ.CountAsync(cancellationToken),
+            await runbooksQ.OrderByDescending(r => r.UpdatedAt).Take(take)
+                .Select(r => new RelatedListItem(r.Id, r.Title, r.UpdatedAt)).ToListAsync(cancellationToken),
+            await keeperQ.CountAsync(cancellationToken),
+            await keeperQ.OrderByDescending(k => k.UpdatedAt).Take(take)
+                .Select(k => new RelatedListItem(k.Id, k.Name, k.UpdatedAt)).ToListAsync(cancellationToken));
+    }
+
+    private static object Map(Company c, CompanyRelatedSnapshot? related = null)
+    {
+        return new
+        {
+            c.Id,
+            c.Name,
+            c.Slug,
+            c.CompanyNumber,
+            c.PrimaryDomain,
+            c.Address,
+            c.City,
+            c.State,
+            c.Phone,
+            c.Website,
+            c.Notes,
+            c.HoursOfOperation,
+            c.IsActive,
+            c.PortalEnabled,
+            c.HaloClientId,
+            c.NinjaOrganizationId,
+            c.CreatedAt,
+            c.UpdatedAt,
+            Counts = related is null ? null : MapCounts(related),
+            Assets = related?.Assets,
+            Documents = related?.Documents,
+            Runbooks = related?.Runbooks,
+            KeeperLinks = related?.KeeperLinks,
+        };
+    }
+
+    private static object MapRelated(CompanyRelatedSnapshot related) => new
+    {
+        Counts = MapCounts(related),
+        related.Assets,
+        related.Documents,
+        related.Runbooks,
+        related.KeeperLinks,
+    };
+
+    private static object MapCounts(CompanyRelatedSnapshot related) => new
+    {
+        Assets = related.AssetCount,
+        Documents = related.DocumentCount,
+        Runbooks = related.RunbookCount,
+        KeeperLinks = related.KeeperLinkCount,
     };
 }
+
+public sealed record RelatedListItem(Guid Id, string Name, DateTimeOffset UpdatedAt);
+
+public sealed record CompanyRelatedSnapshot(
+    int AssetCount,
+    IReadOnlyList<RelatedListItem> Assets,
+    int DocumentCount,
+    IReadOnlyList<RelatedListItem> Documents,
+    int RunbookCount,
+    IReadOnlyList<RelatedListItem> Runbooks,
+    int KeeperLinkCount,
+    IReadOnlyList<RelatedListItem> KeeperLinks);
 
 public record CreateCompanyRequest(
     string Name,

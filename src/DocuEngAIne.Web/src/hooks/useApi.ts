@@ -2,6 +2,19 @@ import useSWR from 'swr'
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json())
 
+export type RelatedListItem = {
+  id: string
+  name: string
+  updatedAt?: string
+}
+
+export type CompanyCounts = {
+  assets: number
+  documents: number
+  runbooks: number
+  keeperLinks: number
+}
+
 export type Company = {
   id: string
   name: string
@@ -19,6 +32,11 @@ export type Company = {
   portalEnabled?: boolean
   haloClientId?: string | null
   ninjaOrganizationId?: string | null
+  counts?: CompanyCounts | null
+  assets?: RelatedListItem[] | null
+  documents?: RelatedListItem[] | null
+  runbooks?: RelatedListItem[] | null
+  keeperLinks?: RelatedListItem[] | null
 }
 
 export type CreateCompanyInput = {

@@ -162,7 +162,8 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/companies` | List companies (`q` search) |
-| GET | `/api/companies/{id}` | Company detail |
+| GET | `/api/companies/{id}` | Company detail + related counts/lists |
+| GET | `/api/companies/{id}/summary` | Related counts/lists only |
 | POST | `/api/companies` | Create company |
 | PUT | `/api/companies/{id}` | Update company |
 | DELETE | `/api/companies/{id}` | Delete company |
@@ -172,10 +173,12 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/mcp/servers` | List MCP servers |
+| GET | `/api/mcp/servers/{id}` | MCP server detail |
 | POST | `/api/mcp/servers` | Register MCP server |
 | PUT | `/api/mcp/servers/{id}` | Update MCP server |
 | DELETE | `/api/mcp/servers/{id}` | Delete MCP server |
 | GET | `/api/integrations` | List integration connections |
+| GET | `/api/integrations/{id}` | Integration connection detail |
 | POST | `/api/integrations` | Create connection (Halo, NinjaOne, UniFi, Blackpoint, CustomMcp) |
 | PUT | `/api/integrations/{id}` | Update connection |
 | DELETE | `/api/integrations/{id}` | Delete connection |
@@ -259,8 +262,10 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] MCP server registry + IntegrationConnection (Key Vault secrets)
 - [x] HaloPSA + NinjaOne sync via payload/MCP path (`SyncFromPayload` + test/sync endpoints)
 - [x] SPA: Companies + Integrations
+- [x] Company overview related lists (assets/docs/runbooks/Keeper)
+- [x] GET MCP server and integration by id; SQL cascade fix
 
-> Hand-written migration `20260827214500_Phase2Integrations`. On a machine with the .NET SDK, run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if you need a regenerated model snapshot.
+> Hand-written migrations `20260827214500_Phase2Integrations` and `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
 
 ### Later
 - [ ] Asset relationship graph

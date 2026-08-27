@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { createCompany, useCompanies, useCompany, type Company } from '../hooks/useApi'
+import { createCompany, useCompanies, useCompany, type Company, type RelatedListItem } from '../hooks/useApi'
 
 function slugify(value: string) {
   return value
@@ -170,6 +170,41 @@ function detailRows(company: Company) {
   return rows
 }
 
+function RelatedSection({
+  title,
+  href,
+  count,
+  items,
+  empty,
+}: {
+  title: string
+  href: string
+  count?: number
+  items?: RelatedListItem[] | null
+  empty: string
+}) {
+  const list = items ?? []
+  return (
+    <section className="panel related-panel">
+      <h2>
+        <Link to={href}>{title}</Link>
+        <span className="muted"> {count ?? list.length}</span>
+      </h2>
+      {list.length === 0 ? (
+        <p>{empty}</p>
+      ) : (
+        <ul className="related-list">
+          {list.map((item) => (
+            <li key={item.id}>
+              <Link to={href}>{item.name}</Link>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 function CompanyDetail({ id }: { id: string }) {
   const { data: company, error, isLoading } = useCompany(id)
 
@@ -182,14 +217,46 @@ function CompanyDetail({ id }: { id: string }) {
       {isLoading && <p>Loading…</p>}
       {error && <p className="error">Failed to load company.</p>}
       {company && (
-        <dl className="detail-grid">
-          {detailRows(company).map(([label, value]) => (
-            <div key={label} className="detail-row">
-              <dt>{label}</dt>
-              <dd>{value}</dd>
-            </div>
-          ))}
-        </dl>
+        <>
+          <dl className="detail-grid">
+            {detailRows(company).map(([label, value]) => (
+              <div key={label} className="detail-row">
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="related-grid">
+            <RelatedSection
+              title="Assets"
+              href="/assets"
+              count={company.counts?.assets}
+              items={company.assets}
+              empty="No assets linked to this company."
+            />
+            <RelatedSection
+              title="Documents"
+              href="/documents"
+              count={company.counts?.documents}
+              items={company.documents}
+              empty="No documents linked to this company."
+            />
+            <RelatedSection
+              title="Runbooks"
+              href="/runbooks"
+              count={company.counts?.runbooks}
+              items={company.runbooks}
+              empty="No runbooks linked to this company."
+            />
+            <RelatedSection
+              title="Keeper links"
+              href="/keeper"
+              count={company.counts?.keeperLinks}
+              items={company.keeperLinks}
+              empty="No Keeper links for this company."
+            />
+          </div>
+        </>
       )}
     </div>
   )
