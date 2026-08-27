@@ -17,7 +17,7 @@ public static class KeyVaultExtensions
         builder.AddAzureKeyVault(
             new Uri(vaultUri),
             new ChainedTokenCredential(
-                new ManagedIdentityCredential(),
+                new ManagedIdentityCredential(ManagedIdentityId.SystemAssigned),
                 new AzureCliCredential()));
 
         return builder;
