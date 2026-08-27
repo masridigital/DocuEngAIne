@@ -181,10 +181,23 @@ Keep README direction: Azure AI Search + OpenAI RAG over documents, assets, runb
 
 ---
 
+
+## 7b. Gap-fill notes (Hudu crawl 2026-08-27)
+
+- **Global**: cross-company Passwords, Networks, Racks, Websites, Expirations; Flag Review; Process Completion; Documentation Quality. Skip Leaderboard/Gold Standards as non-core.
+- **Central KB**: account-wide articles with folders; Public/share flag. Distinct from company KB (`/kba?company_id=`).
+- **Expirations**: aggregate across API keys, contracts, licenses, SaaS renewals, UPS battery, SSL, domains — Phase 2C widget.
+- **Processes**: template → per-company instance with run tracking (extend Runbook with run history later).
+- **UniFi MCP**: sites, alarms, devices, network configs, port forwards.
+- **Security**: 2FA, SAML/SSO, IP allow-list, idle timeout — Entra covers auth; optional IP allow-list later.
+- **Portal**: white-label client portal (KB, limited reveal via Keeper links only, websites, files). Phase 2C.
+- Hudu company KB deep links `/c/{id}/kba` return 500; use query param pattern if importing links.
+
 ## 8. Immediate next engineering tasks
 
-1. Implement Phase 2A on branch `feature/integrations-mcp`
-2. EF migration for Company + Integration/MCP tables
-3. Wire `MapIntegrationEndpoints` / `MapCompanyEndpoints` in `Program.cs`
-4. SPA routes: `/companies`, `/integrations`
-5. Open PR with this plan linked in description
+Phase 2A is on `feature/integrations-mcp` (PR #1): Company, MCP registry, IntegrationConnection, payload sync, SPA Companies/Integrations, hand-written `Phase2Integrations` migration.
+
+Next:
+1. On a machine with the .NET SDK: `dotnet test` and `dotnet ef migrations add Phase2IntegrationsReconcile` if the snapshot needs regen
+2. Wire StackJack MCP credentials in Key Vault and a live Halo/Ninja company pull
+3. Phase 2B: expirations + flags; UniFi/Blackpoint MCP connectors

@@ -1,8 +1,14 @@
+using System.Text.Json.Serialization;
 using DocuEngAIne.Api.Endpoints;
 using DocuEngAIne.Infrastructure;
 using DocuEngAIne.Infrastructure.Configuration;
 
 var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.ConfigureHttpJsonOptions(options =>
+{
+    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter());
+});
 
 builder.Configuration.AddAzureKeyVaultIfConfigured();
 
@@ -59,6 +65,8 @@ app.MapHealthChecks("/api/health/ready", new Microsoft.AspNetCore.Diagnostics.He
 }).AllowAnonymous();
 
 app.MapTenantEndpoints();
+app.MapCompanyEndpoints();
+app.MapIntegrationEndpoints();
 app.MapAssetEndpoints();
 app.MapDocumentEndpoints();
 app.MapKeeperLinkEndpoints();

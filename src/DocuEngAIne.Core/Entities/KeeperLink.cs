@@ -8,6 +8,9 @@ public class KeeperLink : EntityBase, ITenantScoped
     public Guid TenantId { get; set; }
     public Tenant Tenant { get; set; } = null!;
 
+    public Guid? CompanyId { get; set; }
+    public Company? Company { get; set; }
+
     public required string Name { get; set; }
     public string? UsernameHint { get; set; }
     public string? KeeperRecordUrl { get; set; }

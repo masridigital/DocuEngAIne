@@ -8,6 +8,9 @@ public class Runbook : EntityBase, ITenantScoped
     public Guid TenantId { get; set; }
     public Tenant Tenant { get; set; } = null!;
 
+    public Guid? CompanyId { get; set; }
+    public Company? Company { get; set; }
+
     public required string Title { get; set; }
     public string? Slug { get; set; }
     public string? Description { get; set; }

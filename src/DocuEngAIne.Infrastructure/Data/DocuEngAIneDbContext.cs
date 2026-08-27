@@ -17,6 +17,11 @@ public class DocuEngAIneDbContext : DbContext
 
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<Company> Companies => Set<Company>();
+    public DbSet<McpServer> McpServers => Set<McpServer>();
+    public DbSet<IntegrationConnection> IntegrationConnections => Set<IntegrationConnection>();
+    public DbSet<IntegrationMapping> IntegrationMappings => Set<IntegrationMapping>();
+    public DbSet<SyncRun> SyncRuns => Set<SyncRun>();
     public DbSet<AssetType> AssetTypes => Set<AssetType>();
     public DbSet<FieldDefinition> FieldDefinitions => Set<FieldDefinition>();
     public DbSet<Asset> Assets => Set<Asset>();

@@ -13,12 +13,50 @@ public static class ModelBuilderExtensions
             t.HasIndex(x => x.Slug).IsUnique();
             t.HasIndex(x => x.PrimaryDomain);
             t.HasMany(x => x.Users).WithOne(u => u.Tenant).HasForeignKey(u => u.TenantId).OnDelete(DeleteBehavior.Cascade);
+            t.HasMany(x => x.Companies).WithOne(c => c.Tenant).HasForeignKey(c => c.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.AssetTypes).WithOne(a => a.Tenant).HasForeignKey(a => a.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.Assets).WithOne(a => a.Tenant).HasForeignKey(a => a.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.Documents).WithOne(d => d.Tenant).HasForeignKey(d => d.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.KeeperLinks).WithOne(s => s.Tenant).HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.Runbooks).WithOne(r => r.Tenant).HasForeignKey(r => r.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.ResourceRoleAssignments).WithOne(r => r.Tenant).HasForeignKey(r => r.TenantId).OnDelete(DeleteBehavior.Cascade);
+            t.HasMany(x => x.McpServers).WithOne(m => m.Tenant).HasForeignKey(m => m.TenantId).OnDelete(DeleteBehavior.Cascade);
+            t.HasMany(x => x.IntegrationConnections).WithOne(i => i.Tenant).HasForeignKey(i => i.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<Company>(c =>
+        {
+            c.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
+            c.HasIndex(x => new { x.TenantId, x.HaloClientId });
+            c.HasIndex(x => new { x.TenantId, x.NinjaOrganizationId });
+            c.HasMany(x => x.Assets).WithOne(a => a.Company).HasForeignKey(a => a.CompanyId).OnDelete(DeleteBehavior.SetNull);
+            c.HasMany(x => x.Documents).WithOne(d => d.Company).HasForeignKey(d => d.CompanyId).OnDelete(DeleteBehavior.SetNull);
+            c.HasMany(x => x.Runbooks).WithOne(r => r.Company).HasForeignKey(r => r.CompanyId).OnDelete(DeleteBehavior.SetNull);
+            c.HasMany(x => x.KeeperLinks).WithOne(k => k.Company).HasForeignKey(k => k.CompanyId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<McpServer>(m =>
+        {
+            m.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+        });
+
+        modelBuilder.Entity<IntegrationConnection>(i =>
+        {
+            i.HasIndex(x => new { x.TenantId, x.Provider, x.DisplayName });
+            i.HasOne(x => x.McpServer).WithMany(m => m.Integrations).HasForeignKey(x => x.McpServerId).OnDelete(DeleteBehavior.SetNull);
+            i.HasMany(x => x.Mappings).WithOne(m => m.IntegrationConnection).HasForeignKey(m => m.IntegrationConnectionId).OnDelete(DeleteBehavior.Cascade);
+            i.HasMany(x => x.SyncRuns).WithOne(s => s.IntegrationConnection).HasForeignKey(s => s.IntegrationConnectionId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<IntegrationMapping>(m =>
+        {
+            m.HasIndex(x => new { x.IntegrationConnectionId, x.ExternalType, x.ExternalId }).IsUnique();
+            m.HasIndex(x => new { x.TenantId, x.LocalEntityType, x.LocalEntityId });
+        });
+
+        modelBuilder.Entity<SyncRun>(s =>
+        {
+            s.HasIndex(x => new { x.IntegrationConnectionId, x.StartedAt });
         });
 
         modelBuilder.Entity<User>(u =>
