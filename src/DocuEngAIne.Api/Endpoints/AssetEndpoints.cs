@@ -98,12 +98,8 @@ public static class AssetEndpoints
             ICurrentUser user,
             CancellationToken cancellationToken) =>
         {
-            if (request.CompanyId is Guid companyId)
-            {
-                var companyOk = await db.Companies.ForTenant(user).AnyAsync(c => c.Id == companyId, cancellationToken);
-                if (!companyOk)
-                    return Results.BadRequest("Company not found.");
-            }
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
 
             var asset = new Asset
             {
@@ -135,13 +131,10 @@ public static class AssetEndpoints
             if (asset is null)
                 return Results.NotFound();
 
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
             if (request.CompanyId is Guid companyId)
-            {
-                var companyOk = await db.Companies.ForTenant(user).AnyAsync(c => c.Id == companyId, cancellationToken);
-                if (!companyOk)
-                    return Results.BadRequest("Company not found.");
                 asset.CompanyId = companyId;
-            }
 
             asset.Name = request.Name ?? asset.Name;
             asset.Location = request.Location ?? asset.Location;

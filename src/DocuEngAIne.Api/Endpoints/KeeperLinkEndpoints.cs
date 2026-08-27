@@ -66,6 +66,9 @@ public static class KeeperLinkEndpoints
             ICurrentUser user,
             CancellationToken cancellationToken) =>
         {
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
+
             var link = new KeeperLink
             {
                 TenantId = user.TenantId!.Value,
@@ -76,6 +79,7 @@ public static class KeeperLinkEndpoints
                 Notes = request.Notes,
                 AssociatedResourceType = request.AssociatedResourceType,
                 AssociatedResourceId = request.AssociatedResourceId,
+                CompanyId = request.CompanyId,
             };
 
             db.KeeperLinks.Add(link);
@@ -93,6 +97,11 @@ public static class KeeperLinkEndpoints
             var link = await db.KeeperLinks.ForTenant(user).FirstOrDefaultAsync(k => k.Id == id, cancellationToken);
             if (link is null)
                 return Results.NotFound();
+
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
+            if (request.CompanyId is Guid companyId)
+                link.CompanyId = companyId;
 
             link.Name = request.Name ?? link.Name;
             link.UsernameHint = request.UsernameHint ?? link.UsernameHint;
@@ -134,6 +143,7 @@ public static class KeeperLinkEndpoints
         link.Notes,
         link.AssociatedResourceType,
         link.AssociatedResourceId,
+        link.CompanyId,
         link.UpdatedAt,
     };
 }
@@ -145,7 +155,8 @@ public record CreateKeeperLinkRequest(
     string? KeeperRecordUid,
     string? Notes,
     string? AssociatedResourceType,
-    Guid? AssociatedResourceId);
+    Guid? AssociatedResourceId,
+    Guid? CompanyId = null);
 
 public record UpdateKeeperLinkRequest(
     string? Name,
@@ -154,4 +165,5 @@ public record UpdateKeeperLinkRequest(
     string? KeeperRecordUid,
     string? Notes,
     string? AssociatedResourceType,
-    Guid? AssociatedResourceId);
+    Guid? AssociatedResourceId,
+    Guid? CompanyId = null);

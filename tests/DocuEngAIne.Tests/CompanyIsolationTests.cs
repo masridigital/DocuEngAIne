@@ -2,6 +2,7 @@ using DocuEngAIne.Api.Endpoints;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace DocuEngAIne.Tests;
@@ -23,6 +24,15 @@ public class CompanyIsolationTests
             .UseInMemoryDatabase(dbName)
             .Options;
         return (new DocuEngAIneDbContext(options, user), user);
+    }
+
+    private static async Task AssertCompanyNotFound(IResult? result)
+    {
+        Assert.NotNull(result);
+        var status = Assert.IsAssignableFrom<IStatusCodeHttpResult>(result);
+        Assert.Equal(StatusCodes.Status400BadRequest, status.StatusCode);
+        var value = Assert.IsAssignableFrom<IValueHttpResult>(result);
+        Assert.Equal("Company not found.", value.Value);
     }
 
     [Fact]
@@ -111,6 +121,100 @@ public class CompanyIsolationTests
             Assert.Equal("B-Server", relatedB.Assets[0].Name);
             Assert.DoesNotContain(relatedB.Assets, i => i.Name.StartsWith("A-"));
             Assert.DoesNotContain(relatedB.Documents, i => i.Name.StartsWith("A-"));
+        }
+    }
+
+    [Fact]
+    public async Task Cannot_Attach_CompanyId_From_Another_Tenant_To_Document_Runbook_Or_KeeperLink()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var companyA = new Company { TenantId = tenantA, Name = "A Co", Slug = "a-co" };
+        var companyB = new Company { TenantId = tenantB, Name = "B Co", Slug = "b-co" };
+
+        var (seedA, _) = Open(dbName, tenantA);
+        await using (seedA)
+        {
+            seedA.Companies.Add(companyA);
+            await seedA.SaveChangesAsync();
+        }
+
+        var (seedB, _) = Open(dbName, tenantB);
+        await using (seedB)
+        {
+            seedB.Companies.Add(companyB);
+            await seedB.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            await AssertCompanyNotFound(await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, companyB.Id));
+            await AssertCompanyNotFound(await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, Guid.NewGuid()));
+
+            var own = await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, companyA.Id);
+            Assert.Null(own);
+            var omitted = await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, null);
+            Assert.Null(omitted);
+
+            var createDoc = new CreateDocumentRequest("Doc", "doc", null, null, null, true, companyB.Id);
+            await AssertCompanyNotFound(await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, createDoc.CompanyId));
+
+            var createRunbook = new CreateRunbookRequest("SOP", "sop", null, null, true, null, companyB.Id);
+            await AssertCompanyNotFound(await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, createRunbook.CompanyId));
+
+            var createKeeper = new CreateKeeperLinkRequest("Vault", null, "https://keeper.example/x", null, null, null, null, companyB.Id);
+            await AssertCompanyNotFound(await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, createKeeper.CompanyId));
+
+            var doc = new Document { TenantId = tenantA, Title = "Existing", Slug = "existing" };
+            var runbook = new Runbook { TenantId = tenantA, Title = "Existing SOP", Slug = "existing-sop" };
+            var keeper = new KeeperLink { TenantId = tenantA, Name = "Existing vault", KeeperRecordUrl = "https://keeper.example/y" };
+            db.Documents.Add(doc);
+            db.Runbooks.Add(runbook);
+            db.KeeperLinks.Add(keeper);
+            await db.SaveChangesAsync();
+
+            var updateDoc = new UpdateDocumentRequest(null, null, null, null, null, null, null, companyB.Id);
+            await AssertCompanyNotFound(await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, updateDoc.CompanyId));
+            var updateRunbook = new UpdateRunbookRequest(null, null, null, null, null, null, companyB.Id);
+            await AssertCompanyNotFound(await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, updateRunbook.CompanyId));
+            var updateKeeper = new UpdateKeeperLinkRequest(null, null, null, null, null, null, null, companyB.Id);
+            await AssertCompanyNotFound(await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, updateKeeper.CompanyId));
+
+            Assert.Null(doc.CompanyId);
+            Assert.Null(runbook.CompanyId);
+            Assert.Null(keeper.CompanyId);
+        }
+    }
+
+    [Fact]
+    public async Task Own_Tenant_CompanyId_Attaches_To_Document_Runbook_And_KeeperLink()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var companyA = new Company { TenantId = tenantA, Name = "A Co", Slug = "a-co" };
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            db.Companies.Add(companyA);
+            await db.SaveChangesAsync();
+
+            Assert.Null(await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, companyA.Id));
+
+            db.Documents.Add(new Document { TenantId = tenantA, Title = "Doc", Slug = "doc", CompanyId = companyA.Id });
+            db.Runbooks.Add(new Runbook { TenantId = tenantA, Title = "SOP", Slug = "sop", CompanyId = companyA.Id });
+            db.KeeperLinks.Add(new KeeperLink { TenantId = tenantA, Name = "Vault", CompanyId = companyA.Id, KeeperRecordUrl = "https://keeper.example/a" });
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+
+            var doc = await db.Documents.ForTenant(user).AsNoTracking().SingleAsync();
+            var runbook = await db.Runbooks.ForTenant(user).AsNoTracking().SingleAsync();
+            var keeper = await db.KeeperLinks.ForTenant(user).AsNoTracking().SingleAsync();
+            Assert.Equal(companyA.Id, doc.CompanyId);
+            Assert.Equal(companyA.Id, runbook.CompanyId);
+            Assert.Equal(companyA.Id, keeper.CompanyId);
         }
     }
 }

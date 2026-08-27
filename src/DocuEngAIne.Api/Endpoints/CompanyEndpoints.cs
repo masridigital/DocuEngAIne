@@ -150,6 +150,19 @@ public static class CompanyEndpoints
         return app;
     }
 
+    public static async Task<IResult?> EnsureCompanyInTenantAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        Guid? companyId,
+        CancellationToken cancellationToken = default)
+    {
+        if (companyId is not Guid id)
+            return null;
+
+        var exists = await db.Companies.ForTenant(user).AnyAsync(c => c.Id == id, cancellationToken);
+        return exists ? null : Results.BadRequest("Company not found.");
+    }
+
     public static async Task<CompanyRelatedSnapshot> LoadRelatedAsync(
         DocuEngAIneDbContext db,
         ICurrentUser user,

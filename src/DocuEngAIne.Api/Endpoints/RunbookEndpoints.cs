@@ -30,7 +30,7 @@ public static class RunbookEndpoints
 
             var runbooks = await query
                 .OrderBy(r => r.Title)
-                .Select(r => new { r.Id, r.Title, r.Slug, r.Description, r.Tags, r.UpdatedAt })
+                .Select(r => new { r.Id, r.Title, r.Slug, r.Description, r.Tags, r.CompanyId, r.UpdatedAt })
                 .ToListAsync(cancellationToken);
 
             return Results.Ok(runbooks);
@@ -55,6 +55,7 @@ public static class RunbookEndpoints
                 runbook.Slug,
                 runbook.Description,
                 runbook.Tags,
+                runbook.CompanyId,
                 runbook.IsPublished,
                 Steps = runbook.Steps.Select(s => new
                 {
@@ -76,6 +77,9 @@ public static class RunbookEndpoints
             ICurrentUser user,
             CancellationToken cancellationToken) =>
         {
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
+
             var runbook = new Runbook
             {
                 TenantId = user.TenantId!.Value,
@@ -84,6 +88,7 @@ public static class RunbookEndpoints
                 Description = request.Description,
                 Tags = request.Tags,
                 IsPublished = request.IsPublished,
+                CompanyId = request.CompanyId,
                 Steps = request.Steps?.Select((s, i) => new RunbookStep
                 {
                     Order = i + 1,
@@ -114,6 +119,11 @@ public static class RunbookEndpoints
 
             if (runbook is null)
                 return Results.NotFound();
+
+            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+                return badCompany;
+            if (request.CompanyId is Guid companyId)
+                runbook.CompanyId = companyId;
 
             runbook.Title = request.Title ?? runbook.Title;
             runbook.Slug = request.Slug ?? runbook.Slug;
@@ -165,7 +175,8 @@ public record CreateRunbookRequest(
     string? Description,
     string? Tags,
     bool IsPublished = true,
-    List<RunbookStepRequest>? Steps = null);
+    List<RunbookStepRequest>? Steps = null,
+    Guid? CompanyId = null);
 
 public record UpdateRunbookRequest(
     string? Title,
@@ -173,7 +184,8 @@ public record UpdateRunbookRequest(
     string? Description,
     string? Tags,
     bool? IsPublished,
-    List<RunbookStepRequest>? Steps);
+    List<RunbookStepRequest>? Steps,
+    Guid? CompanyId = null);
 
 public record RunbookStepRequest(
     string Title,
