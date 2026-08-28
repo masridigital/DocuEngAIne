@@ -81,9 +81,17 @@ export type UpdateCompanyInput = {
 
 export type McpTransport = 'Http' | 'Sse' | 'Stdio'
 
+export type McpServerKind = 'StackJackCompact' | 'Composio'
+
+export const MCP_ENDPOINTS: Record<McpServerKind, string> = {
+  StackJackCompact: 'https://compact.stackjack.io/mcp',
+  Composio: 'https://connect.composio.dev/mcp',
+}
+
 export type McpServer = {
   id: string
   name: string
+  kind?: string
   transport: string
   endpointUrl?: string | null
   command?: string | null
@@ -93,6 +101,7 @@ export type McpServer = {
 
 export type CreateMcpServerInput = {
   name: string
+  kind: McpServerKind
   transport: McpTransport
   endpointUrl?: string | null
   authSecretName?: string | null
@@ -120,7 +129,16 @@ export type IntegrationConnection = {
   isEnabled?: boolean
 } & Partial<SyncPolicy>
 
-export type IntegrationProvider = 'Halo' | 'NinjaOne' | 'CustomMcp'
+export type IntegrationProvider = 'Halo' | 'NinjaOne' | 'UniFi' | 'Blackpoint' | 'CustomMcp' | 'Cipp' | 'Meraki' | 'Composio'
+
+const compactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Blackpoint']
+
+export function mcpKindForProvider(provider: IntegrationProvider): McpServerKind | null {
+  if (provider === 'Composio') return 'Composio'
+  if (provider === 'CustomMcp') return null
+  if (compactProviders.includes(provider)) return 'StackJackCompact'
+  return 'StackJackCompact'
+}
 
 export type CreateIntegrationInput = {
   provider: IntegrationProvider

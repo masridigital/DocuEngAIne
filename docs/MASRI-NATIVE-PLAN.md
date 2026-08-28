@@ -198,7 +198,7 @@ Keep README direction: Azure AI Search + OpenAI RAG over documents, assets, runb
 Phase 2A is on `feature/integrations-mcp` (PR #1): Company, MCP registry, IntegrationConnection, payload sync, SPA Companies/Integrations, SQL cascade-safe FKs, company related summary.
 
 Next:
-1. Wire StackJack MCP credentials in Key Vault and a live Halo/Ninja company pull
+1. Halo company pull via Compact `halo_list_clients` shipped this slice. Still: Key Vault credentials for live Compact/Composio, then Ninja/CIPP/Meraki/UniFi pulls.
 2. CompanyId on document/runbook/Keeper create-edit (assets already accept it)
 3. Phase 2B: UniFi + Blackpoint MCP; sync schedules + SyncRun UI. Halo/Ninja company deep links shipped (`HaloPortalUrl` / `NinjaPortalUrl`).
 4. Phase 2C: relationship graph, Azure AI Search, client portal, Hudu export import (passwords → Keeper only). Expirations + flags + runbook runs + process completion rollup shipped.
@@ -231,7 +231,7 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Company museum | Novelty. Skip. | skip | |
 | Asset layouts (all types) | One `AssetType` + `FieldDefinition` model. Map from Halo/Ninja. Do not clone 32 layouts. | Phase1 | Create types as ops needs them. |
 | Admin (users, groups, layouts, API, import/export, SMTP, license) | Entra + Azure. Import only for Hudu migration. | later | Audit is Phase1. |
-| Integrations — Halo | `IntegrationConnection` + payload/MCP sync → `Company`. Secret **name** only. Halo is SoR. | Phase2A | Test/sync endpoints. GET by id. |
+| Integrations — Halo | Compact MCP only (`halo_list_clients` → `Company`). `McpServer.Kind=StackJackCompact`. Secret **name** only. Halo is SoR. | Phase2A | Test/sync endpoints. GET by id. Other-tenant sync → 404. |
 | Integrations — NinjaOne | Same path → `Company` + Computer Assets. Secret **name** only. | Phase2A | Same sync service by provider. |
 | Integrations — sync scope toggles | Typed bools on `IntegrationConnection` (not a 32-tile form). Skip inactive/contacts/locations/assets; auto-update names; refuse company overwrite by default. | Phase2A | GET/POST/PUT `/api/integrations`. Honored in `SyncFromPayload`. |
 | Integrations — UniFi | MCP connector, not a Hudu form. | later | |

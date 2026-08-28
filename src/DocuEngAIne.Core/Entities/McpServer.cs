@@ -10,6 +10,7 @@ public class McpServer : EntityBase, ITenantScoped
     public Tenant Tenant { get; set; } = null!;
 
     public required string Name { get; set; }
+    public McpServerKind Kind { get; set; } = McpServerKind.StackJackCompact;
     public McpTransport Transport { get; set; } = McpTransport.Http;
     public string? EndpointUrl { get; set; }
     public string? Command { get; set; }

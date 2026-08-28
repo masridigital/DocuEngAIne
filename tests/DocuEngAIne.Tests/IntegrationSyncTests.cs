@@ -1,8 +1,12 @@
+using System.Text.Json;
+using DocuEngAIne.Api.Endpoints;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
+using DocuEngAIne.Core.Mcp;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Integrations;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace DocuEngAIne.Tests;
@@ -24,7 +28,42 @@ public class IntegrationSyncTests
             => Task.FromResult("""{"result":{}}""");
     }
 
-    private static (DocuEngAIneDbContext Db, FakeCurrentUser User, IntegrationSyncService Sync) Create()
+    private sealed class RecordingMcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public List<object> Clients { get; init; } = [];
+        public int PageSizeOverride { get; init; }
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            var pageNo = 1;
+            var pageSize = PageSizeOverride > 0 ? PageSizeOverride : HaloClientMapper.DefaultPageSize;
+            if (!string.IsNullOrWhiteSpace(argumentsJson))
+            {
+                using var doc = JsonDocument.Parse(argumentsJson);
+                if (doc.RootElement.TryGetProperty("pageNo", out var p))
+                    pageNo = p.GetInt32();
+                if (PageSizeOverride == 0 && doc.RootElement.TryGetProperty("pageSize", out var s))
+                    pageSize = s.GetInt32();
+            }
+
+            var slice = Clients.Skip((pageNo - 1) * pageSize).Take(pageSize).ToList();
+            var inner = JsonSerializer.Serialize(new { clients = slice });
+            var body = JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                id = "1",
+                result = new { content = new[] { new { type = "text", text = inner } } },
+            });
+            return Task.FromResult(body);
+        }
+    }
+
+    private static (DocuEngAIneDbContext Db, FakeCurrentUser User, IntegrationSyncService Sync) Create(IMcpClient? mcp = null)
     {
         var tenantId = Guid.NewGuid();
         var user = new FakeCurrentUser { TenantId = tenantId, ObjectId = Guid.NewGuid().ToString(), Role = UserRole.Owner };
@@ -32,8 +71,46 @@ public class IntegrationSyncTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         var db = new DocuEngAIneDbContext(options, user);
-        var sync = new IntegrationSyncService(db, user, new NoopMcp(), new NoopAudit());
+        var sync = new IntegrationSyncService(db, user, mcp ?? new NoopMcp(), new NoopAudit());
         return (db, user, sync);
+    }
+
+    private static (DocuEngAIneDbContext Db, FakeCurrentUser User) Open(string dbName, Guid tenantId)
+    {
+        var user = new FakeCurrentUser { TenantId = tenantId, ObjectId = Guid.NewGuid().ToString(), Role = UserRole.Owner };
+        var options = new DbContextOptionsBuilder<DocuEngAIneDbContext>()
+            .UseInMemoryDatabase(dbName)
+            .Options;
+        return (new DocuEngAIneDbContext(options, user), user);
+    }
+
+    private static async Task<(McpServer Server, IntegrationConnection Connection)> SeedHaloCompactAsync(
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool skipInactive = true, bool updateCompanyDetails = false)
+    {
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            Transport = McpTransport.Http,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.Halo,
+            DisplayName = "Halo",
+            McpServerId = server.Id,
+            SkipInactive = skipInactive,
+            UpdateCompanyDetails = updateCompanyDetails,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+        return (server, connection);
     }
 
     [Fact]
@@ -77,7 +154,7 @@ public class IntegrationSyncTests
             .Options;
 
         await using var a = new DocuEngAIneDbContext(options, new FakeCurrentUser { TenantId = tenantA, ObjectId = "a", Role = UserRole.Owner });
-        a.McpServers.Add(new McpServer { TenantId = tenantA, Name = "StackJack", EndpointUrl = "https://example/mcp" });
+        a.McpServers.Add(new McpServer { TenantId = tenantA, Name = "StackJack Compact", Kind = McpServerKind.StackJackCompact, EndpointUrl = McpServerDefaults.StackJackCompactEndpoint });
         await a.SaveChangesAsync();
 
         await using var b = new DocuEngAIneDbContext(options, new FakeCurrentUser { TenantId = tenantB, ObjectId = "b", Role = UserRole.Owner });
@@ -86,7 +163,7 @@ public class IntegrationSyncTests
     }
 
     private static async Task<(IntegrationConnection Connection, Company Company)> SeedMappedCompany(
-        DocuEngAIneDbContext db, FakeCurrentUser user, bool updateCompanyDetails)
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool updateCompanyDetails, Guid? mcpServerId = null)
     {
         var connection = new IntegrationConnection
         {
@@ -94,6 +171,7 @@ public class IntegrationSyncTests
             Provider = IntegrationProvider.Halo,
             DisplayName = "Halo",
             AuthSecretName = "halo-secret",
+            McpServerId = mcpServerId,
             UpdateCompanyDetails = updateCompanyDetails,
         };
         db.IntegrationConnections.Add(connection);
@@ -192,5 +270,242 @@ public class IntegrationSyncTests
         Assert.Equal(1, run.ItemsCreated);
         var company = await db.Companies.SingleAsync();
         Assert.Equal("LiveCo", company.Name);
+    }
+
+    [Fact]
+    public async Task Halo_SyncAsync_Creates_Companies_Mappings_And_HaloClientId()
+    {
+        var mcp = new RecordingMcp
+        {
+            Clients =
+            [
+                new { id = 100, name = "ExampleCo", city = "Austin", state = "TX", inactive = false },
+            ],
+        };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedHaloCompactAsync(db, user);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsCreated);
+        Assert.Equal("halo_list_clients", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(server.Id, mcp.Calls[0].ServerId);
+        Assert.Contains("\"includeInactive\":false", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"activeInactive\":\"active\"", mcp.Calls[0].Args, StringComparison.Ordinal);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("ExampleCo", company.Name);
+        Assert.Equal("100", company.HaloClientId);
+        var mapping = await db.IntegrationMappings.SingleAsync();
+        Assert.Equal("100", mapping.ExternalId);
+        Assert.Equal(company.Id, mapping.LocalEntityId);
+    }
+
+    [Fact]
+    public async Task Halo_SyncAsync_SkipInactive_Requests_Active_And_Skips_Inactive_Rows()
+    {
+        var mcp = new RecordingMcp
+        {
+            Clients =
+            [
+                new { id = 1, name = "DeadCo", inactive = true },
+                new { id = 2, name = "LiveCo", inactive = false },
+            ],
+        };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedHaloCompactAsync(db, user, skipInactive: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsSkipped);
+        Assert.Equal(1, run.ItemsCreated);
+        Assert.Contains("\"includeInactive\":false", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"activeInactive\":\"active\"", mcp.Calls[0].Args, StringComparison.Ordinal);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("LiveCo", company.Name);
+        Assert.Equal("2", company.HaloClientId);
+    }
+
+    [Fact]
+    public async Task Halo_SyncAsync_Does_Not_Clobber_Name_When_UpdateCompanyDetails_False()
+    {
+        var mcp = new RecordingMcp
+        {
+            Clients = [new { id = "halo-100", name = "Remote Name", inactive = false }],
+        };
+        var (db, user, sync) = Create(mcp);
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+        var (connection, _) = await SeedMappedCompany(db, user, updateCompanyDetails: false, mcpServerId: server.Id);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsUpdated);
+        Assert.Equal("halo_list_clients", Assert.Single(mcp.Calls).Tool);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("Local Name", company.Name);
+        Assert.Equal("halo-100", company.HaloClientId);
+    }
+
+    [Fact]
+    public async Task Halo_SyncAsync_Updates_Name_When_UpdateCompanyDetails_True()
+    {
+        var mcp = new RecordingMcp
+        {
+            Clients = [new { id = "halo-100", name = "Remote Name", inactive = false }],
+        };
+        var (db, user, sync) = Create(mcp);
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+        var (connection, _) = await SeedMappedCompany(db, user, updateCompanyDetails: true, mcpServerId: server.Id);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsUpdated);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("Remote Name", company.Name);
+        Assert.Equal("halo-100", company.HaloClientId);
+    }
+
+    [Fact]
+    public async Task Halo_SyncAsync_Missing_McpServerId_Fails_Without_Calling_Mcp()
+    {
+        var mcp = new RecordingMcp { Clients = [new { id = 1, name = "ShouldNotImport" }] };
+        var (db, user, sync) = Create(mcp);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.Halo,
+            DisplayName = "Halo",
+            AuthSecretName = "kv-name-only",
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        Assert.Contains("McpServerId", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Key Vault", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
+        Assert.Empty(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Other_Tenant_Connection_Sync_Returns_404_And_Does_Not_Call_Mcp()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var mcp = new RecordingMcp { Clients = [new { id = 9, name = "PoisonCo" }] };
+
+        Guid connectionBId;
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var server = new McpServer
+            {
+                TenantId = tenantB,
+                Name = "Compact B",
+                Kind = McpServerKind.StackJackCompact,
+                EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            };
+            dbB.McpServers.Add(server);
+            var connection = new IntegrationConnection
+            {
+                TenantId = tenantB,
+                Provider = IntegrationProvider.Halo,
+                DisplayName = "Halo B",
+                McpServerId = server.Id,
+            };
+            dbB.IntegrationConnections.Add(connection);
+            await dbB.SaveChangesAsync();
+            connectionBId = connection.Id;
+        }
+
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var sync = new IntegrationSyncService(dbA, userA, mcp, new NoopAudit());
+            var result = await IntegrationEndpoints.SyncAsync(connectionBId, null, sync, dbA, userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+            Assert.Empty(mcp.Calls);
+            Assert.Empty(await dbA.IntegrationConnections.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.SyncRuns.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
+        }
+    }
+
+    [Fact]
+    public async Task Create_Compact_And_Composio_McpServers_Use_Defaults_ForTenant_Without_Secret_Values()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+
+        Guid compactId;
+        Guid composioId;
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var compact = Assert.IsAssignableFrom<IValueHttpResult>(
+                await IntegrationEndpoints.CreateMcpServerAsync(
+                    new CreateMcpServerRequest("StackJack Compact", McpServerKind.StackJackCompact, AuthSecretName: "kv-stackjack-compact"),
+                    dbA, userA));
+            var composio = Assert.IsAssignableFrom<IValueHttpResult>(
+                await IntegrationEndpoints.CreateMcpServerAsync(
+                    new CreateMcpServerRequest("Composio Connect", McpServerKind.Composio, AuthSecretName: "kv-composio"),
+                    dbA, userA));
+
+            var compactJson = JsonSerializer.Serialize(compact.Value);
+            using var compactDoc = JsonDocument.Parse(compactJson);
+            Assert.Equal("StackJackCompact", compactDoc.RootElement.GetProperty("Kind").GetString());
+            Assert.Equal(McpServerDefaults.StackJackCompactEndpoint, compactDoc.RootElement.GetProperty("EndpointUrl").GetString());
+            Assert.Equal("kv-stackjack-compact", compactDoc.RootElement.GetProperty("AuthSecretName").GetString());
+            Assert.Equal("Http", compactDoc.RootElement.GetProperty("Transport").GetString());
+            compactId = compactDoc.RootElement.GetProperty("Id").GetGuid();
+
+            var composioJson = JsonSerializer.Serialize(composio.Value);
+            using var composioDoc = JsonDocument.Parse(composioJson);
+            Assert.Equal("Composio", composioDoc.RootElement.GetProperty("Kind").GetString());
+            Assert.Equal(McpServerDefaults.ComposioEndpoint, composioDoc.RootElement.GetProperty("EndpointUrl").GetString());
+            Assert.Equal("kv-composio", composioDoc.RootElement.GetProperty("AuthSecretName").GetString());
+            composioId = composioDoc.RootElement.GetProperty("Id").GetGuid();
+
+            var stored = await dbA.McpServers.ForTenant(userA).ToListAsync();
+            Assert.Equal(2, stored.Count);
+            Assert.All(stored, s => Assert.False(string.IsNullOrWhiteSpace(s.AuthSecretName)));
+            Assert.DoesNotContain(stored, s => s.AuthSecretName!.Contains("secret-value", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(stored, s => (s.Notes ?? "").Contains("sk-", StringComparison.Ordinal));
+        }
+
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var leaked = await dbB.McpServers.ForTenant(userB).ToListAsync();
+            Assert.Empty(leaked);
+            Assert.Null(await dbB.McpServers.ForTenant(userB).FirstOrDefaultAsync(s => s.Id == compactId));
+            Assert.Null(await dbB.McpServers.ForTenant(userB).FirstOrDefaultAsync(s => s.Id == composioId));
+        }
     }
 }

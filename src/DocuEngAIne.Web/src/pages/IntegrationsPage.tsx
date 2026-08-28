@@ -2,6 +2,8 @@ import { useState, type FormEvent } from 'react'
 import {
   createIntegration,
   createMcpServer,
+  MCP_ENDPOINTS,
+  mcpKindForProvider,
   syncIntegration,
   testIntegration,
   updateIntegration,
@@ -9,7 +11,8 @@ import {
   useMcpServers,
   type IntegrationConnection,
   type IntegrationProvider,
-  type McpTransport,
+  type McpServer,
+  type McpServerKind,
 } from '../hooks/useApi'
 
 const defaultPolicy = {
@@ -35,8 +38,8 @@ export function IntegrationsPage() {
   const integrations = Array.isArray(intData) ? intData : []
 
   const [mcpName, setMcpName] = useState('')
-  const [mcpTransport, setMcpTransport] = useState<McpTransport>('Http')
-  const [mcpUrl, setMcpUrl] = useState('')
+  const [mcpKind, setMcpKind] = useState<McpServerKind>('StackJackCompact')
+  const [mcpUrl, setMcpUrl] = useState(MCP_ENDPOINTS.StackJackCompact)
   const [mcpSecret, setMcpSecret] = useState('')
   const [mcpEnabled, setMcpEnabled] = useState(true)
 
@@ -64,14 +67,15 @@ export function IntegrationsPage() {
     try {
       await createMcpServer({
         name: mcpName.trim(),
-        transport: mcpTransport,
-        endpointUrl: mcpUrl.trim() || null,
+        kind: mcpKind,
+        transport: 'Http',
+        endpointUrl: mcpUrl.trim() || MCP_ENDPOINTS[mcpKind],
         authSecretName: mcpSecret.trim() || null,
         enabled: mcpEnabled,
       })
       setMcpName('')
-      setMcpTransport('Http')
-      setMcpUrl('')
+      setMcpKind('StackJackCompact')
+      setMcpUrl(MCP_ENDPOINTS.StackJackCompact)
       setMcpSecret('')
       setMcpEnabled(true)
       setMessage('MCP server added.')
@@ -115,8 +119,14 @@ export function IntegrationsPage() {
     e.preventDefault()
     setMessage(null)
     setErrorMessage(null)
-    if (provider === 'CustomMcp' && !mcpServerId) {
-      setErrorMessage('Select an MCP server for CustomMcp.')
+    if (!mcpServerId) {
+      setErrorMessage(
+        provider === 'Composio'
+          ? 'Select a Composio MCP server.'
+          : provider === 'CustomMcp'
+            ? 'Select an MCP server for CustomMcp.'
+            : 'Select the StackJack Compact MCP server. Halo, NinjaOne, CIPP, Meraki, and UniFi run through Compact — not vendor REST.',
+      )
       return
     }
     setBusy(true)
@@ -136,7 +146,7 @@ export function IntegrationsPage() {
         await updateIntegration(editingId, {
           displayName,
           authSecretName: authSecretName.trim() || null,
-          mcpServerId: provider === 'CustomMcp' ? mcpServerId : null,
+          mcpServerId: mcpServerId || null,
           ...policy,
         })
         setMessage('Integration updated.')
@@ -145,7 +155,7 @@ export function IntegrationsPage() {
           provider,
           displayName,
           authSecretName: authSecretName.trim() || null,
-          mcpServerId: provider === 'CustomMcp' ? mcpServerId : null,
+          mcpServerId: mcpServerId || null,
           isEnabled: true,
           ...policy,
         })
@@ -207,7 +217,10 @@ export function IntegrationsPage() {
   return (
     <div className="page">
       <h1>Integrations</h1>
-      <p>Register MCP servers, then connect Halo, NinjaOne, or a custom MCP provider. Secrets stay in Key Vault names only.</p>
+      <p>
+        Register StackJack Compact or Composio MCP servers, then connect Halo, NinjaOne, CIPP, Meraki, or UniFi to Compact.
+        Auth is a Key Vault secret name on the MCP server — never a secret in SQL. Do not add a second StackJack server.
+      </p>
       {message && <p className="banner">{message}</p>}
       {errorMessage && <p className="error">{errorMessage}</p>}
 
@@ -220,7 +233,7 @@ export function IntegrationsPage() {
             <thead>
               <tr>
                 <th>Name</th>
-                <th>Transport</th>
+                <th>Kind</th>
                 <th>EndpointUrl</th>
                 <th>AuthSecretName</th>
                 <th>Enabled</th>
@@ -235,7 +248,7 @@ export function IntegrationsPage() {
               {servers.map((s) => (
                 <tr key={s.id}>
                   <td>{s.name}</td>
-                  <td>{s.transport}</td>
+                  <td>{s.kind || '—'}</td>
                   <td>{s.endpointUrl || '—'}</td>
                   <td>{s.authSecretName || '—'}</td>
                   <td>{s.enabled === false ? 'No' : 'Yes'}</td>
@@ -247,24 +260,27 @@ export function IntegrationsPage() {
 
         <form className="form-grid" onSubmit={onCreateMcp}>
           <label>
-            Name
-            <input className="input" required value={mcpName} onChange={(e) => setMcpName(e.target.value)} />
-          </label>
-          <label>
-            Transport
+            Kind
             <select
               className="input"
-              value={mcpTransport}
-              onChange={(e) => setMcpTransport(e.target.value as McpTransport)}
+              value={mcpKind}
+              onChange={(e) => {
+                const kind = e.target.value as McpServerKind
+                setMcpKind(kind)
+                setMcpUrl(MCP_ENDPOINTS[kind])
+              }}
             >
-              <option value="Http">http</option>
-              <option value="Sse">sse</option>
-              <option value="Stdio">stdio</option>
+              <option value="StackJackCompact">StackJack Compact</option>
+              <option value="Composio">Composio</option>
             </select>
           </label>
           <label>
+            Name
+            <input className="input" required value={mcpName} onChange={(e) => setMcpName(e.target.value)} placeholder={mcpKind === 'Composio' ? 'Composio Connect' : 'StackJack Compact'} />
+          </label>
+          <label>
             EndpointUrl
-            <input className="input" value={mcpUrl} onChange={(e) => setMcpUrl(e.target.value)} placeholder="https://…" />
+            <input className="input" value={mcpUrl} onChange={(e) => setMcpUrl(e.target.value)} placeholder={MCP_ENDPOINTS[mcpKind]} />
           </label>
           <label>
             AuthSecretName
@@ -322,7 +338,7 @@ export function IntegrationsPage() {
           </table>
         )}
 
-        <p>Sync policy defaults skip inactive accounts and contacts and refuse overwriting company details.</p>
+        <p>Halo company pull uses Compact <code>halo_list_clients</code>. Ninja/CIPP/Meraki/UniFi sync implementations come later. Sync policy defaults skip inactive accounts and refuse overwriting company details.</p>
         <form className="form-grid" onSubmit={onCreateIntegration}>
           <label>
             Provider
@@ -330,24 +346,36 @@ export function IntegrationsPage() {
               className="input"
               value={provider}
               disabled={!!editingId}
-              onChange={(e) => setProvider(e.target.value as IntegrationProvider)}
+              onChange={(e) => {
+                setProvider(e.target.value as IntegrationProvider)
+                setMcpServerId('')
+              }}
             >
               <option value="Halo">Halo</option>
               <option value="NinjaOne">NinjaOne</option>
+              <option value="Cipp">CIPP</option>
+              <option value="Meraki">Meraki</option>
+              <option value="UniFi">UniFi</option>
+              <option value="Blackpoint">Blackpoint</option>
+              <option value="Composio">Composio</option>
               <option value="CustomMcp">CustomMcp</option>
             </select>
           </label>
-          {provider === 'CustomMcp' && (
-            <label>
-              MCP server
-              <select className="input" required value={mcpServerId} onChange={(e) => setMcpServerId(e.target.value)}>
-                <option value="">Select a server…</option>
-                {servers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
+          <label>
+            MCP server
+            <select className="input" required value={mcpServerId} onChange={(e) => setMcpServerId(e.target.value)}>
+              <option value="">Select a server…</option>
+              {servers
+                .filter((s: McpServer) => {
+                  const kind = mcpKindForProvider(provider)
+                  if (!kind) return true
+                  return (s.kind || 'StackJackCompact') === kind
+                })
+                .map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} ({s.kind || 'MCP'})</option>
                 ))}
-              </select>
-            </label>
-          )}
+            </select>
+          </label>
           <label>
             Auth secret name (optional)
             <input className="input" value={authSecretName} onChange={(e) => setAuthSecretName(e.target.value)} />

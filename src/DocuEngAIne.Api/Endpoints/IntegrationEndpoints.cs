@@ -1,6 +1,7 @@
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
+using DocuEngAIne.Core.Mcp;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -32,31 +33,7 @@ public static class IntegrationEndpoints
             return server is null ? Results.NotFound() : Results.Ok(MapServer(server));
         });
 
-        group.MapPost("", async (
-            [FromBody] CreateMcpServerRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            CancellationToken ct) =>
-        {
-            if (user.TenantId is null)
-                return Results.Unauthorized();
-
-            var server = new McpServer
-            {
-                TenantId = user.TenantId.Value,
-                Name = request.Name,
-                Transport = request.Transport,
-                EndpointUrl = request.EndpointUrl,
-                Command = request.Command,
-                ArgsJson = request.ArgsJson,
-                Enabled = request.Enabled ?? true,
-                AuthSecretName = request.AuthSecretName,
-                Notes = request.Notes,
-            };
-            db.McpServers.Add(server);
-            await db.SaveChangesAsync(ct);
-            return Results.Created($"/api/mcp/servers/{server.Id}", MapServer(server));
-        });
+        group.MapPost("", CreateMcpServerAsync);
 
         group.MapPut("/{id:guid}", async (
             Guid id,
@@ -70,9 +47,14 @@ public static class IntegrationEndpoints
                 return Results.NotFound();
 
             server.Name = request.Name ?? server.Name;
+            if (request.Kind.HasValue)
+                server.Kind = request.Kind.Value;
             if (request.Transport.HasValue)
                 server.Transport = request.Transport.Value;
-            server.EndpointUrl = request.EndpointUrl ?? server.EndpointUrl;
+            if (request.EndpointUrl is not null)
+                server.EndpointUrl = McpServerDefaults.ResolveEndpoint(server.Kind, request.EndpointUrl);
+            else if (request.Kind.HasValue)
+                server.EndpointUrl = McpServerDefaults.EndpointFor(server.Kind);
             server.Command = request.Command ?? server.Command;
             server.ArgsJson = request.ArgsJson ?? server.ArgsJson;
             if (request.Enabled.HasValue)
@@ -196,24 +178,7 @@ public static class IntegrationEndpoints
             return ok ? Results.Ok(new { ok, message }) : Results.BadRequest(new { ok, message });
         });
 
-        group.MapPost("/{id:guid}/sync", async (
-            Guid id,
-            [FromBody] SyncPayloadRequest? request,
-            IIntegrationSyncService sync,
-            CancellationToken ct) =>
-        {
-            if (request?.Companies is { Count: > 0 })
-            {
-                var run = await sync.SyncFromPayloadAsync(id, request.Companies.Select(c =>
-                    new ExternalCompanyDto(c.ExternalId, c.Name, c.Slug, c.PrimaryDomain, c.City, c.State, c.Website, c.Address, c.IsInactive)).ToList(), ct);
-                return Results.Ok(MapRun(run));
-            }
-
-            var result = await sync.SyncAsync(id, ct);
-            return result.Status == SyncRunStatus.Succeeded
-                ? Results.Ok(MapRun(result))
-                : Results.BadRequest(MapRun(result));
-        });
+        group.MapPost("/{id:guid}/sync", SyncAsync);
 
         group.MapGet("/{id:guid}/runs", async (
             Guid id,
@@ -259,10 +224,65 @@ public static class IntegrationEndpoints
         });
     }
 
+    public static async Task<IResult> CreateMcpServerAsync(
+        [FromBody] CreateMcpServerRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken ct = default)
+    {
+        if (user.TenantId is null)
+            return Results.Unauthorized();
+
+        var kind = request.Kind ?? McpServerKind.StackJackCompact;
+        var secretName = string.IsNullOrWhiteSpace(request.AuthSecretName) ? null : request.AuthSecretName.Trim();
+        var server = new McpServer
+        {
+            TenantId = user.TenantId.Value,
+            Name = request.Name,
+            Kind = kind,
+            Transport = request.Transport,
+            EndpointUrl = McpServerDefaults.ResolveEndpoint(kind, request.EndpointUrl),
+            Command = request.Command,
+            ArgsJson = request.ArgsJson,
+            Enabled = request.Enabled ?? true,
+            AuthSecretName = secretName,
+            Notes = request.Notes,
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync(ct);
+        return Results.Created($"/api/mcp/servers/{server.Id}", MapServer(server));
+    }
+
+    public static async Task<IResult> SyncAsync(
+        Guid id,
+        [FromBody] SyncPayloadRequest? request,
+        IIntegrationSyncService sync,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken ct = default)
+    {
+        var exists = await db.IntegrationConnections.ForTenant(user).AnyAsync(i => i.Id == id, ct);
+        if (!exists)
+            return Results.NotFound();
+
+        if (request?.Companies is { Count: > 0 })
+        {
+            var run = await sync.SyncFromPayloadAsync(id, request.Companies.Select(c =>
+                new ExternalCompanyDto(c.ExternalId, c.Name, c.Slug, c.PrimaryDomain, c.City, c.State, c.Website, c.Address, c.IsInactive)).ToList(), ct);
+            return Results.Ok(MapRun(run));
+        }
+
+        var result = await sync.SyncAsync(id, ct);
+        return result.Status == SyncRunStatus.Succeeded
+            ? Results.Ok(MapRun(result))
+            : Results.BadRequest(MapRun(result));
+    }
+
     private static object MapServer(McpServer s) => new
     {
         s.Id,
         s.Name,
+        Kind = s.Kind.ToString(),
         Transport = s.Transport.ToString(),
         s.EndpointUrl,
         s.Command,
@@ -312,6 +332,7 @@ public static class IntegrationEndpoints
 
 public record CreateMcpServerRequest(
     string Name,
+    McpServerKind? Kind = null,
     McpTransport Transport = McpTransport.Http,
     string? EndpointUrl = null,
     string? Command = null,
@@ -322,6 +343,7 @@ public record CreateMcpServerRequest(
 
 public record UpdateMcpServerRequest(
     string? Name = null,
+    McpServerKind? Kind = null,
     McpTransport? Transport = null,
     string? EndpointUrl = null,
     string? Command = null,

@@ -1,4 +1,3 @@
-using System.Text.Json;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
@@ -72,28 +71,37 @@ public class IntegrationSyncService : IIntegrationSyncService
             .FirstOrDefaultAsync(c => c.Id == connectionId, cancellationToken)
             ?? throw new InvalidOperationException("Integration not found.");
 
-        if (string.IsNullOrWhiteSpace(connection.AuthSecretName) && connection.McpServerId is null)
+        if (connection.Provider == IntegrationProvider.Halo)
         {
-            var failed = await StartRunAsync(connection, cancellationToken);
-            failed.Status = SyncRunStatus.Failed;
-            failed.FinishedAt = DateTimeOffset.UtcNow;
-            failed.ErrorSummary = "Configure AuthSecretName (Key Vault) or link an McpServer before syncing.";
-            connection.Status = IntegrationStatus.Error;
-            connection.LastError = failed.ErrorSummary;
-            await _db.SaveChangesAsync(cancellationToken);
-            return failed;
+            if (connection.McpServerId is not Guid mcpId)
+            {
+                return await FailRunAsync(connection,
+                    "Halo sync requires a linked StackJack Compact MCP server (McpServerId). AuthSecretName is a Key Vault name only; secrets are never stored in SQL.",
+                    cancellationToken);
+            }
+
+            try
+            {
+                var companies = await PullHaloCompaniesAsync(connection, mcpId, cancellationToken);
+                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return await FailRunAsync(connection, ex.Message, cancellationToken);
+            }
         }
 
-        // Live vendor pull is provider-specific and credential-gated.
-        // v1 exposes SyncFromPayload for tests and MCP-driven importers.
-        var run = await StartRunAsync(connection, cancellationToken);
-        run.Status = SyncRunStatus.Failed;
-        run.FinishedAt = DateTimeOffset.UtcNow;
-        run.ErrorSummary = "No sync payload supplied. Use SyncFromPayload (tests/importers) or wire MCP tool results into company upsert.";
-        connection.Status = IntegrationStatus.Error;
-        connection.LastError = run.ErrorSummary;
-        await _db.SaveChangesAsync(cancellationToken);
-        return run;
+        if (string.IsNullOrWhiteSpace(connection.AuthSecretName) && connection.McpServerId is null)
+        {
+            return await FailRunAsync(connection,
+                "Configure AuthSecretName (Key Vault) or link an McpServer before syncing.",
+                cancellationToken);
+        }
+
+        // Ninja/CIPP/Meraki/UniFi/Composio live pulls are out of scope this slice — payload path remains.
+        return await FailRunAsync(connection,
+            "No sync payload supplied. Use SyncFromPayload (tests/importers) or wire MCP tool results into company upsert.",
+            cancellationToken);
     }
 
     public async Task<SyncRun> SyncFromPayloadAsync(
@@ -204,6 +212,45 @@ public class IntegrationSyncService : IIntegrationSyncService
             await _db.SaveChangesAsync(cancellationToken);
             return run;
         }
+    }
+
+    private async Task<IReadOnlyList<ExternalCompanyDto>> PullHaloCompaniesAsync(
+        IntegrationConnection connection,
+        Guid mcpServerId,
+        CancellationToken cancellationToken)
+    {
+        var server = await _db.McpServers.ForTenant(_user)
+            .FirstOrDefaultAsync(s => s.Id == mcpServerId, cancellationToken)
+            ?? throw new InvalidOperationException("MCP server not found.");
+
+        if (server.Kind != McpServerKind.StackJackCompact)
+            throw new InvalidOperationException("Halo company pull requires a StackJack Compact MCP server. Composio is not a Halo connector.");
+
+        const int maxPages = 500;
+        var companies = new List<ExternalCompanyDto>();
+        for (var pageNo = 1; pageNo <= maxPages; pageNo++)
+        {
+            var args = HaloClientMapper.BuildArgumentsJson(pageNo, connection.SkipInactive);
+            var body = await _mcpClient.CallToolAsync(mcpServerId, HaloClientMapper.ToolName, args, cancellationToken);
+            var page = HaloClientMapper.MapClients(body);
+            companies.AddRange(page);
+            if (page.Count < HaloClientMapper.DefaultPageSize)
+                break;
+        }
+
+        return companies;
+    }
+
+    private async Task<SyncRun> FailRunAsync(IntegrationConnection connection, string error, CancellationToken cancellationToken)
+    {
+        var run = await StartRunAsync(connection, cancellationToken);
+        run.Status = SyncRunStatus.Failed;
+        run.FinishedAt = DateTimeOffset.UtcNow;
+        run.ErrorSummary = error;
+        connection.Status = IntegrationStatus.Error;
+        connection.LastError = error;
+        await _db.SaveChangesAsync(cancellationToken);
+        return run;
     }
 
     private async Task<SyncRun> StartRunAsync(IntegrationConnection connection, CancellationToken cancellationToken)
