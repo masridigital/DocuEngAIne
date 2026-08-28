@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { createCompany, createResourceLink, useCompanies, useCompany, type Company, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
+import { createCompany, createResourceLink, updateCompany, useCompanies, useCompany, type Company, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
 
 function slugify(value: string) {
   return value
@@ -8,6 +8,16 @@ function slugify(value: string) {
     .trim()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
+}
+
+function isHttpUrl(value?: string | null): value is string {
+  if (!value) return false
+  try {
+    const url = new URL(value)
+    return url.protocol === 'http:' || url.protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
 function isActive(c: Company) {
@@ -27,6 +37,8 @@ function CompanyList() {
   const [slug, setSlug] = useState('')
   const [haloClientId, setHaloClientId] = useState('')
   const [ninjaOrganizationId, setNinjaOrganizationId] = useState('')
+  const [haloPortalUrl, setHaloPortalUrl] = useState('')
+  const [ninjaPortalUrl, setNinjaPortalUrl] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -49,11 +61,15 @@ function CompanyList() {
         slug: trimmedSlug,
         haloClientId: haloClientId.trim() || null,
         ninjaOrganizationId: ninjaOrganizationId.trim() || null,
+        haloPortalUrl: haloPortalUrl.trim() || null,
+        ninjaPortalUrl: ninjaPortalUrl.trim() || null,
       })
       setName('')
       setSlug('')
       setHaloClientId('')
       setNinjaOrganizationId('')
+      setHaloPortalUrl('')
+      setNinjaPortalUrl('')
       await mutate()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to create company.')
@@ -65,7 +81,7 @@ function CompanyList() {
   return (
     <div className="page">
       <h1>Companies</h1>
-      <p>Client spaces distinct from the Entra tenant. Halo and Ninja IDs link PSA and RMM systems of record.</p>
+      <p>Client spaces distinct from the Entra tenant. Halo and Ninja IDs plus portal URLs link PSA and RMM systems of record — URLs only, no secrets.</p>
 
       <div className="toolbar">
         <input
@@ -140,6 +156,26 @@ function CompanyList() {
           <label>
             Ninja organization ID (optional)
             <input className="input" value={ninjaOrganizationId} onChange={(e) => setNinjaOrganizationId(e.target.value)} />
+          </label>
+          <label>
+            Halo portal URL (optional)
+            <input
+              className="input"
+              type="url"
+              placeholder="https://…"
+              value={haloPortalUrl}
+              onChange={(e) => setHaloPortalUrl(e.target.value)}
+            />
+          </label>
+          <label>
+            Ninja portal URL (optional)
+            <input
+              className="input"
+              type="url"
+              placeholder="https://…"
+              value={ninjaPortalUrl}
+              onChange={(e) => setNinjaPortalUrl(e.target.value)}
+            />
           </label>
         </div>
         <button className="btn" type="submit" disabled={submitting}>
@@ -320,6 +356,34 @@ function RelatedLinksSection({
 
 function CompanyDetail({ id }: { id: string }) {
   const { data: company, error, isLoading, mutate } = useCompany(id)
+  const [haloPortalUrl, setHaloPortalUrl] = useState('')
+  const [ninjaPortalUrl, setNinjaPortalUrl] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [hydrated, setHydrated] = useState<string | null>(null)
+
+  if (company && hydrated !== company.id) {
+    setHaloPortalUrl(company.haloPortalUrl ?? '')
+    setNinjaPortalUrl(company.ninjaPortalUrl ?? '')
+    setHydrated(company.id)
+  }
+
+  async function onSaveUrls(e: FormEvent) {
+    e.preventDefault()
+    setFormError(null)
+    setSubmitting(true)
+    try {
+      await updateCompany(id, {
+        haloPortalUrl: haloPortalUrl.trim() || '',
+        ninjaPortalUrl: ninjaPortalUrl.trim() || '',
+      })
+      await mutate()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to update portal URLs.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   return (
     <div className="page">
@@ -327,6 +391,20 @@ function CompanyDetail({ id }: { id: string }) {
         <Link to="/companies">← Companies</Link>
       </p>
       <h1>{company?.name ?? 'Company'}</h1>
+      {company && (
+        <div className="portal-links">
+          {isHttpUrl(company.haloPortalUrl) && (
+            <a className="btn" href={company.haloPortalUrl} target="_blank" rel="noopener noreferrer">
+              Open in Halo
+            </a>
+          )}
+          {isHttpUrl(company.ninjaPortalUrl) && (
+            <a className="btn" href={company.ninjaPortalUrl} target="_blank" rel="noopener noreferrer">
+              Open in Ninja
+            </a>
+          )}
+        </div>
+      )}
       {isLoading && <p>Loading…</p>}
       {error && <p className="error">Failed to load company.</p>}
       {company && (
@@ -339,6 +417,36 @@ function CompanyDetail({ id }: { id: string }) {
               </div>
             ))}
           </dl>
+          <form className="panel" onSubmit={onSaveUrls}>
+            <h2>PSA / RMM portal links</h2>
+            <p className="muted">Store Halo and Ninja portal URLs only — never API secrets.</p>
+            {formError && <p className="error">{formError}</p>}
+            <div className="form-grid">
+              <label>
+                Halo portal URL
+                <input
+                  className="input"
+                  type="url"
+                  placeholder="https://…"
+                  value={haloPortalUrl}
+                  onChange={(e) => setHaloPortalUrl(e.target.value)}
+                />
+              </label>
+              <label>
+                Ninja portal URL
+                <input
+                  className="input"
+                  type="url"
+                  placeholder="https://…"
+                  value={ninjaPortalUrl}
+                  onChange={(e) => setNinjaPortalUrl(e.target.value)}
+                />
+              </label>
+            </div>
+            <button className="btn" type="submit" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Save portal links'}
+            </button>
+          </form>
           <div className="related-grid">
             <RelatedSection
               title="Assets"

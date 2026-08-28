@@ -298,6 +298,18 @@ body {
   margin: 0;
 }
 
+.portal-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.portal-links .btn {
+  text-decoration: none;
+  display: inline-block;
+}
+
 .related-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));

@@ -24,6 +24,10 @@ public class Company : EntityBase, ITenantScoped
 
     public string? HaloClientId { get; set; }
     public string? NinjaOrganizationId { get; set; }
+    /// <summary>Optional Halo PSA portal deep link. URL only — no secrets.</summary>
+    public string? HaloPortalUrl { get; set; }
+    /// <summary>Optional NinjaOne portal deep link. URL only — no secrets.</summary>
+    public string? NinjaPortalUrl { get; set; }
     public string? ExternalIdsJson { get; set; }
 
     public ICollection<Asset> Assets { get; set; } = [];
