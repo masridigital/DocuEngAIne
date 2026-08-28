@@ -77,6 +77,7 @@ app.MapKeeperLinkEndpoints();
 app.MapRunbookEndpoints();
 app.MapProfileEndpoints();
 app.MapUserEndpoints();
+app.MapResourceAccessEndpoints();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();
