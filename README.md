@@ -265,6 +265,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 | POST | `/api/runbooks` | Create runbook |
 | PUT | `/api/runbooks/{id}` | Update runbook and steps |
 | DELETE | `/api/runbooks/{id}` | Delete runbook |
+| GET | `/api/runbooks/runs` | Tenant-scoped process completion rollup (`status`, `companyId`). Joins runbook title and company name. Other-tenant / unknown company → empty. |
 | GET | `/api/runbooks/{id}/runs` | List runs (`ForTenant`; other-tenant runbook → 404) |
 | POST | `/api/runbooks/{id}/runs` | Start a run (optional `companyId`, must `ForTenant`) |
 | POST | `/api/runbooks/{id}/runs/{runId}/complete` | Mark a running run completed |
@@ -324,7 +325,8 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [ ] UniFi / Blackpoint as MCP connectors
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
 - [x] Flags (`GET/POST /api/flags`, assign, `/flags` review queue)
-- [x] Runbook runs (`POST/GET /api/runbooks/{id}/runs`, complete/cancel, `runCount`). Global Process Completion rollup later.
+- [x] Runbook runs (`POST/GET /api/runbooks/{id}/runs`, complete/cancel, `runCount`)
+- [x] Process completion rollup (`GET /api/runbooks/runs?status=&companyId=`, `/runs`)
 - [x] Related items (`ResourceLink`, `GET/POST/DELETE /api/links`, company `relatedLinks`). Graph visualization later.
 - [x] Document folders (`CRUD /api/folders`, `folderId` on documents, `/documents` folder list). Other-tenant folder attach → 400.
 - [ ] Client portal

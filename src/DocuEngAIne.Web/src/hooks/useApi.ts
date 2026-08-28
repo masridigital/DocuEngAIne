@@ -255,8 +255,21 @@ export type RunbookRun = {
   startedByObjectId?: string | null
 }
 
+export type RunbookRunRollup = RunbookRun & {
+  runbookTitle: string
+  companyName?: string | null
+}
+
 export function useRunbooks() {
   return useSWR<Runbook[]>('/api/runbooks', fetcher)
+}
+
+export function useRunbookRuns(opts?: { status?: string; companyId?: string }) {
+  const params = new URLSearchParams()
+  if (opts?.status) params.set('status', opts.status)
+  if (opts?.companyId) params.set('companyId', opts.companyId)
+  const qs = params.toString()
+  return useSWR<RunbookRunRollup[]>(`/api/runbooks/runs${qs ? `?${qs}` : ''}`, fetcher)
 }
 
 export function startRunbookRun(runbookId: string, companyId?: string | null) {

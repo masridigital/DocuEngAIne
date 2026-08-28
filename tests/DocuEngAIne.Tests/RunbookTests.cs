@@ -235,4 +235,160 @@ public class RunbookTests
             Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(cancelled).StatusCode);
         }
     }
+
+    [Fact]
+    public async Task Recent_Rollup_Does_Not_Leak_Other_Tenant_Runs()
+    {
+        var (tenantA, tenantB, _, _, runbookA, runbookB, dbName) = await SeedAsync();
+
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var started = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(), dbA, userA);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(started).StatusCode);
+        }
+
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var started = await RunbookEndpoints.StartRunAsync(runbookB, new StartRunbookRunRequest(), dbB, userB);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(started).StatusCode);
+            await RunbookEndpoints.CompleteRunAsync(
+                runbookB,
+                Assert.IsType<RunbookRunItem>(Assert.IsAssignableFrom<IValueHttpResult>(started).Value).Id,
+                dbB,
+                userB);
+        }
+
+        var (queryA, queryUserA) = Open(dbName, tenantA);
+        await using (queryA)
+        {
+            var items = await RunbookEndpoints.ListRecentRunsAsync(queryA, queryUserA);
+            Assert.Single(items);
+            Assert.Equal(runbookA, items[0].RunbookId);
+            Assert.Equal("Onboard ExampleCo", items[0].RunbookTitle);
+            Assert.Equal("ExampleCo", items[0].CompanyName);
+            Assert.Equal(RunbookRunStatus.Running, items[0].Status);
+            Assert.DoesNotContain(items, i => i.RunbookId == runbookB);
+            Assert.DoesNotContain(items, i => i.RunbookTitle.Contains("Poison", StringComparison.OrdinalIgnoreCase));
+            Assert.DoesNotContain(items, i => i.CompanyName == "PoisonCo");
+
+            var hidden = await RunbookEndpoints.ListRecentRunsAsync(queryA, queryUserA, status: RunbookRunStatus.Completed);
+            Assert.Empty(hidden);
+        }
+
+        var (queryB, queryUserB) = Open(dbName, tenantB);
+        await using (queryB)
+        {
+            var items = await RunbookEndpoints.ListRecentRunsAsync(queryB, queryUserB);
+            Assert.Single(items);
+            Assert.Equal(runbookB, items[0].RunbookId);
+            Assert.Equal("Poison SOP", items[0].RunbookTitle);
+            Assert.Equal("PoisonCo", items[0].CompanyName);
+            Assert.Equal(RunbookRunStatus.Completed, items[0].Status);
+            Assert.DoesNotContain(items, i => i.RunbookId == runbookA);
+            Assert.DoesNotContain(items, i => i.CompanyName == "ExampleCo");
+        }
+    }
+
+    [Fact]
+    public async Task Recent_Rollup_CompanyId_Uses_ForTenant_And_Does_Not_Five_Hundred()
+    {
+        var (tenantA, _, companyA, companyB, runbookA, _, dbName) = await SeedAsync();
+        var companyAOnly = new Company { TenantId = tenantA, Name = "OtherCo", Slug = "otherco" };
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            db.Companies.Add(companyAOnly);
+            await db.SaveChangesAsync();
+
+            var first = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(companyA), db, user);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(first).StatusCode);
+
+            var second = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(companyAOnly.Id), db, user);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(second).StatusCode);
+
+            var otherTenant = await RunbookEndpoints.ListRecentRunsAsync(db, user, companyId: companyB);
+            Assert.Empty(otherTenant);
+
+            var missing = await RunbookEndpoints.ListRecentRunsAsync(db, user, companyId: Guid.NewGuid());
+            Assert.Empty(missing);
+
+            var scoped = await RunbookEndpoints.ListRecentRunsAsync(db, user, companyId: companyA);
+            Assert.Single(scoped);
+            Assert.All(scoped, i => Assert.Equal(companyA, i.CompanyId));
+            Assert.Equal("ExampleCo", scoped[0].CompanyName);
+            Assert.DoesNotContain(scoped, i => i.CompanyName == "OtherCo");
+            Assert.DoesNotContain(scoped, i => i.CompanyName == "PoisonCo");
+
+            var otherCo = await RunbookEndpoints.ListRecentRunsAsync(db, user, companyId: companyAOnly.Id);
+            Assert.Single(otherCo);
+            Assert.Equal("OtherCo", otherCo[0].CompanyName);
+        }
+    }
+
+    [Fact]
+    public async Task Recent_Rollup_Filters_Status_And_Orders_Recent_First()
+    {
+        var (tenantA, _, _, _, runbookA, _, dbName) = await SeedAsync();
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var first = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(), db, user);
+            var firstId = Assert.IsType<RunbookRunItem>(Assert.IsAssignableFrom<IValueHttpResult>(first).Value).Id;
+            await RunbookEndpoints.CompleteRunAsync(runbookA, firstId, db, user);
+
+            var second = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(), db, user);
+            var secondId = Assert.IsType<RunbookRunItem>(Assert.IsAssignableFrom<IValueHttpResult>(second).Value).Id;
+            await RunbookEndpoints.CancelRunAsync(runbookA, secondId, db, user);
+
+            var third = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(), db, user);
+            var thirdId = Assert.IsType<RunbookRunItem>(Assert.IsAssignableFrom<IValueHttpResult>(third).Value).Id;
+
+            var all = await RunbookEndpoints.ListRecentRunsAsync(db, user);
+            Assert.Equal(3, all.Count);
+            Assert.Equal(new[] { thirdId, secondId, firstId }, all.Select(i => i.Id).ToArray());
+            Assert.Equal("Onboard ExampleCo", all[0].RunbookTitle);
+            Assert.NotNull(all[0].StartedAt);
+            Assert.Null(all[0].FinishedAt);
+            Assert.NotNull(all[1].FinishedAt);
+
+            var running = await RunbookEndpoints.ListRecentRunsAsync(db, user, status: RunbookRunStatus.Running);
+            Assert.Single(running);
+            Assert.Equal(thirdId, running[0].Id);
+
+            var completed = await RunbookEndpoints.ListRecentRunsAsync(db, user, status: RunbookRunStatus.Completed);
+            Assert.Single(completed);
+            Assert.Equal(firstId, completed[0].Id);
+            Assert.NotNull(completed[0].FinishedAt);
+
+            var cancelled = await RunbookEndpoints.ListRecentRunsAsync(db, user, status: RunbookRunStatus.Cancelled);
+            Assert.Single(cancelled);
+            Assert.Equal(secondId, cancelled[0].Id);
+        }
+    }
+
+    [Fact]
+    public async Task Recent_Rollup_Unknown_Status_Is_Bad_Request()
+    {
+        var (tenantA, _, _, _, runbookA, _, dbName) = await SeedAsync();
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(), db, user);
+
+            var bad = await RunbookEndpoints.ListRecentRunsResultAsync("poison", null, db, user);
+            Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsAssignableFrom<IStatusCodeHttpResult>(bad).StatusCode);
+            Assert.Equal(RunbookEndpoints.UnknownStatusMessage, Assert.IsAssignableFrom<IValueHttpResult>(bad).Value);
+
+            var ok = Assert.IsAssignableFrom<IValueHttpResult>(
+                await RunbookEndpoints.ListRecentRunsResultAsync("completed", null, db, user));
+            Assert.Empty(Assert.IsAssignableFrom<IReadOnlyList<RunbookRunRollupItem>>(ok.Value));
+
+            var running = Assert.IsAssignableFrom<IValueHttpResult>(
+                await RunbookEndpoints.ListRecentRunsResultAsync("Running", null, db, user));
+            Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<RunbookRunRollupItem>>(running.Value));
+        }
+    }
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router-dom'
 import { startRunbookRun, useRunbooks, type Runbook } from '../hooks/useApi'
 
 function runsLabel(count: number) {
@@ -27,7 +28,10 @@ export function RunbooksPage() {
   return (
     <div className="page">
       <h1>Runbooks</h1>
-      <p>SOPs and checklists. Start a run to track a pass through the steps. Tenant-wide books are templates; company-linked books are per-client.</p>
+      <p>
+        SOPs and checklists. Start a run to track a pass through the steps. Tenant-wide books are templates; company-linked books are per-client.{' '}
+        <Link to="/runs">Process completion</Link> rolls up recent runs.
+      </p>
       {isLoading && <p>Loading…</p>}
       {error && <p className="error">Failed to load runbooks.</p>}
       {actionError && <p className="error">{actionError}</p>}
