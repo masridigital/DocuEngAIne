@@ -10,6 +10,27 @@ public static class McpServerDefaults
     /// <summary>Composio Connect remote MCP.</summary>
     public const string ComposioEndpoint = "https://connect.composio.dev/mcp";
 
+    /// <summary>Name given to the Compact registration created on demand for a tenant that has none.</summary>
+    public const string StackJackCompactName = "StackJack Compact";
+
+    /// <summary>
+    /// Providers whose live pulls run through StackJack Compact rather than a vendor REST API. Compact
+    /// is built in for these: an admin supplies a Key Vault secret name and the tenant's Compact
+    /// registration is resolved — or created once — on their behalf.
+    ///
+    /// Blackpoint is deliberately absent. It has a Compact connector (CompassOne) but no pull path in
+    /// IntegrationSyncService yet, so auto-creating a server for it would register egress nothing uses.
+    /// </summary>
+    public static bool IsCompactBacked(IntegrationProvider provider) => provider switch
+    {
+        IntegrationProvider.Halo
+            or IntegrationProvider.NinjaOne
+            or IntegrationProvider.Cipp
+            or IntegrationProvider.Meraki
+            or IntegrationProvider.UniFi => true,
+        _ => false,
+    };
+
     public static string EndpointFor(McpServerKind kind) => kind switch
     {
         McpServerKind.StackJackCompact => StackJackCompactEndpoint,
