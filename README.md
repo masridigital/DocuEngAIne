@@ -35,7 +35,8 @@ tests/                      # xUnit + EF InMemory tests
 - **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry and PSA/RMM sync. Secrets live in Key Vault names only.
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
 - **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
-- **Document** — KB articles with full-text search and **versioning**.
+- **Document** — KB articles with full-text search and **versioning**. Optional `FolderId`.
+- **DocumentFolder** — nested KB folders (`ParentId`). Optional `CompanyId` (null = central KB; set = company KB). Tenant-scoped.
 - **Runbook / RunbookStep / RunbookRun** — ordered SOPs and checklists with start/complete/cancel run history. Tenant-wide books are templates; optional `CompanyId` is the per-client instance. Not a second process product. No local secrets.
 - **KeeperLink** — links to credentials in **Keeper**; no secrets are stored locally.
 - **ResourceRoleAssignment** — object-level RBAC overriding tenant-wide roles.
@@ -236,14 +237,24 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/documents` | Search documents |
+| GET | `/api/documents` | List published documents (`search`, `folderId`). Other-tenant `folderId` → empty. |
 | GET | `/api/documents/{id}` | Document detail |
-| POST | `/api/documents` | Create document |
-| PUT | `/api/documents/{id}` | Update document (creates a version) |
+| POST | `/api/documents` | Create document (optional `folderId`; other-tenant folder → 400) |
+| PUT | `/api/documents/{id}` | Update document (creates a version; optional `folderId`) |
 | DELETE | `/api/documents/{id}` | Delete document |
 | GET | `/api/documents/{id}/versions` | List versions |
 | GET | `/api/documents/{id}/versions/{versionId}` | Version detail |
 | POST | `/api/documents/{id}/restore` | Restore a version |
+
+### Folders
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/folders` | List folders (`companyId`, `parentId`). `ForTenant`. Other-tenant company → empty. |
+| GET | `/api/folders/{id}` | Folder detail |
+| POST | `/api/folders` | Create folder (`name`, optional `parentId` / `companyId`) |
+| PUT | `/api/folders/{id}` | Update folder |
+| DELETE | `/api/folders/{id}` | Delete folder (reparents children, unfiles articles) |
 
 ### Runbooks
 
@@ -304,7 +315,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 - [x] Optional `Company.HaloPortalUrl` / `Company.NinjaPortalUrl` (Open in Halo / Open in Ninja)
 
-> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), and `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`), and `20260828045000_Phase2DocumentFolders` (`DocumentFolders`; `Documents.FolderId` Restrict; Parent Restrict; Company Restrict). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
 
 
 ### Later
@@ -315,6 +326,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Flags (`GET/POST /api/flags`, assign, `/flags` review queue)
 - [x] Runbook runs (`POST/GET /api/runbooks/{id}/runs`, complete/cancel, `runCount`). Global Process Completion rollup later.
 - [x] Related items (`ResourceLink`, `GET/POST/DELETE /api/links`, company `relatedLinks`). Graph visualization later.
+- [x] Document folders (`CRUD /api/folders`, `folderId` on documents, `/documents` folder list). Other-tenant folder attach → 400.
 - [ ] Client portal
 - [ ] Switch SQL auth to managed identity
 - [ ] One-time Hudu export migration (passwords → Keeper only)

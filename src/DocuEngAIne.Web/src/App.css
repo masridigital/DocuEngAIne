@@ -443,3 +443,52 @@ body {
   width: 100%;
 }
 
+.kb-layout {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 24px;
+  align-items: start;
+}
+
+.kb-folders {
+  margin-top: 0;
+}
+
+.folder-create {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  margin: 0 0 12px;
+}
+
+.folder-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.folder-list button {
+  width: 100%;
+  text-align: left;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 10px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+}
+
+.folder-list button:hover,
+.folder-list button.active {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+@media (max-width: 720px) {
+  .kb-layout {
+    grid-template-columns: 1fr;
+  }
+}

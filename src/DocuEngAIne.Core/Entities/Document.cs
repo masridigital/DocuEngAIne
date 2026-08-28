@@ -11,6 +11,9 @@ public class Document : EntityBase, ITenantScoped
     public Guid? CompanyId { get; set; }
     public Company? Company { get; set; }
 
+    public Guid? FolderId { get; set; }
+    public DocumentFolder? Folder { get; set; }
+
     public required string Title { get; set; }
     public string? Slug { get; set; }
     public string? Summary { get; set; }

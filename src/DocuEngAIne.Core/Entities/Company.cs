@@ -32,6 +32,7 @@ public class Company : EntityBase, ITenantScoped
 
     public ICollection<Asset> Assets { get; set; } = [];
     public ICollection<Document> Documents { get; set; } = [];
+    public ICollection<DocumentFolder> DocumentFolders { get; set; } = [];
     public ICollection<Runbook> Runbooks { get; set; } = [];
     public ICollection<KeeperLink> KeeperLinks { get; set; } = [];
 }
