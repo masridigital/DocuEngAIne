@@ -33,6 +33,9 @@ public static class ModelBuilderExtensions
             c.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
             c.HasIndex(x => new { x.TenantId, x.HaloClientId });
             c.HasIndex(x => new { x.TenantId, x.NinjaOrganizationId });
+            c.HasIndex(x => x.ParentCompanyId);
+            // Restrict: Tenant already cascades to Company — SQL Server forbids multiple cascade paths on the self-FK.
+            c.HasOne(x => x.ParentCompany).WithMany(x => x.ChildCompanies).HasForeignKey(x => x.ParentCompanyId).OnDelete(DeleteBehavior.Restrict);
             // Restrict: Company and Tenant/AssetType both reach these tables — SQL Server forbids multiple cascade paths (including SET NULL).
             c.HasMany(x => x.Assets).WithOne(a => a.Company).HasForeignKey(a => a.CompanyId).OnDelete(DeleteBehavior.Restrict);
             c.HasMany(x => x.Documents).WithOne(d => d.Company).HasForeignKey(d => d.CompanyId).OnDelete(DeleteBehavior.Restrict);

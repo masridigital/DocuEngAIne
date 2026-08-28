@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react'
+import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { createCompany, createResourceLink, updateCompany, useCompanies, useCompany, type Company, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
 
@@ -35,6 +35,9 @@ function CompanyList() {
   const { data, error, isLoading, mutate } = useCompanies(query)
   const [name, setName] = useState('')
   const [slug, setSlug] = useState('')
+  const [parentCompanyId, setParentCompanyId] = useState('')
+  const [companyType, setCompanyType] = useState('')
+  const [nickname, setNickname] = useState('')
   const [haloClientId, setHaloClientId] = useState('')
   const [ninjaOrganizationId, setNinjaOrganizationId] = useState('')
   const [haloPortalUrl, setHaloPortalUrl] = useState('')
@@ -59,6 +62,9 @@ function CompanyList() {
       await createCompany({
         name: trimmedName,
         slug: trimmedSlug,
+        parentCompanyId: parentCompanyId.trim() || null,
+        companyType: companyType.trim() || null,
+        nickname: nickname.trim() || null,
         haloClientId: haloClientId.trim() || null,
         ninjaOrganizationId: ninjaOrganizationId.trim() || null,
         haloPortalUrl: haloPortalUrl.trim() || null,
@@ -66,6 +72,9 @@ function CompanyList() {
       })
       setName('')
       setSlug('')
+      setParentCompanyId('')
+      setCompanyType('')
+      setNickname('')
       setHaloClientId('')
       setNinjaOrganizationId('')
       setHaloPortalUrl('')
@@ -150,6 +159,25 @@ function CompanyList() {
             <input className="input" required value={slug} onChange={(e) => setSlug(e.target.value)} />
           </label>
           <label>
+            Parent company (optional guid)
+            <select className="input" value={parentCompanyId} onChange={(e) => setParentCompanyId(e.target.value)}>
+              <option value="">None</option>
+              {companies.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label>
+            Company type (optional)
+            <input className="input" value={companyType} onChange={(e) => setCompanyType(e.target.value)} />
+          </label>
+          <label>
+            Nickname (optional)
+            <input className="input" value={nickname} onChange={(e) => setNickname(e.target.value)} />
+          </label>
+          <label>
             Halo client ID (optional)
             <input className="input" value={haloClientId} onChange={(e) => setHaloClientId(e.target.value)} />
           </label>
@@ -187,19 +215,30 @@ function CompanyList() {
 }
 
 function detailRows(company: Company) {
-  const rows: [string, string][] = [
+  const rows: [string, ReactNode][] = [
     ['Name', company.name],
     ['Slug', company.slug],
     ['HaloClientId', company.haloClientId || '—'],
     ['NinjaOrganizationId', company.ninjaOrganizationId || '—'],
     ['IsActive', isActive(company) ? 'Yes' : 'No'],
   ]
+  if (company.nickname) rows.push(['Nickname', company.nickname])
+  if (company.companyType) rows.push(['Company type', company.companyType])
+  if (company.parentCompanyId) {
+    rows.push([
+      'Parent company',
+      <Link to={`/companies/${company.parentCompanyId}`}>{company.parentCompanyId}</Link>,
+    ])
+  }
   if (company.companyNumber) rows.push(['Company number', company.companyNumber])
   if (company.primaryDomain) rows.push(['Primary domain', company.primaryDomain])
   if (company.address) rows.push(['Address', company.address])
   if (company.city) rows.push(['City', company.city])
   if (company.state) rows.push(['State', company.state])
+  if (company.country) rows.push(['Country', company.country])
+  if (company.postalCode) rows.push(['Postal code', company.postalCode])
   if (company.phone) rows.push(['Phone', company.phone])
+  if (company.fax) rows.push(['Fax', company.fax])
   if (company.website) rows.push(['Website', company.website])
   if (company.hoursOfOperation) rows.push(['Hours', company.hoursOfOperation])
   if (company.notes) rows.push(['Notes', company.notes])

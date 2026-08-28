@@ -30,11 +30,17 @@ export type Company = {
   name: string
   slug: string
   companyNumber?: string | null
+  companyType?: string | null
+  nickname?: string | null
+  parentCompanyId?: string | null
   primaryDomain?: string | null
   address?: string | null
   city?: string | null
   state?: string | null
+  country?: string | null
+  postalCode?: string | null
   phone?: string | null
+  fax?: string | null
   website?: string | null
   notes?: string | null
   hoursOfOperation?: string | null
@@ -55,6 +61,9 @@ export type Company = {
 export type CreateCompanyInput = {
   name: string
   slug: string
+  parentCompanyId?: string | null
+  companyType?: string | null
+  nickname?: string | null
   haloClientId?: string | null
   ninjaOrganizationId?: string | null
   haloPortalUrl?: string | null

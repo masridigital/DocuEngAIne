@@ -10,6 +10,8 @@ namespace DocuEngAIne.Api.Endpoints;
 public static class CompanyEndpoints
 {
     public const int RelatedTake = 8;
+    public const string ParentCompanyNotFoundMessage = "Parent company not found.";
+    public const string CompanyCannotBeOwnParentMessage = "Company cannot be its own parent.";
 
     public static IEndpointRouteBuilder MapCompanyEndpoints(this IEndpointRouteBuilder app)
     {
@@ -20,21 +22,7 @@ public static class CompanyEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            var query = db.Companies.ForTenant(user).AsNoTracking();
-            if (!string.IsNullOrWhiteSpace(q))
-            {
-                var term = q.Trim();
-                query = query.Where(c =>
-                    c.Name.Contains(term)
-                    || c.Slug.Contains(term)
-                    || (c.HaloClientId != null && c.HaloClientId.Contains(term))
-                    || (c.NinjaOrganizationId != null && c.NinjaOrganizationId.Contains(term)));
-            }
-
-            var items = await query.OrderBy(c => c.Name).ToListAsync(cancellationToken);
-            return Results.Ok(items.Select(c => Map(c)));
-        });
+            await ListAsync(q, db, user, cancellationToken));
 
         group.MapGet("/{id:guid}", async (
             Guid id,
@@ -91,6 +79,27 @@ public static class CompanyEndpoints
         return app;
     }
 
+    public static async Task<IResult> ListAsync(
+        string? q,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var query = db.Companies.ForTenant(user).AsNoTracking();
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var term = q.Trim();
+            query = query.Where(c =>
+                c.Name.Contains(term)
+                || c.Slug.Contains(term)
+                || (c.HaloClientId != null && c.HaloClientId.Contains(term))
+                || (c.NinjaOrganizationId != null && c.NinjaOrganizationId.Contains(term)));
+        }
+
+        var items = await query.OrderBy(c => c.Name).ToListAsync(cancellationToken);
+        return Results.Ok(items.Select(c => Map(c)));
+    }
+
     public static async Task<IResult> GetAsync(
         Guid id,
         DocuEngAIneDbContext db,
@@ -118,17 +127,26 @@ public static class CompanyEndpoints
         if (await db.Companies.ForTenant(user).AnyAsync(c => c.Slug == request.Slug, cancellationToken))
             return Results.Conflict("Slug already exists.");
 
+        if (await EnsureParentCompanyInTenantAsync(db, user, request.ParentCompanyId, cancellationToken: cancellationToken) is { } badParent)
+            return badParent;
+
         var company = new Company
         {
             TenantId = user.TenantId.Value,
             Name = request.Name,
             Slug = request.Slug,
             CompanyNumber = request.CompanyNumber,
+            CompanyType = request.CompanyType,
+            Nickname = request.Nickname,
+            ParentCompanyId = request.ParentCompanyId,
             PrimaryDomain = request.PrimaryDomain,
             Address = request.Address,
             City = request.City,
             State = request.State,
+            Country = request.Country,
+            PostalCode = request.PostalCode,
             Phone = request.Phone,
+            Fax = request.Fax,
             Website = request.Website,
             Notes = request.Notes,
             HoursOfOperation = request.HoursOfOperation,
@@ -155,14 +173,24 @@ public static class CompanyEndpoints
         if (company is null)
             return Results.NotFound();
 
+        if (await EnsureParentCompanyInTenantAsync(db, user, request.ParentCompanyId, excludeId: id, cancellationToken) is { } badParent)
+            return badParent;
+
         company.Name = request.Name ?? company.Name;
         company.Slug = request.Slug ?? company.Slug;
         company.CompanyNumber = request.CompanyNumber ?? company.CompanyNumber;
+        company.CompanyType = request.CompanyType ?? company.CompanyType;
+        company.Nickname = request.Nickname ?? company.Nickname;
+        if (request.ParentCompanyId.HasValue)
+            company.ParentCompanyId = request.ParentCompanyId.Value;
         company.PrimaryDomain = request.PrimaryDomain ?? company.PrimaryDomain;
         company.Address = request.Address ?? company.Address;
         company.City = request.City ?? company.City;
         company.State = request.State ?? company.State;
+        company.Country = request.Country ?? company.Country;
+        company.PostalCode = request.PostalCode ?? company.PostalCode;
         company.Phone = request.Phone ?? company.Phone;
+        company.Fax = request.Fax ?? company.Fax;
         company.Website = request.Website ?? company.Website;
         company.Notes = request.Notes ?? company.Notes;
         company.HoursOfOperation = request.HoursOfOperation ?? company.HoursOfOperation;
@@ -190,6 +218,23 @@ public static class CompanyEndpoints
 
         var exists = await db.Companies.ForTenant(user).AnyAsync(c => c.Id == id, cancellationToken);
         return exists ? null : Results.BadRequest("Company not found.");
+    }
+
+    public static async Task<IResult?> EnsureParentCompanyInTenantAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        Guid? parentCompanyId,
+        Guid? excludeId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (parentCompanyId is not Guid id)
+            return null;
+
+        if (excludeId is Guid self && self == id)
+            return Results.BadRequest(CompanyCannotBeOwnParentMessage);
+
+        var exists = await db.Companies.ForTenant(user).AnyAsync(c => c.Id == id, cancellationToken);
+        return exists ? null : Results.BadRequest(ParentCompanyNotFoundMessage);
     }
 
     public static async Task<CompanyRelatedSnapshot> LoadRelatedAsync(
@@ -232,11 +277,17 @@ public static class CompanyEndpoints
             c.Name,
             c.Slug,
             c.CompanyNumber,
+            c.CompanyType,
+            c.Nickname,
+            c.ParentCompanyId,
             c.PrimaryDomain,
             c.Address,
             c.City,
             c.State,
+            c.Country,
+            c.PostalCode,
             c.Phone,
+            c.Fax,
             c.Website,
             c.Notes,
             c.HoursOfOperation,
@@ -298,11 +349,17 @@ public record CreateCompanyRequest(
     string Name,
     string Slug,
     string? CompanyNumber = null,
+    string? CompanyType = null,
+    string? Nickname = null,
+    Guid? ParentCompanyId = null,
     string? PrimaryDomain = null,
     string? Address = null,
     string? City = null,
     string? State = null,
+    string? Country = null,
+    string? PostalCode = null,
     string? Phone = null,
+    string? Fax = null,
     string? Website = null,
     string? Notes = null,
     string? HoursOfOperation = null,
@@ -316,11 +373,17 @@ public record UpdateCompanyRequest(
     string? Name = null,
     string? Slug = null,
     string? CompanyNumber = null,
+    string? CompanyType = null,
+    string? Nickname = null,
+    Guid? ParentCompanyId = null,
     string? PrimaryDomain = null,
     string? Address = null,
     string? City = null,
     string? State = null,
+    string? Country = null,
+    string? PostalCode = null,
     string? Phone = null,
+    string? Fax = null,
     string? Website = null,
     string? Notes = null,
     string? HoursOfOperation = null,
