@@ -214,6 +214,20 @@ body {
   font-size: 1.1rem;
 }
 
+details.panel > summary {
+  cursor: pointer;
+  font-size: 1.1rem;
+  font-weight: 600;
+}
+
+details.advanced > summary {
+  cursor: pointer;
+  margin-top: 16px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));

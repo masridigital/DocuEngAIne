@@ -173,6 +173,9 @@ export type SyncPolicy = {
   updateCompanyDetails: boolean
 }
 
+/** int.MaxValue — how StackJack reports an unlimited connector allowance. */
+export const UNLIMITED_CALL_LIMIT = 2147483647
+
 export type IntegrationConnection = {
   id: string
   provider: string
@@ -183,6 +186,16 @@ export type IntegrationConnection = {
   mcpServerId?: string | null
   authSecretName?: string | null
   isEnabled?: boolean
+  /** StackJack tier for this connector, detected during Test. 'Unknown' until then. */
+  stackJackPlan?: string | null
+  /** Successful tool calls per billing cycle, as reported by StackJack. UNLIMITED_CALL_LIMIT means unlimited. */
+  monthlyCallLimit?: number | null
+  planDetectedAt?: string | null
+  syncIntervalMinutesOverride?: number | null
+  /** Derived server-side from the allowance and the override. Null means manual only. */
+  syncIntervalMinutes?: number | null
+  /** When a check at that cadence would next fall due. Nothing runs it — there is no scheduler yet. */
+  nextSyncDueAt?: string | null
 } & Partial<SyncPolicy>
 
 export type IntegrationProvider = 'Halo' | 'NinjaOne' | 'UniFi' | 'Blackpoint' | 'CustomMcp' | 'Cipp' | 'Meraki' | 'Composio'
@@ -209,6 +222,8 @@ export type UpdateIntegrationInput = {
   authSecretName?: string | null
   mcpServerId?: string | null
   isEnabled?: boolean
+  /** Minutes between scheduled checks. Omit to leave as-is; 0 clears the override. */
+  syncIntervalMinutesOverride?: number
 } & Partial<SyncPolicy>
 
 export function useProfile() {

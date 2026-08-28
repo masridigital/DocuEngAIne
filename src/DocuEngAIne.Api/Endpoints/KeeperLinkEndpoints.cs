@@ -41,6 +41,12 @@ public static class KeeperLinkEndpoints
             return link is null ? Results.NotFound() : Results.Ok(MapLink(link, includeUrl: false));
         });
 
+        // Reveal is a POST but semantically a read, and it is left on the tenant-wide Reader gate
+        // that already covers reads. Routing it through CanReadAsync would deny nobody who can reach
+        // it today — every provisioned User row is Reader or better, and the resource service falls
+        // back to that role — while denying a caller whose row has not been provisioned yet. The
+        // gap that leaves is real and named in the report: a grant that *lowers* someone to None on
+        // one link does not stop them revealing it.
         group.MapPost("/{id:guid}/reveal", async (
             Guid id,
             DocuEngAIneDbContext db,
@@ -64,23 +70,41 @@ public static class KeeperLinkEndpoints
             [FromBody] CreateKeeperLinkRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
-            await CreateAsync(request, db, user, cancellationToken));
+        {
+            // The link does not exist yet, so no grant can name it: creation gates on the tenant-wide
+            // role.
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.KeeperLink, cancellationToken) is { } denied)
+                return denied;
+
+            return await CreateAsync(request, db, user, cancellationToken);
+        });
 
         group.MapPut("/{id:guid}", async (
             Guid id,
             [FromBody] UpdateKeeperLinkRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
-            await UpdateAsync(id, request, db, user, cancellationToken));
+        {
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.KeeperLink, cancellationToken) is { } denied)
+                return denied;
+
+            return await UpdateAsync(id, request, db, user, cancellationToken);
+        });
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.KeeperLink, cancellationToken) is { } denied)
+                return denied;
+
             var link = await db.KeeperLinks.ForTenant(user).FirstOrDefaultAsync(k => k.Id == id, cancellationToken);
             if (link is null)
                 return Results.NotFound();

@@ -1,4 +1,5 @@
 using DocuEngAIne.Core.Entities;
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -53,23 +54,41 @@ public static class DocumentEndpoints
             [FromBody] CreateDocumentRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
-            await CreateAsync(request, db, user, cancellationToken));
+        {
+            // The document does not exist yet, so no grant can name it: creation gates on the
+            // tenant-wide role.
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Document, cancellationToken) is { } denied)
+                return denied;
+
+            return await CreateAsync(request, db, user, cancellationToken);
+        });
 
         group.MapPut("/{id:guid}", async (
             Guid id,
             [FromBody] UpdateDocumentRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
-            await UpdateAsync(id, request, db, user, cancellationToken));
+        {
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
+                return denied;
+
+            return await UpdateAsync(id, request, db, user, cancellationToken);
+        });
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
+                return denied;
+
             var doc = await db.Documents
                 .ForTenant(user)
                 .FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
@@ -128,8 +147,14 @@ public static class DocumentEndpoints
             [FromBody] RestoreVersionRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            // Restoring rewrites the document's current content, so it is a write on the document
+            // itself even though the route reads like history navigation.
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
+                return denied;
+
             var doc = await db.Documents.ForTenant(user).FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
             if (doc is null)
                 return Results.NotFound();

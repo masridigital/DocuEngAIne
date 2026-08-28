@@ -2,6 +2,7 @@ using System.Text.Json;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
+using DocuEngAIne.Core.Mcp;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -43,15 +44,13 @@ public class IntegrationSyncService : IIntegrationSyncService
         if (connection is null)
             return (false, "Integration not found.");
 
-        if (connection.McpServerId is Guid mcpId)
+        if (await ResolveMcpServerIdAsync(connection, cancellationToken) is Guid mcpId)
         {
             try
             {
                 await _mcpClient.ListToolsAsync(mcpId, cancellationToken);
                 connection.Status = IntegrationStatus.Connected;
                 connection.LastError = null;
-                await _db.SaveChangesAsync(cancellationToken);
-                return (true, "MCP server responded to tools/list.");
             }
             catch (Exception ex)
             {
@@ -60,6 +59,14 @@ public class IntegrationSyncService : IIntegrationSyncService
                 await _db.SaveChangesAsync(cancellationToken);
                 return (false, ex.Message);
             }
+
+            // Second call, and deliberately outside the try above: stackjack_session_info is a free
+            // platform tool that never draws down a connector allowance, but it is also not what the
+            // test is testing. tools/list already proved the server answers, so a detection failure
+            // reports the connection as Connected with the plan left unknown.
+            var plan = await DetectPlanAsync(connection, mcpId, cancellationToken);
+            await _db.SaveChangesAsync(cancellationToken);
+            return (true, $"MCP server responded to tools/list. {plan}");
         }
 
         if (string.IsNullOrWhiteSpace(connection.AuthSecretName) && string.IsNullOrWhiteSpace(connection.ConfigJson))
@@ -84,12 +91,8 @@ public class IntegrationSyncService : IIntegrationSyncService
 
         if (connection.Provider == IntegrationProvider.Halo)
         {
-            if (connection.McpServerId is not Guid mcpId)
-            {
-                return await FailRunAsync(connection,
-                    "Halo sync requires a linked StackJack Compact MCP server (McpServerId). AuthSecretName is a Key Vault name only; secrets are never stored in SQL.",
-                    cancellationToken);
-            }
+            if (await ResolveMcpServerIdAsync(connection, cancellationToken) is not Guid mcpId)
+                return await FailRunAsync(connection, CompactServerMissing("Halo"), cancellationToken);
 
             try
             {
@@ -104,12 +107,8 @@ public class IntegrationSyncService : IIntegrationSyncService
 
         if (connection.Provider == IntegrationProvider.NinjaOne)
         {
-            if (connection.McpServerId is not Guid mcpId)
-            {
-                return await FailRunAsync(connection,
-                    "NinjaOne sync requires a linked StackJack Compact MCP server (McpServerId). AuthSecretName is a Key Vault name only; secrets are never stored in SQL.",
-                    cancellationToken);
-            }
+            if (await ResolveMcpServerIdAsync(connection, cancellationToken) is not Guid mcpId)
+                return await FailRunAsync(connection, CompactServerMissing("NinjaOne"), cancellationToken);
 
             try
             {
@@ -135,12 +134,8 @@ public class IntegrationSyncService : IIntegrationSyncService
 
         if (connection.Provider == IntegrationProvider.Cipp)
         {
-            if (connection.McpServerId is not Guid mcpId)
-            {
-                return await FailRunAsync(connection,
-                    "CIPP sync requires a linked StackJack Compact MCP server (McpServerId). AuthSecretName is a Key Vault name only; secrets are never stored in SQL.",
-                    cancellationToken);
-            }
+            if (await ResolveMcpServerIdAsync(connection, cancellationToken) is not Guid mcpId)
+                return await FailRunAsync(connection, CompactServerMissing("CIPP"), cancellationToken);
 
             try
             {
@@ -155,12 +150,8 @@ public class IntegrationSyncService : IIntegrationSyncService
 
         if (connection.Provider == IntegrationProvider.Meraki)
         {
-            if (connection.McpServerId is not Guid mcpId)
-            {
-                return await FailRunAsync(connection,
-                    "Meraki sync requires a linked StackJack Compact MCP server (McpServerId). AuthSecretName is a Key Vault name only; secrets are never stored in SQL.",
-                    cancellationToken);
-            }
+            if (await ResolveMcpServerIdAsync(connection, cancellationToken) is not Guid mcpId)
+                return await FailRunAsync(connection, CompactServerMissing("Meraki"), cancellationToken);
 
             try
             {
@@ -184,6 +175,105 @@ public class IntegrationSyncService : IIntegrationSyncService
         return await FailRunAsync(connection,
             "No sync payload supplied. Use SyncFromPayload (tests/importers) or wire MCP tool results into company upsert.",
             cancellationToken);
+    }
+
+    /// <summary>
+    /// The MCP server this connection speaks through. StackJack Compact is built in, so a
+    /// Compact-backed connection that carries no <see cref="IntegrationConnection.McpServerId"/> —
+    /// created before Compact became the default, or created with an explicit null — adopts the
+    /// tenant's Compact registration here and keeps it. This only ever <em>resolves</em>: creating a
+    /// registration needs a Key Vault secret name, which only the create endpoint is given.
+    /// </summary>
+    private async Task<Guid?> ResolveMcpServerIdAsync(IntegrationConnection connection, CancellationToken cancellationToken)
+    {
+        if (connection.McpServerId is Guid linked)
+            return linked;
+
+        if (!McpServerDefaults.IsCompactBacked(connection.Provider))
+            return null;
+
+        // Same ordering as the create endpoint, so both land on the same server for a tenant that
+        // somehow registered more than one: an enabled server first, then the oldest.
+        var compact = await _db.McpServers.ForTenant(_user)
+            .Where(s => s.Kind == McpServerKind.StackJackCompact)
+            .OrderByDescending(s => s.Enabled)
+            .ThenBy(s => s.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (compact is null)
+            return null;
+
+        connection.McpServerId = compact.Id;
+        await _db.SaveChangesAsync(cancellationToken);
+        return compact.Id;
+    }
+
+    private static string CompactServerMissing(string providerName)
+        => $"{providerName} sync runs through StackJack Compact and this tenant has no Compact MCP server registered. "
+            + "Add the integration again with a Key Vault secret name, or link one with McpServerId. "
+            + "AuthSecretName is a Key Vault name only; secrets are never stored in SQL.";
+
+    /// <summary>
+    /// Reads the StackJack tier and monthly allowance for this connector and stamps them on the
+    /// connection. Returns one sentence for the test result and never throws: <c>session_info</c>
+    /// being unavailable says nothing about whether the connection itself works.
+    /// </summary>
+    private async Task<string> DetectPlanAsync(
+        IntegrationConnection connection,
+        Guid mcpServerId,
+        CancellationToken cancellationToken)
+    {
+        var connector = StackJackPlanDetector.ConnectorName(connection.Provider);
+        if (connector is null)
+            return "No StackJack connector covers this provider, so no plan was detected.";
+
+        try
+        {
+            var detected = await StackJackPlanDetector.DetectAsync(
+                _mcpClient, mcpServerId, connection.Provider, cancellationToken);
+            connection.PlanDetectedAt = DateTimeOffset.UtcNow;
+
+            if (detected is null)
+            {
+                // A session that answered and did not list the connector is authoritative: this
+                // StackJack key holds no subscription for it. Say so rather than keep a stale tier.
+                connection.StackJackPlan = StackJackPlan.Unknown;
+                connection.MonthlyCallLimit = null;
+                return $"StackJack lists no {connector} subscription on this key, so the plan is unknown.";
+            }
+
+            connection.StackJackPlan = detected.Plan;
+            connection.MonthlyCallLimit = detected.MonthlyCallLimit;
+            var credentials = detected.HasCredentials
+                ? string.Empty
+                : "; StackJack holds no credentials for it yet";
+            return $"StackJack plan {detected.Plan} ({DescribeAllowance(detected.MonthlyCallLimit)})"
+                + $"{DescribeCadence(connection)}{credentials}.";
+        }
+        catch (Exception ex)
+        {
+            // Plan, limit and PlanDetectedAt are left exactly as they were: a stale but real tier
+            // beats one overwritten from a read that failed, and the timestamp keeps saying when the
+            // last good read happened.
+            return $"Plan not detected ({ex.Message}).";
+        }
+    }
+
+    private static string DescribeAllowance(int? monthlyCallLimit)
+    {
+        if (monthlyCallLimit is not int limit)
+            return "allowance not reported";
+        return limit >= StackJackPlanDetector.UnlimitedCallLimit
+            ? "unlimited calls per cycle"
+            : $"{limit:N0} calls per cycle";
+    }
+
+    private static string DescribeCadence(IntegrationConnection connection)
+    {
+        // Capability, not a promise: nothing runs syncs on a timer yet.
+        var minutes = SyncCadencePolicy.IntervalMinutesFor(connection);
+        return minutes is int interval
+            ? $", which supports a check every {interval} min (syncs are still manual)"
+            : ", too little to suggest a cadence";
     }
 
     public async Task<SyncRun> SyncFromPayloadAsync(
@@ -522,9 +612,11 @@ public class IntegrationSyncService : IIntegrationSyncService
         {
             var args = HaloClientMapper.BuildArgumentsJson(pageNo, connection.SkipInactive);
             var body = await _mcpClient.CallToolAsync(mcpServerId, HaloClientMapper.ToolName, args, cancellationToken);
-            var page = HaloClientMapper.MapClients(body);
+            var page = HaloClientMapper.MapClients(body, out var rowCount);
             companies.AddRange(page);
-            if (page.Count < HaloClientMapper.DefaultPageSize)
+            // Raw rows, never mapped rows: a client with no id or name is dropped, and testing the
+            // mapped count would read that short page as the last one and abandon the rest.
+            if (rowCount < HaloClientMapper.DefaultPageSize)
                 break;
         }
 

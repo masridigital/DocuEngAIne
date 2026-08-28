@@ -16,11 +16,21 @@ public static class HaloClientMapper
     public const int MaxPageSize = 200;
 
     public static IReadOnlyList<ExternalCompanyDto> MapClients(string mcpBody)
+        => MapClients(mcpBody, out _);
+
+    /// <summary>
+    /// Maps one page. <paramref name="rowCount"/> is the number of rows Halo returned, which is NOT the
+    /// number mapped — a client with no id or no name is dropped. Paging must turn on the raw count, or
+    /// one unmappable client ends the pull and the run still reports Succeeded.
+    /// </summary>
+    public static IReadOnlyList<ExternalCompanyDto> MapClients(string mcpBody, out int rowCount)
     {
         var payload = UnwrapMcpPayload(mcpBody);
         var companies = new List<ExternalCompanyDto>();
+        rowCount = 0;
         foreach (var client in EnumerateClients(payload))
         {
+            rowCount++;
             var mapped = MapClient(client);
             if (mapped is not null)
                 companies.Add(mapped);

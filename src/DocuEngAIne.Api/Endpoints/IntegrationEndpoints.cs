@@ -4,6 +4,7 @@ using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Core.Mcp;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
+using DocuEngAIne.Infrastructure.Integrations;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -92,77 +93,11 @@ public static class IntegrationEndpoints
             return Results.Ok(items.Select(MapIntegration));
         });
 
-        group.MapGet("/{id:guid}", async (Guid id, DocuEngAIneDbContext db, ICurrentUser user, CancellationToken ct) =>
-        {
-            var connection = await db.IntegrationConnections.ForTenant(user).AsNoTracking()
-                .FirstOrDefaultAsync(i => i.Id == id, ct);
-            return connection is null ? Results.NotFound() : Results.Ok(MapIntegration(connection));
-        });
+        group.MapGet("/{id:guid}", GetIntegrationAsync);
 
-        group.MapPost("", async (
-            [FromBody] CreateIntegrationRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            CancellationToken ct) =>
-        {
-            if (user.TenantId is null)
-                return Results.Unauthorized();
+        group.MapPost("", CreateIntegrationAsync);
 
-            var connection = new IntegrationConnection
-            {
-                TenantId = user.TenantId.Value,
-                Provider = request.Provider,
-                DisplayName = request.DisplayName,
-                ConfigJson = request.ConfigJson,
-                AuthSecretName = request.AuthSecretName,
-                McpServerId = request.McpServerId,
-                IsEnabled = request.IsEnabled ?? true,
-                Status = IntegrationStatus.Disconnected,
-                SkipInactive = request.SkipInactive ?? true,
-                SkipContacts = request.SkipContacts ?? false,
-                SkipLocations = request.SkipLocations ?? false,
-                SkipAssets = request.SkipAssets ?? false,
-                AutoUpdateAssetNames = request.AutoUpdateAssetNames ?? false,
-                UpdateCompanyDetails = request.UpdateCompanyDetails ?? false,
-            };
-            db.IntegrationConnections.Add(connection);
-            await db.SaveChangesAsync(ct);
-            return Results.Created($"/api/integrations/{connection.Id}", MapIntegration(connection));
-        });
-
-        group.MapPut("/{id:guid}", async (
-            Guid id,
-            [FromBody] UpdateIntegrationRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            CancellationToken ct) =>
-        {
-            var connection = await db.IntegrationConnections.ForTenant(user).FirstOrDefaultAsync(i => i.Id == id, ct);
-            if (connection is null)
-                return Results.NotFound();
-
-            connection.DisplayName = request.DisplayName ?? connection.DisplayName;
-            connection.ConfigJson = request.ConfigJson ?? connection.ConfigJson;
-            connection.AuthSecretName = request.AuthSecretName ?? connection.AuthSecretName;
-            if (request.McpServerId.HasValue)
-                connection.McpServerId = request.McpServerId;
-            if (request.IsEnabled.HasValue)
-                connection.IsEnabled = request.IsEnabled.Value;
-            if (request.SkipInactive.HasValue)
-                connection.SkipInactive = request.SkipInactive.Value;
-            if (request.SkipContacts.HasValue)
-                connection.SkipContacts = request.SkipContacts.Value;
-            if (request.SkipLocations.HasValue)
-                connection.SkipLocations = request.SkipLocations.Value;
-            if (request.SkipAssets.HasValue)
-                connection.SkipAssets = request.SkipAssets.Value;
-            if (request.AutoUpdateAssetNames.HasValue)
-                connection.AutoUpdateAssetNames = request.AutoUpdateAssetNames.Value;
-            if (request.UpdateCompanyDetails.HasValue)
-                connection.UpdateCompanyDetails = request.UpdateCompanyDetails.Value;
-            await db.SaveChangesAsync(ct);
-            return Results.NoContent();
-        });
+        group.MapPut("/{id:guid}", UpdateIntegrationAsync);
 
         group.MapDelete("/{id:guid}", async (Guid id, DocuEngAIneDbContext db, ICurrentUser user, CancellationToken ct) =>
         {
@@ -258,6 +193,170 @@ public static class IntegrationEndpoints
         return Results.Created($"/api/mcp/servers/{server.Id}", MapServer(server));
     }
 
+    public static async Task<IResult> GetIntegrationAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken ct = default)
+    {
+        var connection = await db.IntegrationConnections.ForTenant(user).AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == id, ct);
+        return connection is null ? Results.NotFound() : Results.Ok(MapIntegration(connection));
+    }
+
+    public static async Task<IResult> UpdateIntegrationAsync(
+        Guid id,
+        [FromBody] UpdateIntegrationRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken ct = default)
+    {
+        var connection = await db.IntegrationConnections.ForTenant(user).FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (connection is null)
+            return Results.NotFound();
+
+        connection.DisplayName = request.DisplayName ?? connection.DisplayName;
+        connection.ConfigJson = request.ConfigJson ?? connection.ConfigJson;
+        connection.AuthSecretName = request.AuthSecretName ?? connection.AuthSecretName;
+        if (request.McpServerId.HasValue)
+            connection.McpServerId = request.McpServerId;
+        if (request.IsEnabled.HasValue)
+            connection.IsEnabled = request.IsEnabled.Value;
+        if (request.SkipInactive.HasValue)
+            connection.SkipInactive = request.SkipInactive.Value;
+        if (request.SkipContacts.HasValue)
+            connection.SkipContacts = request.SkipContacts.Value;
+        if (request.SkipLocations.HasValue)
+            connection.SkipLocations = request.SkipLocations.Value;
+        if (request.SkipAssets.HasValue)
+            connection.SkipAssets = request.SkipAssets.Value;
+        if (request.AutoUpdateAssetNames.HasValue)
+            connection.AutoUpdateAssetNames = request.AutoUpdateAssetNames.Value;
+        if (request.UpdateCompanyDetails.HasValue)
+            connection.UpdateCompanyDetails = request.UpdateCompanyDetails.Value;
+        // Zero (or negative) clears the override and hands cadence back to the detected plan;
+        // SyncCadencePolicy already ignores non-positive values, so storing null keeps the two ways
+        // of saying "no override" from disagreeing in the API response.
+        if (request.SyncIntervalMinutesOverride.HasValue)
+        {
+            connection.SyncIntervalMinutesOverride = request.SyncIntervalMinutesOverride.Value > 0
+                ? request.SyncIntervalMinutesOverride.Value
+                : null;
+        }
+        await db.SaveChangesAsync(ct);
+        return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Creates an integration. StackJack Compact is built in: for a Compact-backed provider the caller
+    /// supplies a Key Vault secret name and nothing else, and the tenant's Compact registration is
+    /// resolved — or created once, at <see cref="McpServerDefaults.StackJackCompactEndpoint"/> — here.
+    /// An explicit <c>McpServerId</c> still wins, for anyone pointing at a specific server.
+    /// </summary>
+    public static async Task<IResult> CreateIntegrationAsync(
+        [FromBody] CreateIntegrationRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken ct = default)
+    {
+        if (user.TenantId is null)
+            return Results.Unauthorized();
+
+        var secretName = string.IsNullOrWhiteSpace(request.AuthSecretName) ? null : request.AuthSecretName.Trim();
+        var mcpServerId = request.McpServerId;
+
+        if (mcpServerId is Guid explicitId)
+        {
+            // Checked here rather than at first sync: an id belonging to another tenant, or a typo,
+            // would otherwise sit on the connection until someone pressed Sync and got "not found".
+            if (!await db.McpServers.ForTenant(user).AnyAsync(s => s.Id == explicitId, ct))
+                return Results.BadRequest(new { message = "McpServerId does not match an MCP server for this tenant." });
+        }
+        else if (McpServerDefaults.IsCompactBacked(request.Provider))
+        {
+            var compact = await db.McpServers.ForTenant(user)
+                .Where(s => s.Kind == McpServerKind.StackJackCompact)
+                .OrderByDescending(s => s.Enabled)
+                .ThenBy(s => s.CreatedAt)
+                .FirstOrDefaultAsync(ct);
+
+            if (compact is null)
+            {
+                if (secretName is null)
+                {
+                    return Results.BadRequest(new
+                    {
+                        message = "AuthSecretName is required: it is the Key Vault secret name holding this tenant's "
+                            + "StackJack Compact API key. Supply it, or link an existing server with McpServerId.",
+                    });
+                }
+
+                compact = new McpServer
+                {
+                    TenantId = user.TenantId.Value,
+                    Name = McpServerDefaults.StackJackCompactName,
+                    Kind = McpServerKind.StackJackCompact,
+                    Transport = McpTransport.Http,
+                    EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+                    Enabled = true,
+                    AuthSecretName = secretName,
+                };
+                db.McpServers.Add(compact);
+                await db.SaveChangesAsync(ct);
+            }
+            else if (string.IsNullOrWhiteSpace(compact.AuthSecretName))
+            {
+                // Filling in a registration that never carried a secret name is not an overwrite.
+                // But if the caller supplied nothing either, the connection would be created against a
+                // server with no credential and every sync would fail later as an opaque vendor 401.
+                if (string.IsNullOrWhiteSpace(secretName))
+                {
+                    return Results.BadRequest(
+                        $"MCP server '{compact.Name}' has no Key Vault secret name, so this integration would have "
+                        + "no credential to authenticate with. Supply authSecretName.");
+                }
+
+                compact.AuthSecretName = secretName;
+            }
+            else if (secretName is not null
+                && !string.Equals(compact.AuthSecretName, secretName, StringComparison.OrdinalIgnoreCase))
+            {
+                // Deliberately neither of the silent options. Reusing the stored name would
+                // authenticate with a credential the admin did not name; rewriting it would repoint
+                // every other integration already running through this server. Make them choose.
+                return Results.Conflict(new
+                {
+                    message = $"MCP server '{compact.Name}' already points at Key Vault secret '{compact.AuthSecretName}'. "
+                        + "Omit AuthSecretName to reuse it, pass McpServerId to use a different server, or update the "
+                        + "server itself at PUT /api/mcp/servers/{id} if the credential really moved.",
+                });
+            }
+
+            mcpServerId = compact.Id;
+        }
+
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = request.Provider,
+            DisplayName = request.DisplayName,
+            ConfigJson = request.ConfigJson,
+            AuthSecretName = secretName,
+            McpServerId = mcpServerId,
+            IsEnabled = request.IsEnabled ?? true,
+            Status = IntegrationStatus.Disconnected,
+            SkipInactive = request.SkipInactive ?? true,
+            SkipContacts = request.SkipContacts ?? false,
+            SkipLocations = request.SkipLocations ?? false,
+            SkipAssets = request.SkipAssets ?? false,
+            AutoUpdateAssetNames = request.AutoUpdateAssetNames ?? false,
+            UpdateCompanyDetails = request.UpdateCompanyDetails ?? false,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync(ct);
+        return Results.Created($"/api/integrations/{connection.Id}", MapIntegration(connection));
+    }
+
     public static async Task<IResult> SyncAsync(
         Guid id,
         [FromBody] SyncPayloadRequest? request,
@@ -317,6 +416,15 @@ public static class IntegrationEndpoints
         i.SkipAssets,
         i.AutoUpdateAssetNames,
         i.UpdateCompanyDetails,
+        StackJackPlan = i.StackJackPlan.ToString(),
+        i.MonthlyCallLimit,
+        i.PlanDetectedAt,
+        i.SyncIntervalMinutesOverride,
+        // Derived, never stored: the cadence the detected allowance supports, and when a check would
+        // next fall due at that cadence. Null means "manual only" — no allowance has been detected.
+        // Nothing runs these on a timer yet; there is no scheduler.
+        SyncIntervalMinutes = SyncCadencePolicy.IntervalMinutesFor(i),
+        NextSyncDueAt = SyncCadencePolicy.NextDueAt(i),
         i.CreatedAt,
         i.UpdatedAt,
     };
@@ -382,7 +490,9 @@ public record UpdateIntegrationRequest(
     bool? SkipLocations = null,
     bool? SkipAssets = null,
     bool? AutoUpdateAssetNames = null,
-    bool? UpdateCompanyDetails = null);
+    bool? UpdateCompanyDetails = null,
+    // Minutes between scheduled checks. Omit to leave as-is; 0 clears the override.
+    int? SyncIntervalMinutesOverride = null);
 
 public record SyncPayloadRequest(List<SyncCompanyDto>? Companies = null);
 

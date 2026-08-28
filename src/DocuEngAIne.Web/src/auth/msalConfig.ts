@@ -95,7 +95,15 @@ export class InteractionInProgressError extends Error {
 async function redirectToSignIn(request: RedirectRequest): Promise<never> {
   if (!redirecting) {
     redirecting = true
-    await msalInstance?.acquireTokenRedirect(request)
+    try {
+      await msalInstance?.acquireTokenRedirect(request)
+    } catch (err) {
+      // acquireTokenRedirect normally never returns -- the page navigates away. If it rejects
+      // instead (a concurrent interaction, a blocked navigation), the latch must be released or
+      // every later acquisition throws without anyone ever being sent to sign in, until a reload.
+      redirecting = false
+      throw err
+    }
   }
   throw new InteractionInProgressError()
 }
