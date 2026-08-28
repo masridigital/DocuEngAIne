@@ -5,6 +5,9 @@ namespace DocuEngAIne.Infrastructure.Integrations;
 
 /// <summary>
 /// Maps StackJack Compact <c>halo_list_clients</c> JSON (vendor passthrough, often JSON-RPC wrapped) to company DTOs.
+/// Live list objects use <c>id</c>, <c>name</c>, <c>inactive</c>, <c>ref</c> (slug), <c>override_org_website</c>,
+/// and <c>stopped</c>. List is the sync source — do not call <c>halo_get_client</c>.
+/// Email/phone override fields are not stored (no matching <see cref="ExternalCompanyDto"/> properties).
 /// </summary>
 public static class HaloClientMapper
 {
@@ -53,10 +56,11 @@ public static class HaloClientMapper
         return new ExternalCompanyDto(
             ExternalId: id,
             Name: name.Trim(),
+            Slug: ReadString(client, "ref"),
             PrimaryDomain: ReadString(client, "primarydomain", "primary_domain", "primaryDomain"),
             City: ReadString(client, "city"),
             State: ReadString(client, "state", "county"),
-            Website: ReadString(client, "website", "websiteurl", "website_url"),
+            Website: ReadString(client, "override_org_website", "website", "websiteurl", "website_url"),
             Address: ReadString(client, "address", "address1", "address_1"),
             IsInactive: ReadInactive(client));
     }
@@ -79,6 +83,14 @@ public static class HaloClientMapper
                 if (string.Equals(s, "active", StringComparison.OrdinalIgnoreCase))
                     return false;
             }
+        }
+
+        if (TryGetProperty(client, out var stopped, "stopped"))
+        {
+            if (stopped.ValueKind == JsonValueKind.Number && stopped.TryGetInt32(out var stoppedN))
+                return stoppedN != 0;
+            if (stopped.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                return stopped.GetBoolean();
         }
 
         if (TryGetProperty(client, out var active, "active", "isactive", "is_active", "isActive"))
