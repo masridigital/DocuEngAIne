@@ -90,6 +90,16 @@ Swagger UI is available at `/swagger` in Development.
 4. Set `EntraId:Authority` to `https://login.microsoftonline.com/{tenant-id}/v2.0` and `EntraId:Audience` to `api://{client-id}`.
 5. (Optional) Add app roles `Owner`, `Admin`, `Contributor`, `Reader` and assign users.
 
+The SPA signs in with MSAL (redirect flow) and attaches a bearer token to every API call, so it needs the same registration at build time. Copy `src/DocuEngAIne.Web/.env.example` to `.env` for local dev:
+
+| Vite variable | Value |
+|---|---|
+| `VITE_ENTRA_CLIENT_ID` | Application (client) ID |
+| `VITE_ENTRA_AUTHORITY` | `https://login.microsoftonline.com/{tenant-id}/v2.0` |
+| `VITE_ENTRA_API_SCOPE` | `api://{client-id}/access` |
+
+These are inlined into the bundle at build time — the CI job supplies them from repository secrets. With none set the SPA renders a notice naming the missing variables rather than failing blank.
+
 ## Azure Infrastructure
 
 Deploy with Bicep:
@@ -120,10 +130,12 @@ The app reads `ConnectionStrings:DocuEngAIne` from Key Vault via a Key Vault ref
 
 `.github/workflows/azure-deploy.yml`:
 
-1. Builds the React SPA into the API's `wwwroot/`.
-2. Builds, tests, and publishes the .NET API.
+1. Builds the React SPA into the API's `wwwroot/` (with the `VITE_ENTRA_*` values above).
+2. Builds, tests, and publishes the .NET API, and builds a self-contained EF migrations bundle.
 3. Deploys Bicep infrastructure.
-4. Deploys the published zip to Azure App Service.
+4. **Applies migrations** with the bundle, then deploys the published zip to Azure App Service.
+
+The `migrate` job runs between `infra` and `deploy-api`, and `deploy-api` depends on it — a failed migration blocks the deploy rather than shipping code against a schema that does not exist. `sql.bicep` only allows Azure services, which does not cover GitHub-hosted runners, so the job opens a run-scoped SQL firewall rule for the runner IP and removes it afterwards.
 
 Required GitHub secrets:
 
@@ -131,8 +143,10 @@ Required GitHub secrets:
 - `AZURE_SUBSCRIPTION_ID`
 - `SQL_ADMIN_LOGIN`
 - `SQL_ADMIN_PASSWORD`
-- `ENTRA_AUTHORITY`
+- `ENTRA_AUTHORITY` (also used for the SPA build)
 - `ENTRA_AUDIENCE`
+- `ENTRA_CLIENT_ID`
+- `ENTRA_API_SCOPE`
 
 ## Database Migrations
 
@@ -142,7 +156,9 @@ Create a new migration:
 dotnet ef migrations add MigrationName --project src/DocuEngAIne.Api --startup-project src/DocuEngAIne.Api --output-dir Data/Migrations
 ```
 
-Apply in production via a CI step or from an Azure Pipelines/SQL deployment task after the infra job completes.
+Production migrations are applied by the `migrate` job in `.github/workflows/azure-deploy.yml`, using an EF migrations bundle built during CI.
+
+> The EF model snapshot still lags the hand-written Phase 2 migrations, and `DependencyInjection` suppresses `PendingModelChangesWarning` to compensate. Run `./scripts/reconcile-model-snapshot.sh` (needs the .NET 10 SDK) before adding any new migration — it regenerates the snapshot and fails unless the result is a pure no-op. See [`docs/NEXT-ITEMS.md`](docs/NEXT-ITEMS.md).
 
 ## Health Checks
 
@@ -189,6 +205,8 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 | POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, CIPP, or Meraki live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations`), or payload upsert. Other-tenant → 404 |
 | GET | `/api/integrations/{id}/runs` | Recent sync runs |
 | GET | `/api/integrations/{id}/mappings` | External→local mappings |
+
+The MCP client speaks Streamable HTTP: it runs the `initialize` handshake, echoes `Mcp-Session-Id` and `MCP-Protocol-Version`, sends `Accept: application/json, text/event-stream`, and unwraps `text/event-stream` replies. A configured `AuthSecretName` that cannot be resolved throws rather than sending an unauthenticated request.
 
 MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi). **Composio** (`https://connect.composio.dev/mcp`) is the 1000+ app Connect MCP. Auth is `McpServer.AuthSecretName` (Key Vault name only).
 
