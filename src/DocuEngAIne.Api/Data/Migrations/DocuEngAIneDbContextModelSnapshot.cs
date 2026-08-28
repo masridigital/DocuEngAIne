@@ -460,6 +460,52 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.ToTable("KeeperLinks");
                 });
 
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.ResourceLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("FromId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FromType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("Label")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ToId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ToType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ToType", "ToId");
+
+                    b.HasIndex("TenantId", "FromType", "FromId", "ToType", "ToId")
+                        .IsUnique();
+
+                    b.ToTable("ResourceLinks");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.ResourceRoleAssignment", b =>
                 {
                     b.Property<Guid>("Id")
@@ -841,6 +887,18 @@ namespace DocuEngAIne.Api.Data.Migrations
                 {
                     b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
                         .WithMany("KeeperLinks")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.ResourceLink", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

@@ -420,3 +420,14 @@ body {
   padding: 6px 12px;
   font-size: 0.85rem;
 }
+
+.link-create {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.link-create .input {
+  width: 100%;
+}
+

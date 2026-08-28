@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { createCompany, useCompanies, useCompany, type Company, type RelatedListItem } from '../hooks/useApi'
+import { createCompany, createResourceLink, useCompanies, useCompany, type Company, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
 
 function slugify(value: string) {
   return value
@@ -208,8 +208,118 @@ function RelatedSection({
   )
 }
 
+
+const linkTypes = ['Asset', 'Document', 'Runbook', 'KeeperLink', 'Company'] as const
+
+function hrefForLink(type: string, id: string) {
+  switch (type) {
+    case 'Company':
+      return `/companies/${id}`
+    case 'Asset':
+      return '/assets'
+    case 'Document':
+      return '/documents'
+    case 'Runbook':
+      return '/runbooks'
+    case 'KeeperLink':
+      return '/keeper'
+    default:
+      return '#'
+  }
+}
+
+function RelatedLinksSection({
+  companyId,
+  count,
+  items,
+  onCreated,
+}: {
+  companyId: string
+  count?: number
+  items?: RelatedLinkItem[] | null
+  onCreated: () => Promise<unknown>
+}) {
+  const list = items ?? []
+  const [toType, setToType] = useState<string>('Asset')
+  const [toId, setToId] = useState('')
+  const [label, setLabel] = useState('')
+  const [formError, setFormError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  async function onCreate(e: FormEvent) {
+    e.preventDefault()
+    setFormError(null)
+    const id = toId.trim()
+    if (!id) {
+      setFormError('Id is required.')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await createResourceLink({
+        fromType: 'Company',
+        fromId: companyId,
+        toType,
+        toId: id,
+        label: label.trim() || null,
+      })
+      setToId('')
+      setLabel('')
+      await onCreated()
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : 'Failed to create link.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <section className="panel related-panel">
+      <h2>
+        Related
+        <span className="muted"> {count ?? list.length}</span>
+      </h2>
+      {list.length === 0 ? (
+        <p>No related records linked yet.</p>
+      ) : (
+        <ul className="related-list">
+          {list.map((item) => (
+            <li key={item.id}>
+              <span className="muted">{item.entityType}</span>{' '}
+              <Link to={hrefForLink(item.entityType, item.entityId)}>{item.name}</Link>
+              {item.label ? <span className="muted"> · {item.label}</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+      <form className="link-create" onSubmit={onCreate}>
+        <label>
+          Type
+          <select className="input" value={toType} onChange={(e) => setToType(e.target.value)}>
+            {linkTypes.map((type) => (
+              <option key={type} value={type}>{type}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Id
+          <input className="input" value={toId} onChange={(e) => setToId(e.target.value)} placeholder="record id" />
+        </label>
+        <label>
+          Label
+          <input className="input" value={label} onChange={(e) => setLabel(e.target.value)} placeholder="optional" />
+        </label>
+        <button className="btn" type="submit" disabled={submitting}>
+          {submitting ? 'Linking…' : 'Add link'}
+        </button>
+      </form>
+      {formError && <p className="error">{formError}</p>}
+    </section>
+  )
+}
+
 function CompanyDetail({ id }: { id: string }) {
-  const { data: company, error, isLoading } = useCompany(id)
+  const { data: company, error, isLoading, mutate } = useCompany(id)
 
   return (
     <div className="page">
@@ -257,6 +367,12 @@ function CompanyDetail({ id }: { id: string }) {
               count={company.counts?.keeperLinks}
               items={company.keeperLinks}
               empty="No Keeper links for this company."
+            />
+            <RelatedLinksSection
+              companyId={company.id}
+              count={company.counts?.relatedLinks}
+              items={company.relatedLinks}
+              onCreated={() => mutate()}
             />
           </div>
         </>

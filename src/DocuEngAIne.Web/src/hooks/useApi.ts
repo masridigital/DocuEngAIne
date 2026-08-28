@@ -14,6 +14,15 @@ export type CompanyCounts = {
   documents: number
   runbooks: number
   keeperLinks: number
+  relatedLinks?: number
+}
+
+export type RelatedLinkItem = {
+  id: string
+  entityType: string
+  entityId: string
+  name: string
+  label?: string | null
 }
 
 export type Company = {
@@ -38,6 +47,7 @@ export type Company = {
   documents?: RelatedListItem[] | null
   runbooks?: RelatedListItem[] | null
   keeperLinks?: RelatedListItem[] | null
+  relatedLinks?: RelatedLinkItem[] | null
 }
 
 export type CreateCompanyInput = {
@@ -244,6 +254,18 @@ async function postJson<T>(url: string, body?: unknown): Promise<T> {
 
 export function createCompany(input: CreateCompanyInput) {
   return postJson<Company>('/api/companies', input)
+}
+
+export type CreateResourceLinkInput = {
+  fromType: string
+  fromId: string
+  toType: string
+  toId: string
+  label?: string | null
+}
+
+export function createResourceLink(input: CreateResourceLinkInput) {
+  return postJson<unknown>('/api/links', input)
 }
 
 export function createMcpServer(input: CreateMcpServerInput) {

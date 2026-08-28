@@ -1,4 +1,5 @@
 using DocuEngAIne.Core.Entities;
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -175,6 +176,9 @@ public static class CompanyEndpoints
         var runbooksQ = db.Runbooks.ForTenant(user).AsNoTracking().Where(r => r.CompanyId == companyId);
         var keeperQ = db.KeeperLinks.ForTenant(user).AsNoTracking().Where(k => k.CompanyId == companyId);
 
+        var relatedLinks = await LinkEndpoints.LoadRelatedForEntityAsync(
+            db, user, LinkEntityType.Company, companyId, take, cancellationToken);
+
         return new CompanyRelatedSnapshot(
             await assetsQ.CountAsync(cancellationToken),
             await assetsQ.OrderByDescending(a => a.UpdatedAt).Take(take)
@@ -187,7 +191,9 @@ public static class CompanyEndpoints
                 .Select(r => new RelatedListItem(r.Id, r.Title, r.UpdatedAt, r.Runs.Count())).ToListAsync(cancellationToken),
             await keeperQ.CountAsync(cancellationToken),
             await keeperQ.OrderByDescending(k => k.UpdatedAt).Take(take)
-                .Select(k => new RelatedListItem(k.Id, k.Name, k.UpdatedAt)).ToListAsync(cancellationToken));
+                .Select(k => new RelatedListItem(k.Id, k.Name, k.UpdatedAt)).ToListAsync(cancellationToken),
+            relatedLinks.Count,
+            relatedLinks.Items);
     }
 
     private static object Map(Company c, CompanyRelatedSnapshot? related = null)
@@ -217,6 +223,7 @@ public static class CompanyEndpoints
             Documents = related?.Documents,
             Runbooks = related?.Runbooks,
             KeeperLinks = related?.KeeperLinks,
+            RelatedLinks = related?.RelatedLinks,
         };
     }
 
@@ -227,6 +234,7 @@ public static class CompanyEndpoints
         related.Documents,
         related.Runbooks,
         related.KeeperLinks,
+        related.RelatedLinks,
     };
 
     private static object MapCounts(CompanyRelatedSnapshot related) => new
@@ -235,6 +243,7 @@ public static class CompanyEndpoints
         Documents = related.DocumentCount,
         Runbooks = related.RunbookCount,
         KeeperLinks = related.KeeperLinkCount,
+        RelatedLinks = related.RelatedLinkCount,
     };
 }
 
@@ -248,7 +257,9 @@ public sealed record CompanyRelatedSnapshot(
     int RunbookCount,
     IReadOnlyList<RelatedListItem> Runbooks,
     int KeeperLinkCount,
-    IReadOnlyList<RelatedListItem> KeeperLinks);
+    IReadOnlyList<RelatedListItem> KeeperLinks,
+    int RelatedLinkCount,
+    IReadOnlyList<RelatedLinkListItem> RelatedLinks);
 
 public record CreateCompanyRequest(
     string Name,

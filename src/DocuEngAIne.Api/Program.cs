@@ -70,6 +70,7 @@ app.MapIntegrationEndpoints();
 app.MapAssetEndpoints();
 app.MapExpirationEndpoints();
 app.MapFlagEndpoints();
+app.MapLinkEndpoints();
 app.MapDocumentEndpoints();
 app.MapKeeperLinkEndpoints();
 app.MapRunbookEndpoints();

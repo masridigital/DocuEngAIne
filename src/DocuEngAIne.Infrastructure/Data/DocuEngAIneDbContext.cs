@@ -37,6 +37,7 @@ public class DocuEngAIneDbContext : DbContext
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<FlagDefinition> FlagDefinitions => Set<FlagDefinition>();
     public DbSet<FlagAssignment> FlagAssignments => Set<FlagAssignment>();
+    public DbSet<ResourceLink> ResourceLinks => Set<ResourceLink>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

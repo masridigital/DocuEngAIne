@@ -168,6 +168,16 @@ public static class ModelBuilderExtensions
             a.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<ResourceLink>(l =>
+        {
+            l.Property(x => x.FromType).HasMaxLength(32);
+            l.Property(x => x.ToType).HasMaxLength(32);
+            l.Property(x => x.Label).HasMaxLength(256);
+            l.HasIndex(x => new { x.TenantId, x.FromType, x.FromId, x.ToType, x.ToId }).IsUnique();
+            l.HasIndex(x => new { x.TenantId, x.ToType, x.ToId });
+            l.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         modelBuilder.Entity<AuditLog>(a =>
         {
             a.HasIndex(x => x.TenantId);

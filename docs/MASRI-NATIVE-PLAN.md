@@ -226,7 +226,7 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Company websites | Asset layout + expiration later. | later | |
 | Company expirations | Date fields (`FieldDefinition.IsExpiration` on Date/DateTime) plus optional `Asset.ExpiresAt`, rolled up. `GET /api/expirations?companyId=` is ForTenant; unknown/other-tenant company returns empty (Hudu `/c/{id}/expirations` 500s — do not copy). Hide expired unless `showExpired=true`. | Phase2C | `/expirations` or `companyId` filter. Not Hudu chrome. |
 | Company portal | Entra external ID / magic-link read-only. | later | |
-| Company related items | `ResourceLink` graph later. This slice is company-scoped lists. | later | Lists ≠ relationship graph. |
+| Company related items | `ResourceLink` (FromType/FromId ↔ ToType/ToId, optional Label). Types: Company, Asset, Document, Runbook, KeeperLink. Unique per tenant pair. Both ends `ForTenant` or 400. `GET/POST/DELETE /api/links`. Company detail includes `relatedLinks` count + short list. Not a graph viz; not Hudu tabs. `AssetDocumentLink` stays the asset↔doc convenience. Graph query later. | Phase2C | `/companies/:id` Related section. Other-tenant entity = 400. |
 | Company museum | Novelty. Skip. | skip | |
 | Asset layouts (all types) | One `AssetType` + `FieldDefinition` model. Map from Halo/Ninja. Do not clone 32 layouts. | Phase1 | Create types as ops needs them. |
 | Admin (users, groups, layouts, API, import/export, SMTP, license) | Entra + Azure. Import only for Hudu migration. | later | Audit is Phase1. |

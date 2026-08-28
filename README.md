@@ -41,6 +41,7 @@ tests/                      # xUnit + EF InMemory tests
 - **ResourceRoleAssignment** — object-level RBAC overriding tenant-wide roles.
 - **AuditLog** — action trail (tenant-scoped where applicable).
 - **FlagDefinition / FlagAssignment** — named color labels on companies, assets, documents, runbooks, and Keeper links. Drive the review queue. No local secrets.
+- **ResourceLink** — directed related-item links between Company, Asset, Document, Runbook, and KeeperLink. Optional label. Not a graph visualization. `AssetDocumentLink` remains the asset↔document convenience. No local secrets.
 
 All tenant-scoped queries use `ForTenant(currentUser)`; `SaveChangesAsync` stamps `TenantId` and audit timestamps automatically.
 
@@ -163,7 +164,7 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/companies` | List companies (`q` search) |
-| GET | `/api/companies/{id}` | Company detail + related counts/lists |
+| GET | `/api/companies/{id}` | Company detail + related counts/lists (includes `relatedLinks`) |
 | GET | `/api/companies/{id}/summary` | Related counts/lists only |
 | POST | `/api/companies` | Create company |
 | PUT | `/api/companies/{id}` | Update company |
@@ -220,6 +221,16 @@ Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipC
 | POST | `/api/flags/{id}/assign` | Assign to `{ entityType, entityId }` (`Company` \| `Asset` \| `Document` \| `Runbook` \| `KeeperLink`). Other-tenant entity → 400. |
 | DELETE | `/api/flags/{id}/assign/{entityType}/{entityId}` | Remove assignment |
 | GET | `/api/flags/review` | Flagged records for the review queue (`entityType` filter). Joins names via existing tables, `ForTenant`. |
+
+### Related items
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/links?type=&id=` | Links from or to that entity (`Company` \| `Asset` \| `Document` \| `Runbook` \| `KeeperLink`). `ForTenant`. |
+| POST | `/api/links` | Create `{ fromType, fromId, toType, toId, label? }`. Both ends must exist `ForTenant` or 400. Unique per tenant pair. |
+| DELETE | `/api/links/{id}` | Delete link |
+
+Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (other-end type + name). Not Hudu tabs; not a graph viz.
 
 ### Documents
 
@@ -292,7 +303,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] GET MCP server and integration by id; SQL cascade fix
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 
-> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), and `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), and `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), and `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), and `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
 
 
 ### Later
@@ -302,6 +313,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
 - [x] Flags (`GET/POST /api/flags`, assign, `/flags` review queue)
 - [x] Runbook runs (`POST/GET /api/runbooks/{id}/runs`, complete/cancel, `runCount`). Global Process Completion rollup later.
+- [x] Related items (`ResourceLink`, `GET/POST/DELETE /api/links`, company `relatedLinks`). Graph visualization later.
 - [ ] Client portal
 - [ ] Switch SQL auth to managed identity
 - [ ] One-time Hudu export migration (passwords → Keeper only)
