@@ -63,6 +63,55 @@ public class IntegrationSyncTests
         }
     }
 
+    private sealed class RecordingNinjaMcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public string OrganizationsJson { get; init; } = "[]";
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            int? after = null;
+            var pageSize = NinjaOrganizationMapper.DefaultPageSize;
+            if (!string.IsNullOrWhiteSpace(argumentsJson))
+            {
+                using var doc = JsonDocument.Parse(argumentsJson);
+                if (doc.RootElement.TryGetProperty("after", out var a) && a.ValueKind == JsonValueKind.Number)
+                    after = a.GetInt32();
+                if (doc.RootElement.TryGetProperty("pageSize", out var s) && s.ValueKind == JsonValueKind.Number)
+                    pageSize = s.GetInt32();
+            }
+
+            var inner = SliceOrganizationsJson(OrganizationsJson, after, pageSize);
+            var body = JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                id = "1",
+                result = new { content = new[] { new { type = "text", text = inner } } },
+            });
+            return Task.FromResult(body);
+        }
+
+        private static string SliceOrganizationsJson(string json, int? after, int pageSize)
+        {
+            using var doc = JsonDocument.Parse(json);
+            var items = new List<string>();
+            foreach (var org in doc.RootElement.EnumerateArray())
+            {
+                var id = org.GetProperty("id").GetInt32();
+                if (after is int afterId && id <= afterId)
+                    continue;
+                items.Add(org.GetRawText());
+                if (items.Count >= pageSize)
+                    break;
+            }
+            return "[" + string.Join(",", items) + "]";
+        }
+    }
+
     private static (DocuEngAIneDbContext Db, FakeCurrentUser User, IntegrationSyncService Sync) Create(IMcpClient? mcp = null)
     {
         var tenantId = Guid.NewGuid();
@@ -104,6 +153,35 @@ public class IntegrationSyncTests
             TenantId = user.TenantId.Value,
             Provider = IntegrationProvider.Halo,
             DisplayName = "Halo",
+            McpServerId = server.Id,
+            SkipInactive = skipInactive,
+            UpdateCompanyDetails = updateCompanyDetails,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+        return (server, connection);
+    }
+
+    private static async Task<(McpServer Server, IntegrationConnection Connection)> SeedNinjaCompactAsync(
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool skipInactive = true, bool updateCompanyDetails = false)
+    {
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            Transport = McpTransport.Http,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.NinjaOne,
+            DisplayName = "NinjaOne",
             McpServerId = server.Id,
             SkipInactive = skipInactive,
             UpdateCompanyDetails = updateCompanyDetails,
@@ -506,6 +584,181 @@ public class IntegrationSyncTests
             Assert.Empty(leaked);
             Assert.Null(await dbB.McpServers.ForTenant(userB).FirstOrDefaultAsync(s => s.Id == compactId));
             Assert.Null(await dbB.McpServers.ForTenant(userB).FirstOrDefaultAsync(s => s.Id == composioId));
+        }
+    }
+
+    [Fact]
+    public async Task Ninja_SyncAsync_Creates_Companies_Mappings_And_NinjaOrganizationId()
+    {
+        var mcp = new RecordingNinjaMcp { OrganizationsJson = NinjaOrganizationMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedNinjaCompactAsync(db, user);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(5, run.ItemsCreated);
+        Assert.Equal(0, run.ItemsSkipped);
+        Assert.Equal("ninja_list_organizations", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(server.Id, mcp.Calls[0].ServerId);
+        Assert.DoesNotContain("after", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"pageSize\":50", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("ninja_get_organization", mcp.Calls.Select(c => c.Tool));
+
+        var companies = await db.Companies.OrderBy(c => c.NinjaOrganizationId).ToListAsync();
+        Assert.Equal(5, companies.Count);
+        Assert.Equal("Masri Digital", companies[0].Name);
+        Assert.Equal("2", companies[0].NinjaOrganizationId);
+        Assert.Null(companies[0].HaloClientId);
+
+        var mappings = await db.IntegrationMappings.OrderBy(m => m.ExternalId).ToListAsync();
+        Assert.Equal(5, mappings.Count);
+        Assert.Equal("2", mappings[0].ExternalId);
+        Assert.Equal("company", mappings[0].ExternalType);
+        Assert.Equal(companies[0].Id, mappings[0].LocalEntityId);
+        Assert.Equal("23", mappings[^1].ExternalId);
+    }
+
+    [Fact]
+    public async Task Ninja_List_Organizations_Cursor_Second_CallToolAsync_Receives_After_23()
+    {
+        var mcp = new RecordingNinjaMcp { OrganizationsJson = NinjaOrganizationMapperTests.LiveCompactListFixture };
+        var (db, user, _) = Create(mcp);
+        var (server, _) = await SeedNinjaCompactAsync(db, user);
+
+        var companies = await NinjaOrganizationMapper.PullAsync(mcp, server.Id, pageSize: 5);
+
+        Assert.Equal(5, companies.Count);
+        Assert.Equal("2", companies[0].ExternalId);
+        Assert.Equal("Masri Digital", companies[0].Name);
+        Assert.Equal(2, mcp.Calls.Count);
+        Assert.All(mcp.Calls, c => Assert.Equal("ninja_list_organizations", c.Tool));
+        Assert.Equal(server.Id, mcp.Calls[0].ServerId);
+        Assert.DoesNotContain("after", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"pageSize\":5", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"after\":23", mcp.Calls[1].Args, StringComparison.Ordinal);
+        Assert.Contains("\"pageSize\":5", mcp.Calls[1].Args, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Ninja_SyncAsync_Does_Not_Clobber_Name_When_UpdateCompanyDetails_False()
+    {
+        var mcp = new RecordingNinjaMcp { OrganizationsJson = NinjaOrganizationMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.NinjaOne,
+            DisplayName = "NinjaOne",
+            McpServerId = server.Id,
+            UpdateCompanyDetails = false,
+        };
+        db.IntegrationConnections.Add(connection);
+        var company = new Company
+        {
+            TenantId = user.TenantId.Value,
+            Name = "Local Name",
+            Slug = "local-name",
+        };
+        db.Companies.Add(company);
+        await db.SaveChangesAsync();
+        db.IntegrationMappings.Add(new IntegrationMapping
+        {
+            TenantId = user.TenantId.Value,
+            IntegrationConnectionId = connection.Id,
+            ExternalId = "2",
+            ExternalType = "company",
+            LocalEntityType = nameof(Company),
+            LocalEntityId = company.Id,
+        });
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsUpdated);
+        Assert.Equal(4, run.ItemsCreated);
+        var masri = await db.Companies.SingleAsync(c => c.NinjaOrganizationId == "2");
+        Assert.Equal("Local Name", masri.Name);
+        Assert.Equal("2", masri.NinjaOrganizationId);
+    }
+
+    [Fact]
+    public async Task Ninja_SyncAsync_Missing_McpServerId_Fails_Without_Calling_Mcp()
+    {
+        var mcp = new RecordingNinjaMcp { OrganizationsJson = NinjaOrganizationMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.NinjaOne,
+            DisplayName = "NinjaOne",
+            AuthSecretName = "kv-name-only",
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        Assert.Contains("McpServerId", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Key Vault", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
+        Assert.Empty(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ninja_Other_Tenant_Connection_Sync_Returns_404_And_Does_Not_Call_Mcp()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var mcp = new RecordingNinjaMcp { OrganizationsJson = NinjaOrganizationMapperTests.LiveCompactListFixture };
+
+        Guid connectionBId;
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var server = new McpServer
+            {
+                TenantId = tenantB,
+                Name = "Compact B",
+                Kind = McpServerKind.StackJackCompact,
+                EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            };
+            dbB.McpServers.Add(server);
+            var connection = new IntegrationConnection
+            {
+                TenantId = tenantB,
+                Provider = IntegrationProvider.NinjaOne,
+                DisplayName = "NinjaOne B",
+                McpServerId = server.Id,
+            };
+            dbB.IntegrationConnections.Add(connection);
+            await dbB.SaveChangesAsync();
+            connectionBId = connection.Id;
+        }
+
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var sync = new IntegrationSyncService(dbA, userA, mcp, new NoopAudit());
+            var result = await IntegrationEndpoints.SyncAsync(connectionBId, null, sync, dbA, userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+            Assert.Empty(mcp.Calls);
+            Assert.Empty(await dbA.IntegrationConnections.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.SyncRuns.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
         }
     }
 }

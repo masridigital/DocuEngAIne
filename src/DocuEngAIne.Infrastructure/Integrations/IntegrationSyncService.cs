@@ -91,6 +91,26 @@ public class IntegrationSyncService : IIntegrationSyncService
             }
         }
 
+        if (connection.Provider == IntegrationProvider.NinjaOne)
+        {
+            if (connection.McpServerId is not Guid mcpId)
+            {
+                return await FailRunAsync(connection,
+                    "NinjaOne sync requires a linked StackJack Compact MCP server (McpServerId). AuthSecretName is a Key Vault name only; secrets are never stored in SQL.",
+                    cancellationToken);
+            }
+
+            try
+            {
+                var companies = await PullNinjaCompaniesAsync(mcpId, cancellationToken);
+                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return await FailRunAsync(connection, ex.Message, cancellationToken);
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(connection.AuthSecretName) && connection.McpServerId is null)
         {
             return await FailRunAsync(connection,
@@ -98,7 +118,7 @@ public class IntegrationSyncService : IIntegrationSyncService
                 cancellationToken);
         }
 
-        // Ninja/CIPP/Meraki/UniFi/Composio live pulls are out of scope this slice — payload path remains.
+        // CIPP/Meraki/UniFi/Composio live pulls are out of scope this slice — payload path remains.
         return await FailRunAsync(connection,
             "No sync payload supplied. Use SyncFromPayload (tests/importers) or wire MCP tool results into company upsert.",
             cancellationToken);
@@ -239,6 +259,20 @@ public class IntegrationSyncService : IIntegrationSyncService
         }
 
         return companies;
+    }
+
+    private async Task<IReadOnlyList<ExternalCompanyDto>> PullNinjaCompaniesAsync(
+        Guid mcpServerId,
+        CancellationToken cancellationToken)
+    {
+        var server = await _db.McpServers.ForTenant(_user)
+            .FirstOrDefaultAsync(s => s.Id == mcpServerId, cancellationToken)
+            ?? throw new InvalidOperationException("MCP server not found.");
+
+        if (server.Kind != McpServerKind.StackJackCompact)
+            throw new InvalidOperationException("NinjaOne company pull requires a StackJack Compact MCP server. Composio is not a NinjaOne connector.");
+
+        return await NinjaOrganizationMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
     }
 
     private async Task<SyncRun> FailRunAsync(IntegrationConnection connection, string error, CancellationToken cancellationToken)
