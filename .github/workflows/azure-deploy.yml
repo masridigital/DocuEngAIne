@@ -16,6 +16,8 @@ env:
   NODE_VERSION: '22'
   AZURE_RG: 'rg-docuengaine-prod'
   AZURE_LOCATION: 'eastus'
+  SQL_DATABASE_NAME: 'DocuEngAIne'
+  KEYVAULT_SQL_SECRET_NAME: 'ConnectionStrings--DocuEngAIne'
 
 jobs:
   build-and-test:
@@ -37,6 +39,10 @@ jobs:
 
       - name: Install and build SPA
         working-directory: src/DocuEngAIne.Web
+        env:
+          VITE_ENTRA_CLIENT_ID: ${{ secrets.ENTRA_CLIENT_ID }}
+          VITE_ENTRA_AUTHORITY: ${{ secrets.ENTRA_AUTHORITY }}
+          VITE_ENTRA_API_SCOPE: ${{ secrets.ENTRA_API_SCOPE }}
         run: |
           npm ci
           npm run build
@@ -54,12 +60,41 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: dotnet publish src/DocuEngAIne.Api/DocuEngAIne.Api.csproj -c Release -o ./publish --no-restore
 
+      - name: Restore .NET local tools
+        if: github.ref == 'refs/heads/main'
+        run: dotnet tool restore
+
+      # Produces a single self-contained linux-x64 executable ("efbundle") that
+      # applies every migration in src/DocuEngAIne.Api/Data/Migrations.
+      # ConnectionStrings__DocuEngAIne is a design-time placeholder only: the API's
+      # DI throws when it is empty, and nothing connects while the bundle is built.
+      # The real connection string is passed to the bundle at run time.
+      - name: Build EF migrations bundle
+        if: github.ref == 'refs/heads/main'
+        env:
+          ConnectionStrings__DocuEngAIne: 'Server=localhost;Database=DocuEngAIne;User ID=placeholder;Password=placeholder;TrustServerCertificate=True;'
+        run: |
+          dotnet ef migrations bundle \
+            --project src/DocuEngAIne.Api \
+            --startup-project src/DocuEngAIne.Api \
+            --configuration Release \
+            --self-contained -r linux-x64 \
+            -o efbundle --force
+
       - name: Upload artifact
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-artifact@v4
         with:
           name: api-publish
           path: ./publish
+          retention-days: 1
+
+      - name: Upload migrations bundle
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: efbundle
+          path: ./efbundle
           retention-days: 1
 
   infra:
@@ -96,10 +131,110 @@ jobs:
             }
           failOnStdErr: false
 
-  deploy-api:
+  # Applies EF migrations before any new code serves traffic. deploy-api is gated
+  # on this job, so a failed migration blocks the app deploy instead of shipping
+  # code against a schema that does not exist yet.
+  migrate:
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     needs: infra
+    steps:
+      - name: Download migrations bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: efbundle
+          path: ./efbundle-artifact
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      # infra/modules/sql.bicep only creates the 0.0.0.0 "Allow Azure services"
+      # rule, which does NOT cover GitHub-hosted runners. Open a temporary,
+      # run-scoped rule for this runner's public IP and remove it below.
+      - name: Open SQL firewall for this runner
+        run: |
+          set -euo pipefail
+          SERVER=$(az sql server list --resource-group "$AZURE_RG" --query "[0].name" -o tsv)
+          if [ -z "$SERVER" ]; then
+            echo "No SQL server found in resource group $AZURE_RG." >&2
+            exit 1
+          fi
+          RUNNER_IP=$(curl -sS --fail --max-time 20 https://api.ipify.org)
+          RULE="gh-actions-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "SQL_SERVER_NAME=$SERVER" >> "$GITHUB_ENV"
+          echo "SQL_FIREWALL_RULE=$RULE" >> "$GITHUB_ENV"
+          az sql server firewall-rule create \
+            --resource-group "$AZURE_RG" \
+            --server "$SERVER" \
+            --name "$RULE" \
+            --start-ip-address "$RUNNER_IP" \
+            --end-ip-address "$RUNNER_IP" \
+            --output none
+          echo "Opened temporary firewall rule '$RULE' on '$SERVER'."
+
+      - name: Apply database migrations
+        env:
+          SQL_ADMIN_LOGIN: ${{ secrets.SQL_ADMIN_LOGIN }}
+          SQL_ADMIN_PASSWORD: ${{ secrets.SQL_ADMIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          # Preferred source: the Key Vault secret provisioned by
+          # infra/modules/keyvault.bicep. Requires the deploying service
+          # principal to hold a Key Vault data-plane role (the vault is
+          # RBAC-authorized; Contributor alone is not enough).
+          CONNECTION_STRING=""
+          KV_NAME=$(az keyvault list --resource-group "$AZURE_RG" --query "[0].name" -o tsv || true)
+          if [ -n "$KV_NAME" ]; then
+            CONNECTION_STRING=$(az keyvault secret show \
+              --vault-name "$KV_NAME" \
+              --name "$KEYVAULT_SQL_SECRET_NAME" \
+              --query value -o tsv 2>/dev/null || true)
+          fi
+
+          if [ -n "$CONNECTION_STRING" ]; then
+            echo "::add-mask::$CONNECTION_STRING"
+            echo "Using connection string from Key Vault '$KV_NAME'."
+          else
+            # Fallback: rebuild the exact string infra/main.bicep composes, from
+            # the SQL admin secrets that already exist. No new secret needed.
+            echo "Key Vault secret unavailable; composing connection string from SQL admin secrets."
+            if [ -z "${SQL_ADMIN_LOGIN}" ] || [ -z "${SQL_ADMIN_PASSWORD}" ]; then
+              echo "Key Vault secret was unreadable and SQL_ADMIN_LOGIN/SQL_ADMIN_PASSWORD are not set." >&2
+              echo "Set those repository secrets, or grant the deploying service principal the" >&2
+              echo "Key Vault Secrets User role on the vault." >&2
+              exit 1
+            fi
+            FQDN=$(az sql server show \
+              --resource-group "$AZURE_RG" \
+              --name "$SQL_SERVER_NAME" \
+              --query fullyQualifiedDomainName -o tsv)
+            CONNECTION_STRING="Server=tcp:${FQDN},1433;Initial Catalog=${SQL_DATABASE_NAME};User ID=${SQL_ADMIN_LOGIN};Password=${SQL_ADMIN_PASSWORD};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
+            echo "::add-mask::$CONNECTION_STRING"
+          fi
+
+          # upload-artifact does not preserve the executable bit.
+          chmod +x ./efbundle-artifact/efbundle
+          ./efbundle-artifact/efbundle --connection "$CONNECTION_STRING"
+
+      - name: Close SQL firewall for this runner
+        if: always()
+        run: |
+          if [ -n "${SQL_SERVER_NAME:-}" ] && [ -n "${SQL_FIREWALL_RULE:-}" ]; then
+            az sql server firewall-rule delete \
+              --resource-group "$AZURE_RG" \
+              --server "$SQL_SERVER_NAME" \
+              --name "$SQL_FIREWALL_RULE" \
+              --output none \
+              || echo "Cleanup failed; remove firewall rule '$SQL_FIREWALL_RULE' from '$SQL_SERVER_NAME' manually."
+          fi
+
+  deploy-api:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    needs: migrate
     steps:
       - name: Download artifact
         uses: actions/download-artifact@v4
@@ -130,5 +265,7 @@ jobs:
       - name: Cleanup artifact
         uses: geekyeggo/delete-artifact@v4
         with:
-          name: api-publish
+          name: |
+            api-publish
+            efbundle
           failOnError: false

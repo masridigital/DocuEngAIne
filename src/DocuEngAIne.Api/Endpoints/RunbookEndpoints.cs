@@ -48,34 +48,7 @@ public static class RunbookEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
-                return badCompany;
-
-            var runbook = new Runbook
-            {
-                TenantId = user.TenantId!.Value,
-                Title = request.Title,
-                Slug = request.Slug ?? request.Title.ToLowerInvariant().Replace(' ', '-'),
-                Description = request.Description,
-                Tags = request.Tags,
-                IsPublished = request.IsPublished,
-                CompanyId = request.CompanyId,
-                Steps = request.Steps?.Select((s, i) => new RunbookStep
-                {
-                    Order = i + 1,
-                    Title = s.Title,
-                    Details = s.Details,
-                    StepType = s.StepType,
-                    IsRequired = s.IsRequired,
-                    ExpectedOutput = s.ExpectedOutput,
-                }).ToList() ?? [],
-            };
-
-            db.Runbooks.Add(runbook);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.Created($"/api/runbooks/{runbook.Id}", new { runbook.Id, runbook.Title, runbook.Slug });
-        });
+            await CreateAsync(request, db, user, cancellationToken));
 
         group.MapPut("/{id:guid}", async (
             Guid id,
@@ -83,44 +56,7 @@ public static class RunbookEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            var runbook = await db.Runbooks
-                .ForTenant(user)
-                .Include(r => r.Steps)
-                .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
-
-            if (runbook is null)
-                return Results.NotFound();
-
-            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
-                return badCompany;
-            if (request.CompanyId is Guid companyId)
-                runbook.CompanyId = companyId;
-
-            runbook.Title = request.Title ?? runbook.Title;
-            runbook.Slug = request.Slug ?? runbook.Slug;
-            runbook.Description = request.Description ?? runbook.Description;
-            runbook.Tags = request.Tags ?? runbook.Tags;
-            runbook.IsPublished = request.IsPublished ?? runbook.IsPublished;
-
-            if (request.Steps is not null)
-            {
-                db.RunbookSteps.RemoveRange(runbook.Steps);
-                runbook.Steps = request.Steps.Select((s, i) => new RunbookStep
-                {
-                    RunbookId = runbook.Id,
-                    Order = i + 1,
-                    Title = s.Title,
-                    Details = s.Details,
-                    StepType = s.StepType,
-                    IsRequired = s.IsRequired,
-                    ExpectedOutput = s.ExpectedOutput,
-                }).ToList();
-            }
-
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+            await UpdateAsync(id, request, db, user, cancellationToken));
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
@@ -235,6 +171,85 @@ public static class RunbookEndpoints
                 s.ExpectedOutput)).ToList(),
             runbook.UpdatedAt,
             runCount));
+    }
+
+    public static async Task<IResult> CreateAsync(
+        CreateRunbookRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+            return badCompany;
+
+        var runbook = new Runbook
+        {
+            TenantId = user.TenantId!.Value,
+            Title = request.Title,
+            Slug = request.Slug ?? request.Title.ToLowerInvariant().Replace(' ', '-'),
+            Description = request.Description,
+            Tags = request.Tags,
+            IsPublished = request.IsPublished,
+            CompanyId = request.CompanyId,
+            Steps = request.Steps?.Select((s, i) => new RunbookStep
+            {
+                Order = i + 1,
+                Title = s.Title,
+                Details = s.Details,
+                StepType = s.StepType,
+                IsRequired = s.IsRequired,
+                ExpectedOutput = s.ExpectedOutput,
+            }).ToList() ?? [],
+        };
+
+        db.Runbooks.Add(runbook);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.Created($"/api/runbooks/{runbook.Id}", new { runbook.Id, runbook.Title, runbook.Slug });
+    }
+
+    public static async Task<IResult> UpdateAsync(
+        Guid id,
+        UpdateRunbookRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var runbook = await db.Runbooks
+            .ForTenant(user)
+            .Include(r => r.Steps)
+            .FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (runbook is null)
+            return Results.NotFound();
+
+        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+            return badCompany;
+        if (request.CompanyId is Guid companyId)
+            runbook.CompanyId = companyId;
+
+        runbook.Title = request.Title ?? runbook.Title;
+        runbook.Slug = request.Slug ?? runbook.Slug;
+        runbook.Description = request.Description ?? runbook.Description;
+        runbook.Tags = request.Tags ?? runbook.Tags;
+        runbook.IsPublished = request.IsPublished ?? runbook.IsPublished;
+
+        if (request.Steps is not null)
+        {
+            db.RunbookSteps.RemoveRange(runbook.Steps);
+            runbook.Steps = request.Steps.Select((s, i) => new RunbookStep
+            {
+                RunbookId = runbook.Id,
+                Order = i + 1,
+                Title = s.Title,
+                Details = s.Details,
+                StepType = s.StepType,
+                IsRequired = s.IsRequired,
+                ExpectedOutput = s.ExpectedOutput,
+            }).ToList();
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
     }
 
     public static async Task<IResult> ListRecentRunsResultAsync(
