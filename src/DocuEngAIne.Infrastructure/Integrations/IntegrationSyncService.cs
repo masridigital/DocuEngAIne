@@ -612,9 +612,11 @@ public class IntegrationSyncService : IIntegrationSyncService
         {
             var args = HaloClientMapper.BuildArgumentsJson(pageNo, connection.SkipInactive);
             var body = await _mcpClient.CallToolAsync(mcpServerId, HaloClientMapper.ToolName, args, cancellationToken);
-            var page = HaloClientMapper.MapClients(body);
+            var page = HaloClientMapper.MapClients(body, out var rowCount);
             companies.AddRange(page);
-            if (page.Count < HaloClientMapper.DefaultPageSize)
+            // Raw rows, never mapped rows: a client with no id or name is dropped, and testing the
+            // mapped count would read that short page as the last one and abandon the rest.
+            if (rowCount < HaloClientMapper.DefaultPageSize)
                 break;
         }
 

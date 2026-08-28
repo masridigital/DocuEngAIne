@@ -45,6 +45,16 @@ jobs:
           VITE_ENTRA_API_SCOPE: ${{ secrets.ENTRA_API_SCOPE }}
         run: |
           npm ci
+          # VITE_* values are baked into the bundle at build time, so a missing secret produces a
+          # green build that deploys a SPA telling every visitor sign-in is not configured, while the
+          # API still demands a bearer token. Surface it here rather than discovering it in the browser.
+          missing=""
+          [ -z "$VITE_ENTRA_CLIENT_ID" ] && missing="$missing ENTRA_CLIENT_ID"
+          [ -z "$VITE_ENTRA_AUTHORITY" ] && missing="$missing ENTRA_AUTHORITY"
+          [ -z "$VITE_ENTRA_API_SCOPE" ] && missing="$missing ENTRA_API_SCOPE"
+          if [ -n "$missing" ]; then
+            echo "::warning title=SPA will ship without Entra sign-in::Missing repository secrets:$missing"
+          fi
           npm run build
 
       - name: Restore

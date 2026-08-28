@@ -18,15 +18,25 @@ public static class MerakiOrganizationMapper
     public const int MaxPageSize = 9000;
 
     public static IReadOnlyList<ExternalCompanyDto> MapOrganizations(string mcpBody)
-        => MapOrganizations(mcpBody, out _);
+        => MapOrganizations(mcpBody, out _, out _);
 
     public static IReadOnlyList<ExternalCompanyDto> MapOrganizations(string mcpBody, out string? lastOrganizationId)
+        => MapOrganizations(mcpBody, out lastOrganizationId, out _);
+
+    /// <summary>
+    /// Maps one page. <paramref name="rowCount"/> is the number of rows the vendor returned, which is
+    /// NOT the number mapped — rows missing a required field are dropped. Paging must turn on the raw
+    /// count, or one unmappable row ends the pull and the run still reports Succeeded.
+    /// </summary>
+    public static IReadOnlyList<ExternalCompanyDto> MapOrganizations(string mcpBody, out string? lastOrganizationId, out int rowCount)
     {
         var payload = UnwrapMcpPayload(mcpBody);
         var companies = new List<ExternalCompanyDto>();
         lastOrganizationId = null;
+        rowCount = 0;
         foreach (var org in EnumerateOrganizations(payload))
         {
+            rowCount++;
             var id = ReadString(org, "id");
             if (!string.IsNullOrWhiteSpace(id))
                 lastOrganizationId = id;
@@ -63,9 +73,10 @@ public static class MerakiOrganizationMapper
         {
             var args = BuildArgumentsJson(startingAfter, size);
             var body = await mcpClient.CallToolAsync(mcpServerId, ToolName, args, cancellationToken);
-            var mapped = MapOrganizations(body, out var lastId);
+            var mapped = MapOrganizations(body, out var lastId, out var rowCount);
             companies.AddRange(mapped);
-            if (mapped.Count == 0 || mapped.Count < size)
+            // Raw rows, never mapped rows -- see NinjaOrganizationMapper for the same hazard.
+            if (rowCount == 0 || rowCount < size)
                 break;
             if (string.IsNullOrWhiteSpace(lastId))
                 break;

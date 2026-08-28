@@ -307,7 +307,16 @@ public static class IntegrationEndpoints
             else if (string.IsNullOrWhiteSpace(compact.AuthSecretName))
             {
                 // Filling in a registration that never carried a secret name is not an overwrite.
-                compact.AuthSecretName = secretName ?? compact.AuthSecretName;
+                // But if the caller supplied nothing either, the connection would be created against a
+                // server with no credential and every sync would fail later as an opaque vendor 401.
+                if (string.IsNullOrWhiteSpace(secretName))
+                {
+                    return Results.BadRequest(
+                        $"MCP server '{compact.Name}' has no Key Vault secret name, so this integration would have "
+                        + "no credential to authenticate with. Supply authSecretName.");
+                }
+
+                compact.AuthSecretName = secretName;
             }
             else if (secretName is not null
                 && !string.Equals(compact.AuthSecretName, secretName, StringComparison.OrdinalIgnoreCase))

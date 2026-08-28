@@ -217,6 +217,23 @@ procedure. Explicitly a later phase. It lands naturally on `Runbook` / `RunbookS
 `Document`, since the output is an ordered procedure. Needs blob storage, which the plan already
 defers to Phase 3 for photos — same dependency, so the two should be planned together.
 
+## Pre-deploy checklist (from the review of the authorization round)
+
+Two things that are harmless today only because nothing has been deployed, and become real the moment
+something is:
+
+- **Any tenant that already has `User` rows has no Owner.** The Owner grant lives in
+  `POST /api/tenant/onboard`, which returns `Conflict` for a tenant that already exists, and the only
+  role-writing route sits behind the same admin policy it would need to escape. A tenant created before
+  this round — including a local development database — is therefore permanently 403 on
+  `/api/integrations`, `/api/mcp/servers`, `/api/users` and `/api/resource-access`. Recovery is a direct
+  `UPDATE Users SET Role = 4` or defining the Entra app roles. Drop the local database rather than
+  fighting it; **write a backfill before the first real deployment carries tenants across.**
+- **`ENTRA_CLIENT_ID`, `ENTRA_AUTHORITY` and `ENTRA_API_SCOPE` are baked into the SPA bundle at build
+  time.** Missing secrets give a green build that ships a front end telling every visitor sign-in is not
+  configured, while the API still requires a bearer token. CI now emits a warning annotation when any is
+  empty; it is not a hard failure, because they are legitimately unset until Entra is configured.
+
 ## Testing debt worth naming
 
 - No HTTP-level tests. The test project has no `Microsoft.AspNetCore.Mvc.Testing` reference, so the

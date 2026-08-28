@@ -140,8 +140,11 @@ public static class UserEndpoints
         var otherActiveOwners = await db.Users.ForTenant(user)
             .CountAsync(u => u.Id != targetId && u.Role == UserRole.Owner && u.IsActive, cancellationToken);
 
-        // Owner is the top of the enum, so any change away from Owner is a demotion.
-        if (previousRole == UserRole.Owner && otherActiveOwners == 0)
+        // Owner is the top of the enum, so any change away from Owner is a demotion. Only an ACTIVE
+        // Owner counts as an administrator -- an inactive one fails the admin policy's own IsActive
+        // check -- so a deactivated sole Owner is not the tenant's last set of keys and must stay
+        // demotable. Without the IsActive term here, that row could never be changed at all.
+        if (previousRole == UserRole.Owner && target.IsActive && otherActiveOwners == 0)
             return Results.BadRequest(LastOwnerMessage);
 
         // The target is not an Owner here (the guard above returned), so otherActiveOwners is the
