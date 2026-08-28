@@ -40,6 +40,7 @@ tests/                      # xUnit + EF InMemory tests
 - **KeeperLink** — links to credentials in **Keeper**; no secrets are stored locally.
 - **ResourceRoleAssignment** — object-level RBAC overriding tenant-wide roles.
 - **AuditLog** — action trail (tenant-scoped where applicable).
+- **FlagDefinition / FlagAssignment** — named color labels on companies, assets, documents, runbooks, and Keeper links. Drive the review queue. No local secrets.
 
 All tenant-scoped queries use `ForTenant(currentUser)`; `SaveChangesAsync` stamps `TenantId` and audit timestamps automatically.
 
@@ -208,6 +209,18 @@ Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipC
 |--------|------|-------------|
 | GET | `/api/expirations` | Tenant-scoped rollup (`companyId`, `showExpired` default false, `q`). Date fields with `FieldDefinition.IsExpiration` plus `Asset.ExpiresAt`. Sort by date asc. Other-tenant `companyId` returns empty (no 500). |
 
+### Flags
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/flags` | List flag definitions (name + hex color) |
+| POST | `/api/flags` | Create definition (`name`, `color`, optional `isActive`) |
+| PUT | `/api/flags/{id}` | Update definition |
+| DELETE | `/api/flags/{id}` | Delete definition (cascades assignments) |
+| POST | `/api/flags/{id}/assign` | Assign to `{ entityType, entityId }` (`Company` \| `Asset` \| `Document` \| `Runbook` \| `KeeperLink`). Other-tenant entity → 400. |
+| DELETE | `/api/flags/{id}/assign/{entityType}/{entityId}` | Remove assignment |
+| GET | `/api/flags/review` | Flagged records for the review queue (`entityType` filter). Joins names via existing tables, `ForTenant`. |
+
 ### Documents
 
 | Method | Path | Description |
@@ -275,7 +288,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] GET MCP server and integration by id; SQL cascade fix
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 
-> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, and `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), and `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
 
 
 ### Later
@@ -283,7 +296,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [ ] Azure AI Search + Azure OpenAI RAG
 - [ ] UniFi / Blackpoint as MCP connectors
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
-- [ ] Flags
+- [x] Flags (`GET/POST /api/flags`, assign, `/flags` review queue)
 - [ ] Client portal
 - [ ] Switch SQL auth to managed identity
 - [ ] One-time Hudu export migration (passwords → Keeper only)

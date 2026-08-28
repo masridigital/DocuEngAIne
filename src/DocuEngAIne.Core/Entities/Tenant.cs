@@ -19,4 +19,5 @@ public class Tenant : EntityBase
     public ICollection<ResourceRoleAssignment> ResourceRoleAssignments { get; set; } = [];
     public ICollection<McpServer> McpServers { get; set; } = [];
     public ICollection<IntegrationConnection> IntegrationConnections { get; set; } = [];
+    public ICollection<FlagDefinition> FlagDefinitions { get; set; } = [];
 }

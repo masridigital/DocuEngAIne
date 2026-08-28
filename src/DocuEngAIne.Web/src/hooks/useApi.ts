@@ -129,6 +129,43 @@ export function useExpirations(opts?: { q?: string; showExpired?: boolean; compa
   return useSWR<ExpirationItem[]>(`/api/expirations${qs ? `?${qs}` : ''}`, fetcher)
 }
 
+export type FlagDefinition = {
+  id: string
+  name: string
+  color: string
+  isActive: boolean
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type FlagReviewItem = {
+  assignmentId: string
+  flagDefinitionId: string
+  flagName: string
+  flagColor: string
+  entityType: string
+  entityId: string
+  entityName: string
+  companyId?: string | null
+  companyName?: string | null
+  createdAt: string
+}
+
+export function useFlags() {
+  return useSWR<FlagDefinition[]>('/api/flags', fetcher)
+}
+
+export function useFlagReview(entityType?: string) {
+  const params = new URLSearchParams()
+  if (entityType) params.set('entityType', entityType)
+  const qs = params.toString()
+  return useSWR<FlagReviewItem[]>(`/api/flags/review${qs ? `?${qs}` : ''}`, fetcher)
+}
+
+export function createFlag(input: { name: string; color: string; isActive?: boolean }) {
+  return postJson<FlagDefinition>('/api/flags', input)
+}
+
 export function useAssets() {
   return useSWR('/api/assets', fetcher)
 }

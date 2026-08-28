@@ -22,6 +22,7 @@ public static class ModelBuilderExtensions
             t.HasMany(x => x.ResourceRoleAssignments).WithOne(r => r.Tenant).HasForeignKey(r => r.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.McpServers).WithOne(m => m.Tenant).HasForeignKey(m => m.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.IntegrationConnections).WithOne(i => i.Tenant).HasForeignKey(i => i.TenantId).OnDelete(DeleteBehavior.Cascade);
+            t.HasMany(x => x.FlagDefinitions).WithOne(f => f.Tenant).HasForeignKey(f => f.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Company>(c =>
@@ -136,6 +137,24 @@ public static class ModelBuilderExtensions
         modelBuilder.Entity<ResourceRoleAssignment>(r =>
         {
             r.HasIndex(x => new { x.TenantId, x.UserId, x.ResourceType, x.ResourceId }).IsUnique();
+        });
+
+
+        modelBuilder.Entity<FlagDefinition>(f =>
+        {
+            f.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            f.Property(x => x.Color).HasMaxLength(16);
+            f.Property(x => x.IsActive).HasDefaultValue(true);
+        });
+
+        modelBuilder.Entity<FlagAssignment>(a =>
+        {
+            a.HasIndex(x => new { x.TenantId, x.FlagDefinitionId, x.EntityType, x.EntityId }).IsUnique();
+            a.HasIndex(x => new { x.TenantId, x.EntityType, x.EntityId });
+            a.HasIndex(x => new { x.TenantId, x.CreatedAt });
+            a.HasOne(x => x.FlagDefinition).WithMany(d => d.Assignments).HasForeignKey(x => x.FlagDefinitionId).OnDelete(DeleteBehavior.Cascade);
+            // Restrict: FlagDefinition already cascades from Tenant — SQL Server forbids multiple cascade paths.
+            a.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<AuditLog>(a =>

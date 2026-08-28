@@ -114,7 +114,7 @@ SPA: **Integrations** page — add MCP server, connect Halo/Ninja (secrets to Ke
 ### 4.4 Operational metadata (selective)
 Ship when needed, not as a Hudu checklist:
 - **Expirations** on assets/docs (warranty, SSL, contract end) + dashboard widget
-- **Flags / review states** on documents & assets (compliance workflow)
+- **Flags / review states** on companies, assets, documents, runbooks, Keeper links (this slice: definitions + assignments + review queue)
 - **Websites / SSL** as asset layout + expiration, not a separate product line day one
 - **IPAM / Racks** — Phase 3 unless a tenant demands it; UniFi MCP can own live network truth
 - **Photos** — blob storage linked to company/asset (Phase 3)
@@ -146,7 +146,7 @@ Keep README direction: Azure AI Search + OpenAI RAG over documents, assets, runb
 
 ### Phase 2C — Doc quality & ops
 1. Relationships graph
-2. Expirations + flags
+2. Flags (this slice) after expirations
 3. Azure AI Search
 4. Import from Hudu export (one-time migration tooling)
 5. Client portal
@@ -201,7 +201,7 @@ Next:
 1. Wire StackJack MCP credentials in Key Vault and a live Halo/Ninja company pull
 2. CompanyId on document/runbook/Keeper create-edit (assets already accept it)
 3. Phase 2B: UniFi + Blackpoint MCP; sync schedules + SyncRun UI; Halo/Ninja deep links
-4. Phase 2C: relationship graph, expirations + flags, Azure AI Search, client portal, Hudu export import (passwords → Keeper only)
+4. Phase 2C: relationship graph, Azure AI Search, client portal, Hudu export import (passwords → Keeper only). Expirations + flags shipped.
 5. `dotnet ef migrations add Phase2IntegrationsReconcile` if the model snapshot still needs regen after the hand-written Phase 2 migrations
 
 ## 9. Hudu ↔ DocuEngAIne verification matrix
@@ -240,6 +240,7 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Hudu Bridge / Hudini / leaderboard | Skip. Masri AI = our RAG + MCP later. | skip | |
 | Central KB folders / public share | Tags now. Folders/share later. | later | Distinct from company-filtered docs. |
 | Global expirations | Same rollup without `companyId`. Search `q` + show-expired toggle. Types are field names (Expiration Date, End Date, License Expiration, Renewal Date, Next Battery Replacement, SSL Certificate, Domain, …) or `Expiration` for the asset shortcut. | Phase2C | `/expirations`. Table: Name, Company, Type, Date, days. |
+| Flags / Flag Review | Named color labels (`FlagDefinition`: Name + hex Color + IsActive) applied to Company, Asset, Document, Runbook, KeeperLink (`FlagAssignment`). Admin CRUD. `GET /api/flags/review?entityType=` joins names via existing tables, ForTenant. Not Hudu label chrome. Alerts/workflows are separate. | Phase2C | `/flags`. Other-tenant entity assign = 400. |
 | Client portal | Phase 2C. Keeper reveal only, never local secrets. | later | |
 | Passwords (global) | Tenant-wide KeeperLink list. No vault. | skip | Phase1 links exist. |
 
@@ -257,7 +258,7 @@ Hudu company list is `/c` (not `/companies`). Create form fields: Name*, Parent,
 | Halo/Ninja org matching + test/sync/runs | COVERED |
 | MCP servers | COVERED (Masri extra) |
 | Company home related lists | COVERED this slice (assets/docs/runbooks/Keeper by CompanyId). Not Hudu tab chrome. |
-| Company type / archive tab / A–Z filter / flags | NOT YET (IsActive exists; no archive UX) |
+| Company type / archive tab / A–Z filter | NOT YET (IsActive exists; no archive UX). Flags are the Flags / Flag Review row. |
 | Parent company, logo | NOT YET |
 | Halo/Ninja skip/overwrite toggles | COVERED this slice (`IntegrationConnection` sync-policy bools; defaults refuse company overwrite). Layout mapping still later. |
 | UniFi local user/password | INTENTIONAL: Key Vault secret name only |

@@ -339,6 +339,83 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.ToTable("FieldDefinitions");
                 });
 
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.FlagAssignment", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<Guid>("FlagDefinitionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FlagDefinitionId");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.HasIndex("TenantId", "EntityType", "EntityId");
+
+                    b.HasIndex("TenantId", "FlagDefinitionId", "EntityType", "EntityId")
+                        .IsUnique();
+
+                    b.ToTable("FlagAssignments");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.FlagDefinition", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Color")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("IsActive")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("FlagDefinitions");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.KeeperLink", b =>
                 {
                     b.Property<Guid>("Id")
@@ -684,6 +761,37 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Navigation("AssetType");
                 });
 
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.FlagAssignment", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.FlagDefinition", "FlagDefinition")
+                        .WithMany("Assignments")
+                        .HasForeignKey("FlagDefinitionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("FlagDefinition");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.FlagDefinition", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany("FlagDefinitions")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.KeeperLink", b =>
                 {
                     b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
@@ -773,6 +881,11 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Navigation("Steps");
                 });
 
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.FlagDefinition", b =>
+                {
+                    b.Navigation("Assignments");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Tenant", b =>
                 {
                     b.Navigation("AssetTypes");
@@ -780,6 +893,8 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Navigation("Assets");
 
                     b.Navigation("Documents");
+
+                    b.Navigation("FlagDefinitions");
 
                     b.Navigation("KeeperLinks");
 

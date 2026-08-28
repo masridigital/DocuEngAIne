@@ -34,6 +34,8 @@ public class DocuEngAIneDbContext : DbContext
     public DbSet<RunbookStep> RunbookSteps => Set<RunbookStep>();
     public DbSet<ResourceRoleAssignment> ResourceRoleAssignments => Set<ResourceRoleAssignment>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
+    public DbSet<FlagDefinition> FlagDefinitions => Set<FlagDefinition>();
+    public DbSet<FlagAssignment> FlagAssignments => Set<FlagAssignment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

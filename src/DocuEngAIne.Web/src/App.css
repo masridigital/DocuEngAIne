@@ -368,3 +368,43 @@ body {
 .days-ok {
   color: var(--text-muted);
 }
+
+.flags-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 16px;
+}
+
+.flags-toolbar .input {
+  max-width: 220px;
+}
+
+.flag-list {
+  list-style: none;
+  margin: 16px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.flag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.flag-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  display: inline-block;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
