@@ -146,6 +146,36 @@ public class NinjaDeviceMapperTests
         Assert.Contains("\"pageSize\":3", mcp.Calls[1].Args, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// A full page containing one droppable row must not end the pull. Paging is decided on the rows
+    /// the vendor returned, not the rows that mapped — otherwise a single device with no name field
+    /// silently abandons every device after it, while the run still reports Succeeded.
+    /// </summary>
+    [Fact]
+    public async Task PullAsync_KeepsPaging_When_A_Full_Page_Contains_A_Dropped_Row()
+    {
+        // Device 2 has an id (so the cursor can advance) but no displayName, systemName or dnsName,
+        // so MapDevice drops it. Devices 4-6 are only reachable if paging continues past that page.
+        const string devices = """
+            [{"id":1,"organizationId":10,"systemName":"ws-one"},
+             {"id":2,"organizationId":10,"nodeClass":"WINDOWS_WORKSTATION"},
+             {"id":3,"organizationId":10,"systemName":"ws-three"},
+             {"id":4,"organizationId":10,"systemName":"ws-four"},
+             {"id":5,"organizationId":10,"systemName":"ws-five"},
+             {"id":6,"organizationId":10,"systemName":"ws-six"}]
+            """;
+
+        var mcp = new RecordingNinjaMcp { DevicesJson = devices };
+
+        var pulled = await NinjaDeviceMapper.PullAsync(mcp, Guid.NewGuid(), pageSize: 3);
+
+        // Five of six map; the sixth call-worth is the empty page that terminates the loop.
+        Assert.Equal(5, pulled.Count);
+        Assert.Equal(3, mcp.Calls.Count);
+        Assert.DoesNotContain(pulled, d => d.ExternalId == "2");
+        Assert.Contains(pulled, d => d.ExternalId == "6");
+    }
+
     [Fact]
     public async Task Ninja_SyncAsync_Creates_Assets_Attached_To_Mapped_Companies()
     {

@@ -23,15 +23,25 @@ public static class NinjaDeviceMapper
     public const int MaxPageSize = 1000;
 
     public static IReadOnlyList<ExternalDeviceDto> MapDevices(string mcpBody)
-        => MapDevices(mcpBody, out _);
+        => MapDevices(mcpBody, out _, out _);
 
     public static IReadOnlyList<ExternalDeviceDto> MapDevices(string mcpBody, out int? lastDeviceId)
+        => MapDevices(mcpBody, out lastDeviceId, out _);
+
+    /// <summary>
+    /// Maps one page. <paramref name="rowCount"/> is the number of rows the vendor actually returned,
+    /// which is NOT the number mapped — rows missing an id, an organizationId, or every name field are
+    /// dropped. Paging must be decided on the raw count, or one unmappable device ends the pull.
+    /// </summary>
+    public static IReadOnlyList<ExternalDeviceDto> MapDevices(string mcpBody, out int? lastDeviceId, out int rowCount)
     {
         var payload = UnwrapMcpPayload(mcpBody);
         var devices = new List<ExternalDeviceDto>();
         lastDeviceId = null;
+        rowCount = 0;
         foreach (var device in EnumerateDevices(payload))
         {
+            rowCount++;
             if (TryReadId(device, out var id))
                 lastDeviceId = id;
             var mapped = MapDevice(device);
@@ -67,9 +77,13 @@ public static class NinjaDeviceMapper
         {
             var args = BuildArgumentsJson(after, size);
             var body = await mcpClient.CallToolAsync(mcpServerId, ToolName, args, cancellationToken);
-            var mapped = MapDevices(body, out var lastId);
+            var mapped = MapDevices(body, out var lastId, out var rowCount);
             devices.AddRange(mapped);
-            if (mapped.Count == 0 || mapped.Count < size)
+            // Terminate on the rows the vendor returned, never on the rows that mapped. A single
+            // device with no displayName/systemName/dnsName is dropped by MapDevice, and testing
+            // mapped.Count here would read that short page as the last one and silently abandon
+            // every remaining device -- while still reporting the run Succeeded.
+            if (rowCount == 0 || rowCount < size)
                 break;
             if (lastId is null)
                 break;

@@ -159,9 +159,28 @@ public static class StackJackPlanDetector
             throw new InvalidOperationException("StackJack session_info returned non-JSON.", ex);
         }
 
+        // Surface a tool error instead of returning no connectors: an empty connector list is how a
+        // caller learns "this connector is not subscribed", so swallowing an error here would report
+        // an auth or transport failure as an unsubscribed connector.
+        if (root.ValueKind == JsonValueKind.Object && TryGetProperty(root, out var error, "error"))
+        {
+            var message = error.ValueKind == JsonValueKind.Object && TryGetProperty(error, out var msg, "message")
+                ? msg.GetString()
+                : error.GetRawText();
+            throw new InvalidOperationException($"StackJack session_info error: {message}");
+        }
+
         var payload = root;
         if (root.ValueKind == JsonValueKind.Object && TryGetProperty(root, out var result, "result"))
             payload = result;
+
+        if (payload.ValueKind == JsonValueKind.Object
+            && TryGetProperty(payload, out var isError, "isError")
+            && isError.ValueKind == JsonValueKind.True)
+        {
+            throw new InvalidOperationException(
+                $"StackJack session_info error: {ReadContentText(payload) ?? payload.GetRawText()}");
+        }
 
         var text = ReadContentText(payload);
         if (!string.IsNullOrWhiteSpace(text))

@@ -62,7 +62,11 @@ public static class SyncCadencePolicy
         if (limit is null or <= 0)
             return null;
 
-        if (limit >= StackJackPlanDetector.UnlimitedCallLimit || plan == StackJackPlan.Enterprise)
+        // Deliberately NOT `|| plan == Enterprise`. This class treats the reported allowance as
+        // authoritative because StackJack can set a custom limit on an individual subscription, so an
+        // Enterprise connector reporting a real number must be budgeted against that number. A null
+        // allowance still resolves to unlimited via PublishedAllowance above.
+        if (limit >= StackJackPlanDetector.UnlimitedCallLimit)
             return MinimumIntervalMinutes;
 
         var budget = limit.Value * ScheduledShareOfAllowance;

@@ -330,13 +330,15 @@ export function IntegrationsPage() {
         result.itemsSkipped != null ? `${result.itemsSkipped} skipped` : null,
       ].filter(Boolean)
       setMessage(result.errorSummary || result.status || (counts.length ? counts.join(', ') : 'Sync finished'))
-      await mutateIntegrations()
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Sync failed')
     } finally {
       setActionId(null)
-      // A failed sync still records a run, so show the history either way.
+      // A failed sync still writes status and lastError on the connection AND records a run, so both
+      // the row and the history must refresh either way. Refreshing only on success left the row
+      // showing stale state next to a history panel displaying the failure.
       setHistoryId(id)
+      void mutateIntegrations().catch(() => undefined)
       void refreshIntegrationHistory(id).catch(() => undefined)
     }
   }

@@ -429,8 +429,10 @@ public class IntegrationSyncService : IIntegrationSyncService
             await _db.SaveChangesAsync(cancellationToken);
             run.FinishedAt = DateTimeOffset.UtcNow;
             connection.LastSyncAt = run.FinishedAt;
+            // These are the run's cumulative totals, not device-only counts: the company pass already
+            // added to the same counters. Labelled so the audit trail does not overstate the device pass.
             await _audit.LogAsync("Integration.SyncDevices", nameof(IntegrationConnection), connection.Id,
-                $"created={run.ItemsCreated} updated={run.ItemsUpdated} skipped={run.ItemsSkipped}", cancellationToken);
+                $"runTotals created={run.ItemsCreated} updated={run.ItemsUpdated} skipped={run.ItemsSkipped}", cancellationToken);
             await _db.SaveChangesAsync(cancellationToken);
         }
         catch (Exception ex)
@@ -440,7 +442,33 @@ public class IntegrationSyncService : IIntegrationSyncService
             run.ErrorSummary = ex.Message;
             connection.Status = IntegrationStatus.Error;
             connection.LastError = ex.Message;
+            await SaveFailureAsync(run, connection, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Persists a failed device pass without re-throwing. If the original failure was itself a
+    /// <c>SaveChanges</c> failure, the ChangeTracker still holds the entities that caused it, so saving
+    /// again would throw straight out of the catch, past <c>SyncAsync</c>, leaving the run recorded as
+    /// whatever it was before -- Succeeded, in the common case. Detach everything except the run and the
+    /// connection first, and swallow a second failure rather than lose the caller's result.
+    /// </summary>
+    private async Task SaveFailureAsync(SyncRun run, IntegrationConnection connection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            foreach (var entry in _db.ChangeTracker.Entries().ToList())
+            {
+                if (!ReferenceEquals(entry.Entity, run) && !ReferenceEquals(entry.Entity, connection))
+                    entry.State = EntityState.Detached;
+            }
+
             await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // The failure is already on the run object in memory; losing this write is strictly better
+            // than throwing out of a catch block and returning no run at all.
         }
     }
 

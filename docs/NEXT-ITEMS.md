@@ -111,14 +111,19 @@ Two independent gaps, both fine for local development and both blocking the firs
 - **Migrations on deploy.** `azure-deploy.yml` never applies them. Build a
   `dotnet ef migrations bundle` artifact and run it in `deploy-api` before the zip deploy.
 
-### 5. Enforce the authorization that already exists
+### 5. Enforce the authorization that already exists — **partly done**
 
-`IResourceAuthorizationService` is registered, tested and documented, but no endpoint calls it; the
-`RequireAdmin` policy is never applied; `/api/me` auto-provisions everyone as `Contributor`. Apply
-`RequireAdmin` to `/api/mcp/servers` and `/api/integrations`, call `EnforceAsync` on
-asset/document/runbook/Keeper writes, and default new users to `Reader`.
+Shipped: `RequireAdmin` now gates `/api/mcp/servers` and `/api/integrations`, as a requirement +
+handler accepting an Entra `Admin`/`Owner` app-role claim **or** a `User` row with `Role >= Admin`
+(claims-only would have gated these routes on an optional setup step). `/api/me` provisions `Reader`,
+and `POST /api/tenant/onboard` grants the onboarding caller `Owner` in the same save as the tenant.
 
-Needed before a second real tenant, not before the next demo.
+Still open, and the more important half: **`IResourceAuthorizationService` is still called by no
+endpoint.** The README's claim that object-level `ResourceRoleAssignment` overrides a tenant-wide role
+remains false — a grant of Contributor on one document is consulted nowhere. Thread `EnforceAsync`
+through the asset/document/runbook/Keeper write paths, or drop the claim from the README.
+
+Also still open: role management (see 5b) — nothing can change a `User.Role` after onboarding.
 
 ### 5b. Add role management — surfaced by the authorization work
 
@@ -136,7 +141,6 @@ carrying the old `Contributor` default to be locked out.
 
 Back to `MASRI-NATIVE-PLAN.md` §8, now on a foundation that can hold it:
 
-- NinjaOne devices → Computer Assets (plan lists this in 2A; only organizations ship)
 - Sync schedules + a SyncRun UI (runs are exposed by API, not shown in the SPA)
 - Blackpoint and Composio connectors
 - Phase 2C: relationship graph, Azure AI Search, client portal, Hudu import
