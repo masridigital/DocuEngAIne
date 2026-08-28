@@ -189,6 +189,136 @@ public class CompanyIsolationTests
     }
 
     [Fact]
+    public async Task Portal_Urls_Round_Trip_On_Create_And_Update()
+    {
+        var tenantId = Guid.NewGuid();
+        var dbName = Guid.NewGuid().ToString();
+        var haloUrl = "https://halo.example/clients/42";
+        var ninjaUrl = "https://ninja.example/organizations/99";
+
+        Guid companyId;
+        var (db, user) = Open(dbName, tenantId);
+        await using (db)
+        {
+            var created = await CompanyEndpoints.CreateAsync(
+                new CreateCompanyRequest(
+                    "ExampleCo",
+                    "exampleco",
+                    HaloClientId: "halo-42",
+                    NinjaOrganizationId: "ninja-99",
+                    HaloPortalUrl: $"  {haloUrl}  ",
+                    NinjaPortalUrl: ninjaUrl),
+                db,
+                user);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(created).StatusCode);
+
+            var stored = await db.Companies.ForTenant(user).SingleAsync();
+            companyId = stored.Id;
+            Assert.Equal(haloUrl, stored.HaloPortalUrl);
+            Assert.Equal(ninjaUrl, stored.NinjaPortalUrl);
+            Assert.Equal("halo-42", stored.HaloClientId);
+            Assert.Equal("ninja-99", stored.NinjaOrganizationId);
+            Assert.Null(stored.GetType().GetProperty("AuthSecretName"));
+            Assert.Null(stored.GetType().GetProperty("EncryptedValue"));
+
+            db.ChangeTracker.Clear();
+            var get = await CompanyEndpoints.GetAsync(companyId, db, user);
+            Assert.Equal(StatusCodes.Status200OK, Assert.IsAssignableFrom<IStatusCodeHttpResult>(get).StatusCode);
+            var payload = Assert.IsAssignableFrom<IValueHttpResult>(get).Value!;
+            var json = System.Text.Json.JsonSerializer.Serialize(payload);
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            Assert.Equal(haloUrl, doc.RootElement.GetProperty("HaloPortalUrl").GetString());
+            Assert.Equal(ninjaUrl, doc.RootElement.GetProperty("NinjaPortalUrl").GetString());
+        }
+
+        var (updateDb, updateUser) = Open(dbName, tenantId);
+        await using (updateDb)
+        {
+            var updatedHalo = "https://halo.example/clients/42/tickets";
+            var updated = await CompanyEndpoints.UpdateAsync(
+                companyId,
+                new UpdateCompanyRequest(HaloPortalUrl: updatedHalo, NinjaPortalUrl: ""),
+                updateDb,
+                updateUser);
+            Assert.Equal(StatusCodes.Status204NoContent, Assert.IsAssignableFrom<IStatusCodeHttpResult>(updated).StatusCode);
+
+            updateDb.ChangeTracker.Clear();
+            var reloaded = await updateDb.Companies.ForTenant(updateUser).AsNoTracking().SingleAsync(c => c.Id == companyId);
+            Assert.Equal(updatedHalo, reloaded.HaloPortalUrl);
+            Assert.Null(reloaded.NinjaPortalUrl);
+            Assert.Equal("halo-42", reloaded.HaloClientId);
+            Assert.Equal("ninja-99", reloaded.NinjaOrganizationId);
+        }
+    }
+
+    [Fact]
+    public async Task ForTenant_Does_Not_Leak_Other_Tenant_Portal_Urls()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+
+        Guid companyBId;
+        var (seedB, userB) = Open(dbName, tenantB);
+        await using (seedB)
+        {
+            var created = await CompanyEndpoints.CreateAsync(
+                new CreateCompanyRequest(
+                    "PoisonCo",
+                    "poisonco",
+                    HaloPortalUrl: "https://halo.example/clients/secret",
+                    NinjaPortalUrl: "https://ninja.example/organizations/secret"),
+                seedB,
+                userB);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(created).StatusCode);
+            companyBId = (await seedB.Companies.ForTenant(userB).SingleAsync()).Id;
+        }
+
+        var (seedA, userA) = Open(dbName, tenantA);
+        await using (seedA)
+        {
+            var created = await CompanyEndpoints.CreateAsync(
+                new CreateCompanyRequest(
+                    "ExampleCo",
+                    "exampleco",
+                    HaloPortalUrl: "https://halo.example/clients/own",
+                    NinjaPortalUrl: "https://ninja.example/organizations/own"),
+                seedA,
+                userA);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(created).StatusCode);
+
+            var listed = await seedA.Companies.ForTenant(userA).ToListAsync();
+            Assert.Single(listed);
+            Assert.Equal("ExampleCo", listed[0].Name);
+            Assert.Equal("https://halo.example/clients/own", listed[0].HaloPortalUrl);
+            Assert.DoesNotContain(listed, c => c.Id == companyBId);
+            Assert.DoesNotContain(listed, c => c.HaloPortalUrl != null && c.HaloPortalUrl.Contains("secret", StringComparison.Ordinal));
+            Assert.DoesNotContain(listed, c => c.NinjaPortalUrl != null && c.NinjaPortalUrl.Contains("secret", StringComparison.Ordinal));
+
+            var hidden = await seedA.Companies.ForTenant(userA).FirstOrDefaultAsync(c => c.Id == companyBId);
+            Assert.Null(hidden);
+
+            var getHidden = await CompanyEndpoints.GetAsync(companyBId, seedA, userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(getHidden).StatusCode);
+
+            var updateHidden = await CompanyEndpoints.UpdateAsync(
+                companyBId,
+                new UpdateCompanyRequest(HaloPortalUrl: "https://halo.example/stolen"),
+                seedA,
+                userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(updateHidden).StatusCode);
+        }
+
+        var (verifyB, verifyUserB) = Open(dbName, tenantB);
+        await using (verifyB)
+        {
+            var stillB = await verifyB.Companies.ForTenant(verifyUserB).AsNoTracking().SingleAsync(c => c.Id == companyBId);
+            Assert.Equal("https://halo.example/clients/secret", stillB.HaloPortalUrl);
+            Assert.Equal("https://ninja.example/organizations/secret", stillB.NinjaPortalUrl);
+        }
+    }
+
+    [Fact]
     public async Task Own_Tenant_CompanyId_Attaches_To_Document_Runbook_And_KeeperLink()
     {
         var dbName = Guid.NewGuid().ToString();

@@ -142,7 +142,7 @@ Keep README direction: Azure AI Search + OpenAI RAG over documents, assets, runb
 2. UniFi + Blackpoint as MCP connectors
 3. Composio MCP as second harness
 4. Sync schedules + SyncRun UI
-5. Asset external IDs + "open in Halo/Ninja" deep links
+5. Asset external IDs + "open in Halo/Ninja" deep links (company portal URLs shipped)
 
 ### Phase 2C — Doc quality & ops
 1. Relationships graph
@@ -200,7 +200,7 @@ Phase 2A is on `feature/integrations-mcp` (PR #1): Company, MCP registry, Integr
 Next:
 1. Wire StackJack MCP credentials in Key Vault and a live Halo/Ninja company pull
 2. CompanyId on document/runbook/Keeper create-edit (assets already accept it)
-3. Phase 2B: UniFi + Blackpoint MCP; sync schedules + SyncRun UI; Halo/Ninja deep links
+3. Phase 2B: UniFi + Blackpoint MCP; sync schedules + SyncRun UI. Halo/Ninja company deep links shipped (`HaloPortalUrl` / `NinjaPortalUrl`).
 4. Phase 2C: relationship graph, Azure AI Search, client portal, Hudu export import (passwords → Keeper only). Expirations + flags + runbook runs shipped. Global Process Completion later.
 5. `dotnet ef migrations add Phase2IntegrationsReconcile` if the model snapshot still needs regen after the hand-written Phase 2 migrations
 

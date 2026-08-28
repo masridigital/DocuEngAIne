@@ -41,15 +41,7 @@ public static class CompanyEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            var company = await db.Companies.ForTenant(user).AsNoTracking()
-                .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
-            if (company is null)
-                return Results.NotFound();
-
-            var related = await LoadRelatedAsync(db, user, id, RelatedTake, cancellationToken);
-            return Results.Ok(Map(company, related));
-        });
+            await GetAsync(id, db, user, cancellationToken));
 
         group.MapGet("/{id:guid}/summary", async (
             Guid id,
@@ -71,36 +63,7 @@ public static class CompanyEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            if (user.TenantId is null)
-                return Results.Unauthorized();
-
-            if (await db.Companies.ForTenant(user).AnyAsync(c => c.Slug == request.Slug, cancellationToken))
-                return Results.Conflict("Slug already exists.");
-
-            var company = new Company
-            {
-                TenantId = user.TenantId.Value,
-                Name = request.Name,
-                Slug = request.Slug,
-                CompanyNumber = request.CompanyNumber,
-                PrimaryDomain = request.PrimaryDomain,
-                Address = request.Address,
-                City = request.City,
-                State = request.State,
-                Phone = request.Phone,
-                Website = request.Website,
-                Notes = request.Notes,
-                HoursOfOperation = request.HoursOfOperation,
-                HaloClientId = request.HaloClientId,
-                NinjaOrganizationId = request.NinjaOrganizationId,
-                IsActive = request.IsActive ?? true,
-            };
-
-            db.Companies.Add(company);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.Created($"/api/companies/{company.Id}", Map(company));
-        });
+            await CreateAsync(request, db, user, cancellationToken));
 
         group.MapPut("/{id:guid}", async (
             Guid id,
@@ -108,30 +71,7 @@ public static class CompanyEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            var company = await db.Companies.ForTenant(user).FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
-            if (company is null)
-                return Results.NotFound();
-
-            company.Name = request.Name ?? company.Name;
-            company.Slug = request.Slug ?? company.Slug;
-            company.CompanyNumber = request.CompanyNumber ?? company.CompanyNumber;
-            company.PrimaryDomain = request.PrimaryDomain ?? company.PrimaryDomain;
-            company.Address = request.Address ?? company.Address;
-            company.City = request.City ?? company.City;
-            company.State = request.State ?? company.State;
-            company.Phone = request.Phone ?? company.Phone;
-            company.Website = request.Website ?? company.Website;
-            company.Notes = request.Notes ?? company.Notes;
-            company.HoursOfOperation = request.HoursOfOperation ?? company.HoursOfOperation;
-            company.HaloClientId = request.HaloClientId ?? company.HaloClientId;
-            company.NinjaOrganizationId = request.NinjaOrganizationId ?? company.NinjaOrganizationId;
-            if (request.IsActive.HasValue)
-                company.IsActive = request.IsActive.Value;
-
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+            await UpdateAsync(id, request, db, user, cancellationToken));
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
@@ -149,6 +89,94 @@ public static class CompanyEndpoints
         });
 
         return app;
+    }
+
+    public static async Task<IResult> GetAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var company = await db.Companies.ForTenant(user).AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+        if (company is null)
+            return Results.NotFound();
+
+        var related = await LoadRelatedAsync(db, user, id, RelatedTake, cancellationToken);
+        return Results.Ok(Map(company, related));
+    }
+
+    public static async Task<IResult> CreateAsync(
+        CreateCompanyRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        if (user.TenantId is null)
+            return Results.Unauthorized();
+
+        if (await db.Companies.ForTenant(user).AnyAsync(c => c.Slug == request.Slug, cancellationToken))
+            return Results.Conflict("Slug already exists.");
+
+        var company = new Company
+        {
+            TenantId = user.TenantId.Value,
+            Name = request.Name,
+            Slug = request.Slug,
+            CompanyNumber = request.CompanyNumber,
+            PrimaryDomain = request.PrimaryDomain,
+            Address = request.Address,
+            City = request.City,
+            State = request.State,
+            Phone = request.Phone,
+            Website = request.Website,
+            Notes = request.Notes,
+            HoursOfOperation = request.HoursOfOperation,
+            HaloClientId = NullIfEmpty(request.HaloClientId),
+            NinjaOrganizationId = NullIfEmpty(request.NinjaOrganizationId),
+            HaloPortalUrl = NullIfEmpty(request.HaloPortalUrl),
+            NinjaPortalUrl = NullIfEmpty(request.NinjaPortalUrl),
+            IsActive = request.IsActive ?? true,
+        };
+
+        db.Companies.Add(company);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.Created($"/api/companies/{company.Id}", Map(company));
+    }
+
+    public static async Task<IResult> UpdateAsync(
+        Guid id,
+        UpdateCompanyRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var company = await db.Companies.ForTenant(user).FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+        if (company is null)
+            return Results.NotFound();
+
+        company.Name = request.Name ?? company.Name;
+        company.Slug = request.Slug ?? company.Slug;
+        company.CompanyNumber = request.CompanyNumber ?? company.CompanyNumber;
+        company.PrimaryDomain = request.PrimaryDomain ?? company.PrimaryDomain;
+        company.Address = request.Address ?? company.Address;
+        company.City = request.City ?? company.City;
+        company.State = request.State ?? company.State;
+        company.Phone = request.Phone ?? company.Phone;
+        company.Website = request.Website ?? company.Website;
+        company.Notes = request.Notes ?? company.Notes;
+        company.HoursOfOperation = request.HoursOfOperation ?? company.HoursOfOperation;
+        company.HaloClientId = request.HaloClientId ?? company.HaloClientId;
+        company.NinjaOrganizationId = request.NinjaOrganizationId ?? company.NinjaOrganizationId;
+        if (request.HaloPortalUrl is not null)
+            company.HaloPortalUrl = NullIfEmpty(request.HaloPortalUrl);
+        if (request.NinjaPortalUrl is not null)
+            company.NinjaPortalUrl = NullIfEmpty(request.NinjaPortalUrl);
+        if (request.IsActive.HasValue)
+            company.IsActive = request.IsActive.Value;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
     }
 
     public static async Task<IResult?> EnsureCompanyInTenantAsync(
@@ -216,6 +244,8 @@ public static class CompanyEndpoints
             c.PortalEnabled,
             c.HaloClientId,
             c.NinjaOrganizationId,
+            c.HaloPortalUrl,
+            c.NinjaPortalUrl,
             c.CreatedAt,
             c.UpdatedAt,
             Counts = related is null ? null : MapCounts(related),
@@ -245,6 +275,9 @@ public static class CompanyEndpoints
         KeeperLinks = related.KeeperLinkCount,
         RelatedLinks = related.RelatedLinkCount,
     };
+
+    private static string? NullIfEmpty(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
 public sealed record RelatedListItem(Guid Id, string Name, DateTimeOffset UpdatedAt, int? RunCount = null);
@@ -275,6 +308,8 @@ public record CreateCompanyRequest(
     string? HoursOfOperation = null,
     string? HaloClientId = null,
     string? NinjaOrganizationId = null,
+    string? HaloPortalUrl = null,
+    string? NinjaPortalUrl = null,
     bool? IsActive = null);
 
 public record UpdateCompanyRequest(
@@ -291,4 +326,6 @@ public record UpdateCompanyRequest(
     string? HoursOfOperation = null,
     string? HaloClientId = null,
     string? NinjaOrganizationId = null,
+    string? HaloPortalUrl = null,
+    string? NinjaPortalUrl = null,
     bool? IsActive = null);

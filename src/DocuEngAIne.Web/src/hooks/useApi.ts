@@ -42,6 +42,8 @@ export type Company = {
   portalEnabled?: boolean
   haloClientId?: string | null
   ninjaOrganizationId?: string | null
+  haloPortalUrl?: string | null
+  ninjaPortalUrl?: string | null
   counts?: CompanyCounts | null
   assets?: RelatedListItem[] | null
   documents?: RelatedListItem[] | null
@@ -55,6 +57,17 @@ export type CreateCompanyInput = {
   slug: string
   haloClientId?: string | null
   ninjaOrganizationId?: string | null
+  haloPortalUrl?: string | null
+  ninjaPortalUrl?: string | null
+}
+
+export type UpdateCompanyInput = {
+  name?: string | null
+  slug?: string | null
+  haloClientId?: string | null
+  ninjaOrganizationId?: string | null
+  haloPortalUrl?: string | null
+  ninjaPortalUrl?: string | null
 }
 
 export type McpTransport = 'Http' | 'Sse' | 'Stdio'
@@ -254,6 +267,10 @@ async function postJson<T>(url: string, body?: unknown): Promise<T> {
 
 export function createCompany(input: CreateCompanyInput) {
   return postJson<Company>('/api/companies', input)
+}
+
+export function updateCompany(id: string, input: UpdateCompanyInput) {
+  return putJson(`/api/companies/${id}`, input)
 }
 
 export type CreateResourceLinkInput = {
