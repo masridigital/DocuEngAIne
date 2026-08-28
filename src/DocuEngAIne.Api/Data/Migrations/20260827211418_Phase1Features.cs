@@ -85,12 +85,13 @@ namespace DocuEngAIne.Api.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ResourceRoleAssignments", x => x.Id);
+                    // Restrict: User already cascades from Tenant — SQL Server forbids multiple cascade paths.
                     table.ForeignKey(
                         name: "FK_ResourceRoleAssignments_Tenants_TenantId",
                         column: x => x.TenantId,
                         principalTable: "Tenants",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                     table.ForeignKey(
                         name: "FK_ResourceRoleAssignments_Users_UserId",
                         column: x => x.UserId,

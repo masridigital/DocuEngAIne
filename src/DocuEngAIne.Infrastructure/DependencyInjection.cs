@@ -34,6 +34,11 @@ public static class DependencyInjection
                 sql.EnableRetryOnFailure(3, TimeSpan.FromSeconds(5), null);
             });
 
+            // EF 10 fails `dotnet ef database update` when the snapshot lags handwritten
+            // migrations. Ignore so SQL Server (Linux/Azure) can apply existing Up() methods.
+            options.ConfigureWarnings(w =>
+                w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+
             if (configuration.GetValue<bool>("Logging:EnableSensitiveData"))
                 options.EnableSensitiveDataLogging();
         });

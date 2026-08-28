@@ -130,12 +130,13 @@ namespace DocuEngAIne.Api.Data.Migrations
                         principalTable: "McpServers",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.SetNull);
+                    // Restrict: McpServer already cascades from Tenant — SQL Server forbids multiple cascade paths (including SET NULL).
                     table.ForeignKey(
                         name: "FK_IntegrationConnections_Tenants_TenantId",
                         column: x => x.TenantId,
                         principalTable: "Tenants",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -162,12 +163,13 @@ namespace DocuEngAIne.Api.Data.Migrations
                         principalTable: "IntegrationConnections",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                    // Restrict: IntegrationConnection already cascades from Tenant — SQL Server forbids multiple cascade paths.
                     table.ForeignKey(
                         name: "FK_IntegrationMappings_Tenants_TenantId",
                         column: x => x.TenantId,
                         principalTable: "Tenants",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -196,12 +198,13 @@ namespace DocuEngAIne.Api.Data.Migrations
                         principalTable: "IntegrationConnections",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                    // Restrict: IntegrationConnection already cascades from Tenant — SQL Server forbids multiple cascade paths.
                     table.ForeignKey(
                         name: "FK_SyncRuns_Tenants_TenantId",
                         column: x => x.TenantId,
                         principalTable: "Tenants",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateIndex(
@@ -278,7 +281,7 @@ namespace DocuEngAIne.Api.Data.Migrations
                 column: "CompanyId",
                 principalTable: "Companies",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_Documents_Companies_CompanyId",
@@ -286,7 +289,7 @@ namespace DocuEngAIne.Api.Data.Migrations
                 column: "CompanyId",
                 principalTable: "Companies",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_Runbooks_Companies_CompanyId",
@@ -294,7 +297,7 @@ namespace DocuEngAIne.Api.Data.Migrations
                 column: "CompanyId",
                 principalTable: "Companies",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+                onDelete: ReferentialAction.Restrict);
 
             migrationBuilder.AddForeignKey(
                 name: "FK_KeeperLinks_Companies_CompanyId",
@@ -302,7 +305,7 @@ namespace DocuEngAIne.Api.Data.Migrations
                 column: "CompanyId",
                 principalTable: "Companies",
                 principalColumn: "Id",
-                onDelete: ReferentialAction.SetNull);
+                onDelete: ReferentialAction.Restrict);
         }
 
         /// <inheritdoc />
