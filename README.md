@@ -193,13 +193,20 @@ Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipC
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/assets/types` | List asset types |
-| POST | `/api/assets/types` | Create asset type |
+| GET | `/api/assets/types` | List asset types (fields include `isExpiration`) |
+| POST | `/api/assets/types` | Create asset type (fields accept `isExpiration`) |
+| PUT | `/api/assets/fields/{id}` | Update field definition (`isExpiration`, type, name) |
 | GET | `/api/assets` | List assets |
 | GET | `/api/assets/{id}` | Asset detail |
-| POST | `/api/assets` | Create asset |
-| PUT | `/api/assets/{id}` | Update asset |
+| POST | `/api/assets` | Create asset (`expiresAt` optional) |
+| PUT | `/api/assets/{id}` | Update asset (`expiresAt` optional) |
 | DELETE | `/api/assets/{id}` | Delete asset |
+
+### Expirations
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/expirations` | Tenant-scoped rollup (`companyId`, `showExpired` default false, `q`). Date fields with `FieldDefinition.IsExpiration` plus `Asset.ExpiresAt`. Sort by date asc. Other-tenant `companyId` returns empty (no 500). |
 
 ### Documents
 
@@ -268,14 +275,15 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] GET MCP server and integration by id; SQL cascade fix
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 
-> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), and `20260827223000_Phase2SyncPolicy`. Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, and `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
 
 
 ### Later
 - [ ] Asset relationship graph
 - [ ] Azure AI Search + Azure OpenAI RAG
 - [ ] UniFi / Blackpoint as MCP connectors
-- [ ] Expirations + flags
+- [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
+- [ ] Flags
 - [ ] Client portal
 - [ ] Switch SQL auth to managed identity
 - [ ] One-time Hudu export migration (passwords → Keeper only)

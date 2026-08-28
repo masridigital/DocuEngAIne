@@ -34,6 +34,9 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<string>("Location")
                         .HasColumnType("nvarchar(max)");
 
@@ -56,6 +59,8 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AssetTypeId");
+
+                    b.HasIndex("ExpiresAt");
 
                     b.HasIndex("TenantId", "Name");
 
@@ -307,6 +312,11 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<string>("FieldType")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsExpiration")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(false);
 
                     b.Property<bool>("IsRequired")
                         .HasColumnType("bit");

@@ -22,7 +22,8 @@ public class FieldDefinition : EntityBase
     public AssetType AssetType { get; set; } = null!;
 
     public required string Name { get; set; }
-    public required string FieldType { get; set; } // Text, Number, Date, Url, Markdown
+    public required string FieldType { get; set; } // Text, Number, Date, DateTime, Url, Markdown
     public bool IsRequired { get; set; }
+    public bool IsExpiration { get; set; }
     public int SortOrder { get; set; }
 }

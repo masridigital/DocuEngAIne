@@ -108,6 +108,27 @@ export function useProfile() {
   return useSWR('/api/me', fetcher)
 }
 
+export type ExpirationItem = {
+  sourceType: 'AssetField' | 'Asset' | string
+  id: string
+  name: string
+  companyId?: string | null
+  companyName?: string | null
+  fieldName: string
+  expiresAt: string
+  daysUntil: number
+}
+
+export function useExpirations(opts?: { q?: string; showExpired?: boolean; companyId?: string }) {
+  const params = new URLSearchParams()
+  if (opts?.showExpired) params.set('showExpired', 'true')
+  const term = opts?.q?.trim()
+  if (term) params.set('q', term)
+  if (opts?.companyId) params.set('companyId', opts.companyId)
+  const qs = params.toString()
+  return useSWR<ExpirationItem[]>(`/api/expirations${qs ? `?${qs}` : ''}`, fetcher)
+}
+
 export function useAssets() {
   return useSWR('/api/assets', fetcher)
 }

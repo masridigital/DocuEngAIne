@@ -342,3 +342,29 @@ body {
   font-weight: 500;
   font-size: 0.9rem;
 }
+
+.expirations-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+}
+
+.expirations-toolbar .check-label {
+  color: var(--text-muted);
+  font-size: 0.95rem;
+}
+
+.days-expired {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.days-soon {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.days-ok {
+  color: var(--text-muted);
+}

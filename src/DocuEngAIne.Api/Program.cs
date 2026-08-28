@@ -68,6 +68,7 @@ app.MapTenantEndpoints();
 app.MapCompanyEndpoints();
 app.MapIntegrationEndpoints();
 app.MapAssetEndpoints();
+app.MapExpirationEndpoints();
 app.MapDocumentEndpoints();
 app.MapKeeperLinkEndpoints();
 app.MapRunbookEndpoints();

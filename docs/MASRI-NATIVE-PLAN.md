@@ -224,7 +224,7 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Company IPAM | UniFi/MCP owns live network. No IPAM product line day one. | later | |
 | Company racks | Defer unless a tenant demands it. | later | |
 | Company websites | Asset layout + expiration later. | later | |
-| Company expirations | Phase 2C widget on assets/docs. | later | |
+| Company expirations | Date fields (`FieldDefinition.IsExpiration` on Date/DateTime) plus optional `Asset.ExpiresAt`, rolled up. `GET /api/expirations?companyId=` is ForTenant; unknown/other-tenant company returns empty (Hudu `/c/{id}/expirations` 500s — do not copy). Hide expired unless `showExpired=true`. | Phase2C | `/expirations` or `companyId` filter. Not Hudu chrome. |
 | Company portal | Entra external ID / magic-link read-only. | later | |
 | Company related items | `ResourceLink` graph later. This slice is company-scoped lists. | later | Lists ≠ relationship graph. |
 | Company museum | Novelty. Skip. | skip | |
@@ -239,7 +239,7 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Integrations — 32-tile catalog | MCP registry; add on demand. | skip | |
 | Hudu Bridge / Hudini / leaderboard | Skip. Masri AI = our RAG + MCP later. | skip | |
 | Central KB folders / public share | Tags now. Folders/share later. | later | Distinct from company-filtered docs. |
-| Global expirations | Phase 2C dashboard widget. | later | |
+| Global expirations | Same rollup without `companyId`. Search `q` + show-expired toggle. Types are field names (Expiration Date, End Date, License Expiration, Renewal Date, Next Battery Replacement, SSL Certificate, Domain, …) or `Expiration` for the asset shortcut. | Phase2C | `/expirations`. Table: Name, Company, Type, Date, days. |
 | Client portal | Phase 2C. Keeper reveal only, never local secrets. | later | |
 | Passwords (global) | Tenant-wide KeeperLink list. No vault. | skip | Phase1 links exist. |
 

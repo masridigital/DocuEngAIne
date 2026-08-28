@@ -19,6 +19,9 @@ public class Asset : EntityBase, ITenantScoped
     public Guid AssetTypeId { get; set; }
     public AssetType AssetType { get; set; } = null!;
 
+    /// <summary>Optional first-class expiration shortcut, rolled up with date custom fields.</summary>
+    public DateTimeOffset? ExpiresAt { get; set; }
+
     public ICollection<CustomFieldValue> CustomFieldValues { get; set; } = [];
     public ICollection<AssetDocumentLink> Documents { get; set; } = [];
 }

@@ -82,12 +82,14 @@ public static class ModelBuilderExtensions
         modelBuilder.Entity<FieldDefinition>(f =>
         {
             f.HasIndex(x => new { x.AssetTypeId, x.Name }).IsUnique();
+            f.Property(x => x.IsExpiration).HasDefaultValue(false);
         });
 
         modelBuilder.Entity<Asset>(a =>
         {
             a.HasIndex(x => x.AssetTypeId);
             a.HasIndex(x => new { x.TenantId, x.Name });
+            a.HasIndex(x => x.ExpiresAt);
             a.HasMany(x => x.CustomFieldValues).WithOne(v => v.Asset).HasForeignKey(v => v.AssetId).OnDelete(DeleteBehavior.Cascade);
             a.HasMany(x => x.Documents).WithOne(l => l.Asset).HasForeignKey(l => l.AssetId).OnDelete(DeleteBehavior.Cascade);
         });

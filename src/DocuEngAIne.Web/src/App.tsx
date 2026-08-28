@@ -5,6 +5,7 @@ import { AssetsPage } from './pages/AssetsPage'
 import { CompaniesPage } from './pages/CompaniesPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DocumentsPage } from './pages/DocumentsPage'
+import { ExpirationsPage } from './pages/ExpirationsPage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
 import { KeeperPage } from './pages/KeeperPage'
 import { RunbooksPage } from './pages/RunbooksPage'
@@ -20,6 +21,7 @@ function App() {
           <Route path="assets" element={<AssetsPage />} />
           <Route path="documents" element={<DocumentsPage />} />
           <Route path="runbooks" element={<RunbooksPage />} />
+          <Route path="expirations" element={<ExpirationsPage />} />
           <Route path="keeper" element={<KeeperPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

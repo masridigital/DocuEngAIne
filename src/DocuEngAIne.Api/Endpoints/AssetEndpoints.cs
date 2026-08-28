@@ -29,7 +29,7 @@ public static class AssetEndpoints
                 t.Name,
                 t.Description,
                 t.Icon,
-                Fields = t.Fields.Select(f => new { f.Id, f.Name, f.FieldType, f.IsRequired }),
+                Fields = t.Fields.Select(f => new { f.Id, f.Name, f.FieldType, f.IsRequired, f.IsExpiration }),
             }));
         });
 
@@ -50,6 +50,7 @@ public static class AssetEndpoints
                     Name = f.Name,
                     FieldType = f.Type,
                     IsRequired = f.IsRequired,
+                    IsExpiration = f.IsExpiration,
                     SortOrder = i,
                 }).ToList() ?? [],
             };
@@ -57,6 +58,33 @@ public static class AssetEndpoints
             db.AssetTypes.Add(assetType);
             await db.SaveChangesAsync(cancellationToken);
             return Results.Created($"/api/assets/types/{assetType.Id}", new { assetType.Id, assetType.Name });
+        });
+
+        group.MapPut("/fields/{id:guid}", async (
+            Guid id,
+            [FromBody] UpdateFieldDefinitionRequest request,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            CancellationToken cancellationToken) =>
+        {
+            var field = await db.FieldDefinitions
+                .Where(f => db.AssetTypes.ForTenant(user).Any(t => t.Id == f.AssetTypeId))
+                .FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
+
+            if (field is null)
+                return Results.NotFound();
+
+            field.Name = request.Name ?? field.Name;
+            field.FieldType = request.FieldType ?? field.FieldType;
+            if (request.IsRequired.HasValue)
+                field.IsRequired = request.IsRequired.Value;
+            if (request.IsExpiration.HasValue)
+                field.IsExpiration = request.IsExpiration.Value;
+            if (request.SortOrder.HasValue)
+                field.SortOrder = request.SortOrder.Value;
+
+            await db.SaveChangesAsync(cancellationToken);
+            return Results.NoContent();
         });
 
         group.MapGet("", async (
@@ -71,7 +99,7 @@ public static class AssetEndpoints
                 .OrderBy(a => a.Name)
                 .ToListAsync(cancellationToken);
 
-            return Results.Ok(assets.Select(a => new { a.Id, a.Name, a.Location, a.Status, a.CompanyId, AssetType = a.AssetType?.Name }));
+            return Results.Ok(assets.Select(a => new { a.Id, a.Name, a.Location, a.Status, a.CompanyId, a.ExpiresAt, AssetType = a.AssetType?.Name }));
         });
 
         group.MapGet("/{id:guid}", async (
@@ -110,6 +138,7 @@ public static class AssetEndpoints
                 Status = request.Status ?? "Active",
                 AssetTypeId = request.AssetTypeId,
                 CompanyId = request.CompanyId,
+                ExpiresAt = request.ExpiresAt,
             };
 
             db.Assets.Add(asset);
@@ -141,6 +170,8 @@ public static class AssetEndpoints
             asset.Notes = request.Notes ?? asset.Notes;
             asset.Status = request.Status ?? asset.Status;
             asset.AssetTypeId = request.AssetTypeId ?? asset.AssetTypeId;
+            if (request.ExpiresAt.HasValue)
+                asset.ExpiresAt = request.ExpiresAt;
 
             await db.SaveChangesAsync(cancellationToken);
             return Results.NoContent();
@@ -177,6 +208,7 @@ public static class AssetEndpoints
             asset.Status,
             asset.Notes,
             asset.CompanyId,
+            asset.ExpiresAt,
             AssetType = new { asset.AssetType?.Id, asset.AssetType?.Name },
             Fields = asset.CustomFieldValues.Select(v => new
             {
@@ -189,6 +221,7 @@ public static class AssetEndpoints
 }
 
 public record CreateAssetTypeRequest(string Name, string? Description, string? Icon, List<AssetTypeFieldRequest>? Fields);
-public record AssetTypeFieldRequest(string Name, string Type, bool IsRequired);
-public record CreateAssetRequest(string Name, Guid AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null);
-public record UpdateAssetRequest(string? Name, Guid? AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null);
+public record AssetTypeFieldRequest(string Name, string Type, bool IsRequired, bool IsExpiration = false);
+public record UpdateFieldDefinitionRequest(string? Name = null, string? FieldType = null, bool? IsRequired = null, bool? IsExpiration = null, int? SortOrder = null);
+public record CreateAssetRequest(string Name, Guid AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null, DateTimeOffset? ExpiresAt = null);
+public record UpdateAssetRequest(string? Name, Guid? AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null, DateTimeOffset? ExpiresAt = null);
