@@ -350,7 +350,7 @@ public class RunbookTests
             Assert.Equal(3, all.Count);
             Assert.Equal(new[] { thirdId, secondId, firstId }, all.Select(i => i.Id).ToArray());
             Assert.Equal("Onboard ExampleCo", all[0].RunbookTitle);
-            Assert.NotNull(all[0].StartedAt);
+            Assert.NotEqual(default, all[0].StartedAt);
             Assert.Null(all[0].FinishedAt);
             Assert.NotNull(all[1].FinishedAt);
 
