@@ -932,4 +932,212 @@ public class IntegrationSyncTests
             Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
         }
     }
+
+    private sealed class RecordingMerakiMcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public string OrganizationsJson { get; init; } = "[]";
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            string? startingAfter = null;
+            var perPage = MerakiOrganizationMapper.DefaultPageSize;
+            if (!string.IsNullOrWhiteSpace(argumentsJson))
+            {
+                using var doc = JsonDocument.Parse(argumentsJson);
+                if (doc.RootElement.TryGetProperty("startingAfter", out var a) && a.ValueKind == JsonValueKind.String)
+                    startingAfter = a.GetString();
+                if (doc.RootElement.TryGetProperty("perPage", out var s) && s.ValueKind == JsonValueKind.Number)
+                    perPage = s.GetInt32();
+            }
+
+            var inner = SliceOrganizationsJson(OrganizationsJson, startingAfter, perPage);
+            var body = JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                id = "1",
+                result = new { content = new[] { new { type = "text", text = inner } } },
+            });
+            return Task.FromResult(body);
+        }
+
+        private static string SliceOrganizationsJson(string json, string? startingAfter, int perPage)
+        {
+            using var doc = JsonDocument.Parse(json);
+            var items = new List<string>();
+            var skip = startingAfter is not null;
+            foreach (var org in doc.RootElement.EnumerateArray())
+            {
+                var id = org.GetProperty("id").GetString();
+                if (skip)
+                {
+                    if (id == startingAfter)
+                        skip = false;
+                    continue;
+                }
+                items.Add(org.GetRawText());
+                if (items.Count >= perPage)
+                    break;
+            }
+            return "[" + string.Join(",", items) + "]";
+        }
+    }
+
+    private static async Task<(McpServer Server, IntegrationConnection Connection)> SeedMerakiCompactAsync(
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool skipInactive = true, bool updateCompanyDetails = false)
+    {
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            Transport = McpTransport.Http,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.Meraki,
+            DisplayName = "Meraki",
+            McpServerId = server.Id,
+            SkipInactive = skipInactive,
+            UpdateCompanyDetails = updateCompanyDetails,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+        return (server, connection);
+    }
+
+    [Fact]
+    public async Task Meraki_SyncAsync_Creates_Companies_And_Mappings_From_Org_Id()
+    {
+        var mcp = new RecordingMerakiMcp { OrganizationsJson = MerakiOrganizationMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedMerakiCompactAsync(db, user);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(2, run.ItemsCreated);
+        Assert.Equal(0, run.ItemsSkipped);
+        Assert.Equal("meraki_get_organizations", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(server.Id, mcp.Calls[0].ServerId);
+        Assert.DoesNotContain("startingAfter", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"perPage\":50", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("meraki_get_organization_networks", mcp.Calls.Select(c => c.Tool));
+
+        var companies = await db.Companies.ToListAsync();
+        Assert.Equal(2, companies.Count);
+        var compression = Assert.Single(companies, c => c.Name == "7 Compression");
+        Assert.Equal("https://n565.dashboard.meraki.com/o/T-0Fub/manage/organization/overview", compression.Website);
+        Assert.Null(compression.HaloClientId);
+        Assert.Null(compression.NinjaOrganizationId);
+
+        var mappings = await db.IntegrationMappings.ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        var compressionMapping = Assert.Single(mappings, m => m.ExternalId == "1279651");
+        Assert.Equal("company", compressionMapping.ExternalType);
+        Assert.Equal(compression.Id, compressionMapping.LocalEntityId);
+        Assert.Contains(mappings, m => m.ExternalId == "1721429");
+    }
+
+    [Fact]
+    public async Task Meraki_Get_Organizations_Cursor_Second_CallToolAsync_Receives_StartingAfter_1721429()
+    {
+        var mcp = new RecordingMerakiMcp { OrganizationsJson = MerakiOrganizationMapperTests.LiveCompactListFixture };
+        var (db, user, _) = Create(mcp);
+        var (server, _) = await SeedMerakiCompactAsync(db, user);
+
+        var companies = await MerakiOrganizationMapper.PullAsync(mcp, server.Id, pageSize: 2);
+
+        Assert.Equal(2, companies.Count);
+        Assert.Equal("1279651", companies[0].ExternalId);
+        Assert.Equal("7 Compression", companies[0].Name);
+        Assert.Equal("https://n565.dashboard.meraki.com/o/T-0Fub/manage/organization/overview", companies[0].Website);
+        Assert.Equal(2, mcp.Calls.Count);
+        Assert.All(mcp.Calls, c => Assert.Equal("meraki_get_organizations", c.Tool));
+        Assert.Equal(server.Id, mcp.Calls[0].ServerId);
+        Assert.DoesNotContain("startingAfter", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"perPage\":2", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"startingAfter\":\"1721429\"", mcp.Calls[1].Args, StringComparison.Ordinal);
+        Assert.Contains("\"perPage\":2", mcp.Calls[1].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("meraki_get_organization_networks", mcp.Calls.Select(c => c.Tool));
+    }
+
+    [Fact]
+    public async Task Meraki_SyncAsync_Missing_McpServerId_Fails_Without_Calling_Mcp()
+    {
+        var mcp = new RecordingMerakiMcp { OrganizationsJson = MerakiOrganizationMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.Meraki,
+            DisplayName = "Meraki",
+            AuthSecretName = "kv-name-only",
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        Assert.Contains("McpServerId", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Key Vault", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
+        Assert.Empty(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Meraki_Other_Tenant_Connection_Sync_Returns_404_And_Does_Not_Call_Mcp()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var mcp = new RecordingMerakiMcp { OrganizationsJson = MerakiOrganizationMapperTests.LiveCompactListFixture };
+
+        Guid connectionBId;
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var server = new McpServer
+            {
+                TenantId = tenantB,
+                Name = "Compact B",
+                Kind = McpServerKind.StackJackCompact,
+                EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            };
+            dbB.McpServers.Add(server);
+            var connection = new IntegrationConnection
+            {
+                TenantId = tenantB,
+                Provider = IntegrationProvider.Meraki,
+                DisplayName = "Meraki B",
+                McpServerId = server.Id,
+            };
+            dbB.IntegrationConnections.Add(connection);
+            await dbB.SaveChangesAsync();
+            connectionBId = connection.Id;
+        }
+
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var sync = new IntegrationSyncService(dbA, userA, mcp, new NoopAudit());
+            var result = await IntegrationEndpoints.SyncAsync(connectionBId, null, sync, dbA, userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+            Assert.Empty(mcp.Calls);
+            Assert.Empty(await dbA.IntegrationConnections.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.SyncRuns.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
+        }
+    }
 }
