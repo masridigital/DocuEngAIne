@@ -83,6 +83,9 @@ This blocks any further schema work, so it comes before anything needing a colum
 
 ### 3. Prove one live Compact pull
 
+> Needs only a Key Vault secret and a reachable Compact endpoint — **not** the Azure deploy. This is
+> runnable well before the app is hosted, and it is the gate on whether any of the five connectors work.
+
 Provision the Compact secret in Key Vault, point a Halo connection at it, and run a real sync.
 Expect to find gaps in `HttpMcpClient` first — it POSTs bare JSON-RPC with no
 `Accept: application/json, text/event-stream`, no `initialize` handshake, no `Mcp-Session-Id`, no
@@ -126,19 +129,25 @@ Back to `MASRI-NATIVE-PLAN.md` §8, now on a foundation that can hold it:
 - Blackpoint and Composio connectors
 - Phase 2C: relationship graph, Azure AI Search, client portal, Hudu import
 
-## Blocker found 2026-08-28: the Azure deploy has never run
+## Azure deploy: intentionally not started
 
-Every one of the 20 `main` pushes since the repo began has failed at the **`Azure login`** step of the
-`infra` job. `AZURE_CREDENTIALS` is missing or invalid, so Bicep has never been deployed and
-`deploy-api` has always been skipped. `build-and-test` passes, so this stayed invisible.
+Azure has not been provisioned yet — the project is not at the testing stage. `AZURE_CREDENTIALS` is
+therefore unset **by design**, so on every `main` push the `infra` job stops at `Azure login`,
+`deploy-api` is skipped, and the workflow run is marked failed. That is expected, not a defect.
 
-That means the resource group, SQL server, Key Vault and App Service described in `infra/` most
-likely **do not exist yet**. Nothing in the pipeline downstream of Azure login has ever been
-exercised, including the new `migrate` job.
+What follows from it, and matters when Azure *is* set up:
 
-Fix `AZURE_CREDENTIALS` first. Everything else in the deploy path — the migration bundle, the
-runner firewall rule, the Key Vault read and its fallback — is unverified until then, and the first
-green run will be the real test of all of it at once.
+- The resource group, SQL server, Key Vault and App Service in `infra/` do not exist yet.
+- Nothing downstream of `Azure login` has ever executed. The `migrate` job, the migration bundle, the
+  run-scoped SQL firewall rule, the Key Vault read and its `SQL_ADMIN_*` fallback are all **written
+  but never run**. The first real deploy exercises all of them at once — budget time for that rather
+  than expecting it to be clean.
+- `build-and-test` is the check that actually gates code today, and it is green.
+
+One side effect worth deciding on: because the deploy jobs always fail, **every** run on `main` shows
+red, so a genuine failure would not stand out. If that becomes a problem before Azure is ready, gate
+the `infra` / `migrate` / `deploy-api` jobs on a repository variable (or move them to
+`workflow_dispatch`) so `main` reads green until you deliberately turn deployment on.
 
 ## Corrections to the older plan
 
