@@ -126,6 +126,20 @@ Back to `MASRI-NATIVE-PLAN.md` §8, now on a foundation that can hold it:
 - Blackpoint and Composio connectors
 - Phase 2C: relationship graph, Azure AI Search, client portal, Hudu import
 
+## Blocker found 2026-08-28: the Azure deploy has never run
+
+Every one of the 20 `main` pushes since the repo began has failed at the **`Azure login`** step of the
+`infra` job. `AZURE_CREDENTIALS` is missing or invalid, so Bicep has never been deployed and
+`deploy-api` has always been skipped. `build-and-test` passes, so this stayed invisible.
+
+That means the resource group, SQL server, Key Vault and App Service described in `infra/` most
+likely **do not exist yet**. Nothing in the pipeline downstream of Azure login has ever been
+exercised, including the new `migrate` job.
+
+Fix `AZURE_CREDENTIALS` first. Everything else in the deploy path — the migration bundle, the
+runner firewall rule, the Key Vault read and its fallback — is unverified until then, and the first
+green run will be the real test of all of it at once.
+
 ## Corrections to the older plan
 
 `MASRI-NATIVE-PLAN.md` §8 item 2 — "CompanyId on document/runbook/Keeper create-edit" — is **already
