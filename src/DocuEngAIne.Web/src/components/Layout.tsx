@@ -1,8 +1,11 @@
+import { useMsal } from '@azure/msal-react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { useProfile } from '../hooks/useApi'
 
 export function Layout() {
   const { data: profile, isLoading } = useProfile()
+  const { instance } = useMsal()
+  const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0]
 
   return (
     <div className="app-shell">
@@ -21,7 +24,12 @@ export function Layout() {
           <NavLink to="/integrations">Integrations</NavLink>
         </nav>
         <div className="profile">
-          {isLoading ? '…' : profile?.displayName ?? profile?.email ?? 'Guest'}
+          <span>{isLoading ? '…' : profile?.displayName ?? profile?.email ?? account?.name ?? account?.username ?? 'Guest'}</span>
+          {account ? (
+            <button type="button" className="btn btn-secondary" onClick={() => void instance.logoutRedirect()}>
+              Sign out
+            </button>
+          ) : null}
         </div>
       </header>
       <main className="app-main">

@@ -30,3 +30,24 @@ If you are developing a production application, we recommend enabling type-aware
 ```
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+
+## Authentication (Microsoft Entra ID)
+
+Every API endpoint requires a bearer token, so the SPA signs in with MSAL
+(`@azure/msal-browser` + `@azure/msal-react`) using the redirect flow and attaches
+an access token to every request.
+
+Configure these build-time variables (see `.env.example`; copy it to `.env.local`
+for local development):
+
+| Variable | Example |
+| --- | --- |
+| `VITE_ENTRA_CLIENT_ID` | `00000000-0000-0000-0000-000000000000` |
+| `VITE_ENTRA_AUTHORITY` | `https://login.microsoftonline.com/{tenant-id}/v2.0` |
+| `VITE_ENTRA_API_SCOPE` | `api://{api-client-id}/access` |
+
+The app registration must be of type **Single-page application** with the site
+origin (e.g. `http://localhost:5173`) registered as a redirect URI.
+
+If any variable is missing the app renders a notice naming the missing variables
+instead of failing every request.

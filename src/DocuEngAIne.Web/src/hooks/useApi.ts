@@ -1,6 +1,62 @@
 import useSWR from 'swr'
+import { acquireApiToken } from '../auth/msalConfig'
 
-const fetcher = (url: string) => fetch(url).then((r) => r.json())
+/** Thrown for any non-2xx API response. Carries the HTTP status and the response body. */
+export class ApiError extends Error {
+  readonly status: number
+  readonly body: string
+
+  constructor(status: number, statusText: string, body: string) {
+    super(body ? `Request failed (${status}): ${body}` : `Request failed (${status}${statusText ? ` ${statusText}` : ''})`)
+    this.name = 'ApiError'
+    this.status = status
+    this.body = body
+  }
+}
+
+function describeBody(contentType: string | null, text: string) {
+  if (!text) return ''
+  if (contentType?.includes('json')) {
+    try {
+      const parsed = JSON.parse(text) as { detail?: string; title?: string; message?: string }
+      return parsed.detail ?? parsed.title ?? parsed.message ?? text
+    } catch {
+      return text
+    }
+  }
+  return text
+}
+
+/**
+ * Single entry point for every API call: acquires an Entra access token, attaches
+ * it as a bearer token and turns any non-2xx response into an ApiError.
+ */
+async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
+  const token = await acquireApiToken()
+  const headers = new Headers(init?.headers)
+  headers.set('Authorization', `Bearer ${token}`)
+  const res = await fetch(url, { ...init, headers })
+  if (!res.ok) {
+    let text = ''
+    try {
+      text = await res.text()
+    } catch {
+      text = ''
+    }
+    throw new ApiError(res.status, res.statusText, describeBody(res.headers.get('content-type'), text).trim())
+  }
+  return res
+}
+
+async function readJson<T>(res: Response): Promise<T> {
+  const text = await res.text()
+  if (!text) {
+    return undefined as T
+  }
+  return JSON.parse(text) as T
+}
+
+const fetcher = async (url: string): Promise<any> => readJson(await apiFetch(url))
 
 export type RelatedListItem = {
   id: string
@@ -326,19 +382,12 @@ export function useIntegrations() {
 }
 
 async function postJson<T>(url: string, body?: unknown): Promise<T> {
-  const res = await fetch(url, {
+  const res = await apiFetch(url, {
     method: 'POST',
     headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
   })
-  const text = await res.text()
-  if (!res.ok) {
-    throw new Error(text || `Request failed (${res.status})`)
-  }
-  if (!text) {
-    return undefined as T
-  }
-  return JSON.parse(text) as T
+  return readJson<T>(res)
 }
 
 export function createCompany(input: CreateCompanyInput) {
@@ -370,15 +419,11 @@ export function createIntegration(input: CreateIntegrationInput) {
 }
 
 async function putJson(url: string, body: unknown): Promise<void> {
-  const res = await fetch(url, {
+  await apiFetch(url, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  const text = await res.text()
-  if (!res.ok) {
-    throw new Error(text || `Request failed (${res.status})`)
-  }
 }
 
 export function updateIntegration(id: string, input: UpdateIntegrationInput) {
