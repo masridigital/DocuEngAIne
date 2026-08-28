@@ -1,4 +1,5 @@
 using DocuEngAIne.Core.Entities;
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -37,8 +38,14 @@ public static class AssetEndpoints
             [FromBody] CreateAssetTypeRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            // Asset types are tenant-wide schema, not a resource anyone can hold a grant on, so this
+            // resolves to the caller's tenant-wide role.
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Asset, cancellationToken) is { } denied)
+                return denied;
+
             var assetType = new AssetType
             {
                 TenantId = user.TenantId!.Value,
@@ -65,8 +72,14 @@ public static class AssetEndpoints
             [FromBody] UpdateFieldDefinitionRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            // The route id is a FieldDefinition, not an Asset, so a per-asset grant cannot apply to
+            // it: field definitions are tenant-wide schema and gate on the tenant-wide role.
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Asset, cancellationToken) is { } denied)
+                return denied;
+
             var field = await db.FieldDefinitions
                 .Where(f => db.AssetTypes.ForTenant(user).Any(t => t.Id == f.AssetTypeId))
                 .FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
@@ -124,8 +137,14 @@ public static class AssetEndpoints
             [FromBody] CreateAssetRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            // The asset does not exist yet, so no grant can name it: creation gates on the
+            // tenant-wide role.
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Asset, cancellationToken) is { } denied)
+                return denied;
+
             if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
                 return badCompany;
 
@@ -151,8 +170,12 @@ public static class AssetEndpoints
             [FromBody] UpdateAssetRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
+                return denied;
+
             var asset = await db.Assets
                 .ForTenant(user)
                 .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
@@ -181,8 +204,12 @@ public static class AssetEndpoints
             Guid id,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
+                return denied;
+
             var asset = await db.Assets
                 .ForTenant(user)
                 .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
@@ -218,6 +245,76 @@ public static class AssetEndpoints
             }),
         };
     }
+}
+
+/// <summary>
+/// Turns an <see cref="IResourceAuthorizationService"/> decision into a minimal-API result, so the
+/// object-level grants stored in <c>ResourceRoleAssignment</c> actually gate the write routes of the
+/// four resource endpoint families (assets, documents, runbooks, Keeper links).
+/// </summary>
+/// <remarks>
+/// <para>
+/// The boolean <c>CanWriteAsync</c> is used in preference to <c>EnforceAsync</c>. <c>EnforceAsync</c>
+/// signals denial by throwing <see cref="UnauthorizedAccessException"/>, and nothing in this
+/// application's pipeline translates that exception, so a denied caller would receive a 500 that
+/// looks like a server fault instead of a 403 that tells them to ask for a grant.
+/// </para>
+/// <para>
+/// Denial is <c>Results.StatusCode(403)</c> rather than <c>Results.Forbid()</c> because <c>Forbid</c>
+/// defers to the authentication scheme's forbid handler — an indirection that yields no status code
+/// a unit test can observe, and that is scheme-dependent for a decision this code has already made.
+/// </para>
+/// <para>
+/// An Entra app-role claim is accepted as an alternative to the stored role, for the same reason
+/// <c>TenantAdminAuthorizationHandler</c> accepts it: DocuEngAIne has two independent sources of
+/// truth for a caller's rank, and only one of them (the <c>User</c> row) is visible to the
+/// resource service. Without this, a tenant that configures app roles but whose members were
+/// provisioned as <c>Reader</c> by <c>GET /api/me</c> would see every one of its writers locked out
+/// the moment these guards landed. The claim is checked first because it costs no database
+/// round-trip.
+/// </para>
+/// </remarks>
+public static class ResourceWriteGuard
+{
+    /// <summary>
+    /// Returns <see langword="null"/> when the caller may write <paramref name="resourceId"/>, or a
+    /// 403 result to return from the handler when they may not.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately runs before the handler loads the row. The answer does not depend on whether the
+    /// row exists, and checking first keeps a denied caller from learning which ids are real.
+    /// </remarks>
+    public static async Task<IResult?> RequireWriteAsync(
+        IResourceAuthorizationService authorization,
+        ICurrentUser user,
+        Guid resourceId,
+        string resourceType,
+        CancellationToken cancellationToken = default)
+    {
+        if (user.HasRole(UserRole.Contributor))
+            return null;
+
+        return await authorization.CanWriteAsync(resourceId, resourceType, cancellationToken)
+            ? null
+            : Results.StatusCode(StatusCodes.Status403Forbidden);
+    }
+
+    /// <summary>
+    /// Write gate for operations that have no resource to name yet — creating a record, or editing
+    /// tenant-wide schema such as asset types and field definitions.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Guid.Empty"/> can never identify a stored entity (<c>EntityBase.Id</c> is always a
+    /// generated GUID), so no <c>ResourceRoleAssignment</c> can match it and the lookup falls through
+    /// to the caller's tenant-wide role. That is the intended answer: a grant on one document cannot
+    /// confer the right to create new ones.
+    /// </remarks>
+    public static Task<IResult?> RequireTenantWriteAsync(
+        IResourceAuthorizationService authorization,
+        ICurrentUser user,
+        string resourceType,
+        CancellationToken cancellationToken = default) =>
+        RequireWriteAsync(authorization, user, Guid.Empty, resourceType, cancellationToken);
 }
 
 public record CreateAssetTypeRequest(string Name, string? Description, string? Icon, List<AssetTypeFieldRequest>? Fields);
