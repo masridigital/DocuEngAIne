@@ -187,7 +187,7 @@ Keep README direction: Azure AI Search + OpenAI RAG over documents, assets, runb
 - **Global**: cross-company Passwords, Networks, Racks, Websites, Expirations; Flag Review; Process Completion; Documentation Quality. Skip Leaderboard/Gold Standards as non-core.
 - **Central KB**: account-wide articles with folders; Public/share flag. Distinct from company KB (`/kba?company_id=`).
 - **Expirations**: aggregate across API keys, contracts, licenses, SaaS renewals, UPS battery, SSL, domains — Phase 2C widget.
-- **Processes**: template → per-company instance with run tracking (extend Runbook with run history later).
+- **Processes**: template → per-company instance with run tracking (this slice: `RunbookRun` on existing Runbook). Global Process Completion later.
 - **UniFi MCP**: sites, alarms, devices, network configs, port forwards.
 - **Security**: 2FA, SAML/SSO, IP allow-list, idle timeout — Entra covers auth; optional IP allow-list later.
 - **Portal**: white-label client portal (KB, limited reveal via Keeper links only, websites, files). Phase 2C.
@@ -201,7 +201,7 @@ Next:
 1. Wire StackJack MCP credentials in Key Vault and a live Halo/Ninja company pull
 2. CompanyId on document/runbook/Keeper create-edit (assets already accept it)
 3. Phase 2B: UniFi + Blackpoint MCP; sync schedules + SyncRun UI; Halo/Ninja deep links
-4. Phase 2C: relationship graph, Azure AI Search, client portal, Hudu export import (passwords → Keeper only). Expirations + flags shipped.
+4. Phase 2C: relationship graph, Azure AI Search, client portal, Hudu export import (passwords → Keeper only). Expirations + flags + runbook runs shipped. Global Process Completion later.
 5. `dotnet ef migrations add Phase2IntegrationsReconcile` if the model snapshot still needs regen after the hand-written Phase 2 migrations
 
 ## 9. Hudu ↔ DocuEngAIne verification matrix
@@ -218,7 +218,7 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Top nav — Admin | Entra + RBAC + audit. Azure for SMTP/license. | Phase1 | Users/roles/audit exist. Layouts UI later. |
 | Company home | Overview + related counts/lists (assets, docs, runbooks, Keeper). | Phase2A | `/companies/:id`. Not Hudu tab chrome. |
 | Company passwords | `KeeperLink` filtered by `CompanyId`. Reveal audits. | Phase2A | Links only. Open in Keeper. |
-| Company processes | Runbooks filtered by `CompanyId`. Run history later. | Phase2A | Same Runbook model; no Hudu completion UI. |
+| Company processes | Extend **Runbook** (not a second product): `RunbookRun` with Running/Completed/Cancelled, optional `CompanyId` (`ForTenant`), `runCount` + start-run. Tenant-wide books = templates (Hudu admin Process Templates had 0); per-company books = checklists (ExampleCo had 2 ad-hoc). Global Process Completion rollup later. | Phase2C | `/runbooks` shows runCount + Start run. Company detail lists runCount. Other-tenant runbook start = 404. |
 | Company KB | Documents filtered by `CompanyId`. | Phase2A | Same Document model as central KB. |
 | Company photos | Blob storage later. | later | |
 | Company IPAM | UniFi/MCP owns live network. No IPAM product line day one. | later | |

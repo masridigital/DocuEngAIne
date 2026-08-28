@@ -6,6 +6,7 @@ export type RelatedListItem = {
   id: string
   name: string
   updatedAt?: string
+  runCount?: number | null
 }
 
 export type CompanyCounts = {
@@ -174,8 +175,33 @@ export function useDocuments() {
   return useSWR('/api/documents', fetcher)
 }
 
+export type Runbook = {
+  id: string
+  title: string
+  slug?: string | null
+  description?: string | null
+  tags?: string | null
+  companyId?: string | null
+  runCount?: number
+  updatedAt?: string
+}
+
+export type RunbookRun = {
+  id: string
+  runbookId: string
+  companyId?: string | null
+  status: 'Running' | 'Completed' | 'Cancelled' | string
+  startedAt: string
+  finishedAt?: string | null
+  startedByObjectId?: string | null
+}
+
 export function useRunbooks() {
-  return useSWR('/api/runbooks', fetcher)
+  return useSWR<Runbook[]>('/api/runbooks', fetcher)
+}
+
+export function startRunbookRun(runbookId: string, companyId?: string | null) {
+  return postJson<RunbookRun>(`/api/runbooks/${runbookId}/runs`, { companyId: companyId ?? null })
 }
 
 export function useKeeperLinks() {

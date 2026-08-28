@@ -127,11 +127,22 @@ public static class ModelBuilderExtensions
         {
             r.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
             r.HasMany(x => x.Steps).WithOne(s => s.Runbook).HasForeignKey(s => s.RunbookId).OnDelete(DeleteBehavior.Cascade);
+            r.HasMany(x => x.Runs).WithOne(s => s.Runbook).HasForeignKey(s => s.RunbookId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<RunbookStep>(s =>
         {
             s.HasIndex(x => new { x.RunbookId, x.Order }).IsUnique();
+        });
+
+        modelBuilder.Entity<RunbookRun>(r =>
+        {
+            r.HasIndex(x => new { x.RunbookId, x.StartedAt });
+            r.HasIndex(x => new { x.TenantId, x.StartedAt });
+            // Restrict: Runbook already cascades from Tenant — SQL Server forbids multiple cascade paths.
+            r.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            // Restrict: Company already SetNull-cascades to Runbook — avoid a second path to RunbookRun.
+            r.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ResourceRoleAssignment>(r =>

@@ -184,7 +184,7 @@ public static class CompanyEndpoints
                 .Select(d => new RelatedListItem(d.Id, d.Title, d.UpdatedAt)).ToListAsync(cancellationToken),
             await runbooksQ.CountAsync(cancellationToken),
             await runbooksQ.OrderByDescending(r => r.UpdatedAt).Take(take)
-                .Select(r => new RelatedListItem(r.Id, r.Title, r.UpdatedAt)).ToListAsync(cancellationToken),
+                .Select(r => new RelatedListItem(r.Id, r.Title, r.UpdatedAt, r.Runs.Count())).ToListAsync(cancellationToken),
             await keeperQ.CountAsync(cancellationToken),
             await keeperQ.OrderByDescending(k => k.UpdatedAt).Take(take)
                 .Select(k => new RelatedListItem(k.Id, k.Name, k.UpdatedAt)).ToListAsync(cancellationToken));
@@ -238,7 +238,7 @@ public static class CompanyEndpoints
     };
 }
 
-public sealed record RelatedListItem(Guid Id, string Name, DateTimeOffset UpdatedAt);
+public sealed record RelatedListItem(Guid Id, string Name, DateTimeOffset UpdatedAt, int? RunCount = null);
 
 public sealed record CompanyRelatedSnapshot(
     int AssetCount,

@@ -32,6 +32,7 @@ public class DocuEngAIneDbContext : DbContext
     public DbSet<KeeperLink> KeeperLinks => Set<KeeperLink>();
     public DbSet<Runbook> Runbooks => Set<Runbook>();
     public DbSet<RunbookStep> RunbookSteps => Set<RunbookStep>();
+    public DbSet<RunbookRun> RunbookRuns => Set<RunbookRun>();
     public DbSet<ResourceRoleAssignment> ResourceRoleAssignments => Set<ResourceRoleAssignment>();
     public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
     public DbSet<FlagDefinition> FlagDefinitions => Set<FlagDefinition>();

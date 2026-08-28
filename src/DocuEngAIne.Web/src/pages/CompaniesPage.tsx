@@ -197,6 +197,9 @@ function RelatedSection({
           {list.map((item) => (
             <li key={item.id}>
               <Link to={href}>{item.name}</Link>
+              {item.runCount != null && (
+                <span className="muted"> · {item.runCount === 1 ? '1 run' : `${item.runCount} runs`}</span>
+              )}
             </li>
           ))}
         </ul>

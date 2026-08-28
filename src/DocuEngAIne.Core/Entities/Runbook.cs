@@ -18,4 +18,5 @@ public class Runbook : EntityBase, ITenantScoped
     public bool IsPublished { get; set; } = true;
 
     public ICollection<RunbookStep> Steps { get; set; } = [];
+    public ICollection<RunbookRun> Runs { get; set; } = [];
 }

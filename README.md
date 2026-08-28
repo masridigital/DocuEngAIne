@@ -36,7 +36,7 @@ tests/                      # xUnit + EF InMemory tests
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
 - **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
 - **Document** — KB articles with full-text search and **versioning**.
-- **Runbook / RunbookStep** — ordered SOPs and checklists.
+- **Runbook / RunbookStep / RunbookRun** — ordered SOPs and checklists with start/complete/cancel run history. Tenant-wide books are templates; optional `CompanyId` is the per-client instance. Not a second process product. No local secrets.
 - **KeeperLink** — links to credentials in **Keeper**; no secrets are stored locally.
 - **ResourceRoleAssignment** — object-level RBAC overriding tenant-wide roles.
 - **AuditLog** — action trail (tenant-scoped where applicable).
@@ -238,11 +238,15 @@ Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipC
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/runbooks` | Search runbooks |
-| GET | `/api/runbooks/{id}` | Runbook detail with steps |
+| GET | `/api/runbooks` | Search runbooks (includes `runCount`) |
+| GET | `/api/runbooks/{id}` | Runbook detail with steps and `runCount` |
 | POST | `/api/runbooks` | Create runbook |
 | PUT | `/api/runbooks/{id}` | Update runbook and steps |
 | DELETE | `/api/runbooks/{id}` | Delete runbook |
+| GET | `/api/runbooks/{id}/runs` | List runs (`ForTenant`; other-tenant runbook → 404) |
+| POST | `/api/runbooks/{id}/runs` | Start a run (optional `companyId`, must `ForTenant`) |
+| POST | `/api/runbooks/{id}/runs/{runId}/complete` | Mark a running run completed |
+| POST | `/api/runbooks/{id}/runs/{runId}/cancel` | Cancel a running run |
 
 ### Keeper Links
 
@@ -288,7 +292,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] GET MCP server and integration by id; SQL cascade fix
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 
-> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), and `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), and `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), and `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
 
 
 ### Later
@@ -297,6 +301,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [ ] UniFi / Blackpoint as MCP connectors
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
 - [x] Flags (`GET/POST /api/flags`, assign, `/flags` review queue)
+- [x] Runbook runs (`POST/GET /api/runbooks/{id}/runs`, complete/cancel, `runCount`). Global Process Completion rollup later.
 - [ ] Client portal
 - [ ] Switch SQL auth to managed identity
 - [ ] One-time Hudu export migration (passwords → Keeper only)

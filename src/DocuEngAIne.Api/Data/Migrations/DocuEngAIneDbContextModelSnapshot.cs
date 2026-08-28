@@ -538,6 +538,51 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.ToTable("Runbooks");
                 });
 
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.RunbookRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("FinishedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("RunbookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("StartedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("StartedByObjectId")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("RunbookId", "StartedAt");
+
+                    b.HasIndex("TenantId", "StartedAt");
+
+                    b.ToTable("RunbookRuns");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.RunbookStep", b =>
                 {
                     b.Property<Guid>("Id")
@@ -833,6 +878,26 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.RunbookRun", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.Runbook", "Runbook")
+                        .WithMany("Runs")
+                        .HasForeignKey("RunbookId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Runbook");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.RunbookStep", b =>
                 {
                     b.HasOne("DocuEngAIne.Core.Entities.Runbook", "Runbook")
@@ -878,6 +943,8 @@ namespace DocuEngAIne.Api.Data.Migrations
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Runbook", b =>
                 {
+                    b.Navigation("Runs");
+
                     b.Navigation("Steps");
                 });
 
