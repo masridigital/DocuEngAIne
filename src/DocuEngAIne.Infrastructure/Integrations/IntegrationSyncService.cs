@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
@@ -180,6 +181,18 @@ public class IntegrationSyncService : IIntegrationSyncService
         {
             // SkipContacts/SkipLocations/SkipAssets/AutoUpdateAssetNames document intent for
             // later live Halo/Ninja pulls. v1 payload upsert is companies only.
+            var providerKey = CompanyIdentity.ProviderKey(connection.Provider);
+            var index = new CompanyMatchIndex(
+                await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken));
+
+            // One external record per company per connection. Without this, two rows from the same
+            // provider that share a normalized name or domain ("Acme" and "ACME") would both adopt
+            // the company the first row created, and the second client would never get one.
+            var claimedCompanyIds = (await _db.IntegrationMappings.ForTenant(_user)
+                .Where(m => m.IntegrationConnectionId == connection.Id && m.ExternalType == "company")
+                .Select(m => m.LocalEntityId)
+                .ToListAsync(cancellationToken)).ToHashSet();
+
             foreach (var dto in companies)
             {
                 if (connection.SkipInactive && dto.IsInactive == true)
@@ -197,6 +210,29 @@ public class IntegrationSyncService : IIntegrationSyncService
                 Company company;
                 if (mapping is null)
                 {
+                    // Another provider may already own this client. Adopt it instead of duplicating.
+                    var match = index.Find(providerKey, dto);
+                    if (match is not null && !claimedCompanyIds.Contains(match.Company.Id))
+                    {
+                        company = match.Company;
+                        ApplyDetails(company, dto, connection);
+                        StampExternalId(company, connection, providerKey, dto.ExternalId);
+                        _db.IntegrationMappings.Add(new IntegrationMapping
+                        {
+                            TenantId = _user.TenantId!.Value,
+                            IntegrationConnectionId = connection.Id,
+                            ExternalId = dto.ExternalId,
+                            ExternalType = "company",
+                            LocalEntityType = nameof(Company),
+                            LocalEntityId = company.Id,
+                            MetadataJson = JsonSerializer.Serialize(new { matchedBy = match.Reason }),
+                        });
+                        index.Add(company);
+                        claimedCompanyIds.Add(company.Id);
+                        run.ItemsUpdated++;
+                        continue;
+                    }
+
                     var slug = string.IsNullOrWhiteSpace(dto.Slug)
                         ? Slugify(dto.Name)
                         : dto.Slug!;
@@ -211,9 +247,8 @@ public class IntegrationSyncService : IIntegrationSyncService
                         State = dto.State,
                         Website = dto.Website,
                         Address = dto.Address,
-                        HaloClientId = connection.Provider == IntegrationProvider.Halo ? dto.ExternalId : null,
-                        NinjaOrganizationId = connection.Provider == IntegrationProvider.NinjaOne ? dto.ExternalId : null,
                     };
+                    StampExternalId(company, connection, providerKey, dto.ExternalId);
                     _db.Companies.Add(company);
                     await _db.SaveChangesAsync(cancellationToken);
 
@@ -226,27 +261,18 @@ public class IntegrationSyncService : IIntegrationSyncService
                         LocalEntityType = nameof(Company),
                         LocalEntityId = company.Id,
                     });
+                    index.Add(company);
+                    claimedCompanyIds.Add(company.Id);
                     run.ItemsCreated++;
                 }
                 else
                 {
                     company = await _db.Companies.ForTenant(_user)
                         .FirstAsync(c => c.Id == mapping.LocalEntityId, cancellationToken);
-                    if (connection.UpdateCompanyDetails)
-                    {
-                        company.Name = dto.Name;
-                        company.PrimaryDomain = dto.PrimaryDomain ?? company.PrimaryDomain;
-                        company.City = dto.City ?? company.City;
-                        company.State = dto.State ?? company.State;
-                        company.Website = dto.Website ?? company.Website;
-                        company.Address = dto.Address ?? company.Address;
-                    }
-                    if (connection.Provider == IntegrationProvider.Halo
-                        && (connection.UpdateCompanyDetails || string.IsNullOrEmpty(company.HaloClientId)))
-                        company.HaloClientId = dto.ExternalId;
-                    if (connection.Provider == IntegrationProvider.NinjaOne
-                        && (connection.UpdateCompanyDetails || string.IsNullOrEmpty(company.NinjaOrganizationId)))
-                        company.NinjaOrganizationId = dto.ExternalId;
+                    ApplyDetails(company, dto, connection);
+                    StampExternalId(company, connection, providerKey, dto.ExternalId);
+                    index.Add(company);
+                    claimedCompanyIds.Add(company.Id);
                     run.ItemsUpdated++;
                 }
             }
@@ -341,6 +367,44 @@ public class IntegrationSyncService : IIntegrationSyncService
             throw new InvalidOperationException("Meraki organization pull requires a StackJack Compact MCP server. Composio is not a Meraki connector.");
 
         return await MerakiOrganizationMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>Overwrites local company detail only when the connection opts in. Default is refuse-to-clobber.</summary>
+    private static void ApplyDetails(Company company, ExternalCompanyDto dto, IntegrationConnection connection)
+    {
+        if (!connection.UpdateCompanyDetails)
+            return;
+
+        company.Name = dto.Name;
+        company.PrimaryDomain = dto.PrimaryDomain ?? company.PrimaryDomain;
+        company.City = dto.City ?? company.City;
+        company.State = dto.State ?? company.State;
+        company.Website = dto.Website ?? company.Website;
+        company.Address = dto.Address ?? company.Address;
+    }
+
+    /// <summary>
+    /// Records provider identity on the company: the typed Halo/Ninja columns where they exist,
+    /// and <see cref="Company.ExternalIdsJson"/> for every provider so later runs can match on it.
+    /// </summary>
+    private static void StampExternalId(Company company, IntegrationConnection connection, string providerKey, string externalId)
+    {
+        if (connection.Provider == IntegrationProvider.Halo
+            && (connection.UpdateCompanyDetails || string.IsNullOrEmpty(company.HaloClientId)))
+            company.HaloClientId = externalId;
+
+        if (connection.Provider == IntegrationProvider.NinjaOne
+            && (connection.UpdateCompanyDetails || string.IsNullOrEmpty(company.NinjaOrganizationId)))
+            company.NinjaOrganizationId = externalId;
+
+        // Guarded exactly like the typed columns above: without this the JSON would disagree with
+        // HaloClientId/NinjaOrganizationId, and providers with no typed column would lose their
+        // original id -- which is what provider-id matching relies on.
+        if (connection.UpdateCompanyDetails
+            || !CompanyIdentity.ReadExternalIds(company.ExternalIdsJson).ContainsKey(providerKey))
+        {
+            company.ExternalIdsJson = CompanyIdentity.UpsertExternalId(company.ExternalIdsJson, providerKey, externalId);
+        }
     }
 
     private async Task<SyncRun> FailRunAsync(IntegrationConnection connection, string error, CancellationToken cancellationToken)
