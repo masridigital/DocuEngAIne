@@ -120,6 +120,18 @@ asset/document/runbook/Keeper writes, and default new users to `Reader`.
 
 Needed before a second real tenant, not before the next demo.
 
+### 5b. Add role management — surfaced by the authorization work
+
+With admin routes gated and auto-provisioning defaulted to `Reader`, **nothing in the codebase can
+change a `User.Role`**. The first user in a tenant is bootstrapped to `Owner`; everyone after is a
+`Reader` forever, and if that first person leaves, the tenant has no admin and no in-app recovery.
+
+An admin-gated `PUT /api/users/{id}/role` (plus a users list) is the smallest thing that makes the
+gate usable. Treat it as part of shipping authorization, not a follow-up.
+
+Note this is only safe to ship *because* nothing has been deployed yet — there are no existing tenants
+carrying the old `Contributor` default to be locked out.
+
 ### 6. Resume the feature chain
 
 Back to `MASRI-NATIVE-PLAN.md` §8, now on a foundation that can hold it:
@@ -163,6 +175,43 @@ Note `null` on update means "leave unchanged", never "clear", consistently acros
 Runbook, KeeperLink and Folder. There is therefore **no way to detach** a resource from a company
 through the API. That is a real gap, but a deliberate, consistent one — changing it needs a sentinel
 value or a separate route, and should be decided rather than slipped in.
+
+## AI surface — direction captured 2026-08-28
+
+Three things Joe called for. None started; recorded here so the shape is agreed before code.
+
+### 1. Expose DocuEngAIne's own MCP server to other harnesses
+
+Today we are an MCP *client* (we call StackJack Compact). The ask is the other direction: publish our
+documentation as MCP tools so Claude, Cursor and other harnesses can read a client's assets, docs,
+runbooks, expirations and Keeper links directly.
+
+The hard part is not the protocol, it is the trust boundary. Every existing query is scoped by
+`ForTenant(currentUser)`, and `ICurrentUser` is derived from an Entra JWT on an HTTP request. An MCP
+client is not a browser session, so this needs its own auth path — most likely per-tenant API tokens
+or Entra client credentials — mapped onto a `ICurrentUser` a background/non-HTTP scope can supply.
+That same gap blocks the sync scheduler (below), so the two should be solved together, once.
+
+Read-only first. Keeper reveal must stay out of the tool surface, or be audit-logged exactly as the
+HTTP path is.
+
+### 2. Promote content into documentation
+
+A path from "something we learned" to "a documented article", rather than expecting techs to write
+docs from scratch. Candidate sources: a sync result, a completed runbook run, an asset's change
+history, a resolved Halo ticket.
+
+**Ambiguous as specified — confirm before building.** It could mean a one-click "promote this into a
+Document", an AI drafting step over the source material, or a review queue of suggestions. The
+existing `FlagDefinition` / review-queue machinery and `Document` versioning already cover part of
+whichever shape wins.
+
+### 3. Screen-recording capture (future)
+
+A browser extension in the spirit of Hudu's, recording a workflow and turning it into a documented
+procedure. Explicitly a later phase. It lands naturally on `Runbook` / `RunbookStep` rather than
+`Document`, since the output is an ordered procedure. Needs blob storage, which the plan already
+defers to Phase 3 for photos — same dependency, so the two should be planned together.
 
 ## Testing debt worth naming
 
