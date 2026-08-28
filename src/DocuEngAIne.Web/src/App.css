@@ -519,3 +519,36 @@ body {
   color: var(--text-muted);
   font-weight: 600;
 }
+
+.status-failed {
+  color: var(--danger);
+  font-weight: 600;
+}
+
+.status-partial {
+  color: #fbbf24;
+  font-weight: 600;
+}
+
+.sync-history-cell {
+  background: var(--bg);
+}
+
+.sync-history h3 {
+  margin: 4px 0 0;
+  font-size: 0.95rem;
+}
+
+.sync-history h3 + p {
+  margin: 8px 0 0;
+}
+
+.sync-history .data-table {
+  margin: 8px 0 16px;
+}
+
+.sync-history .sync-error {
+  max-width: 360px;
+  white-space: normal;
+  font-size: 0.85rem;
+}

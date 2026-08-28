@@ -43,7 +43,7 @@ function flattenFolders(folders: DocumentFolder[]): FolderRow[] {
 
 export function DocumentsPage() {
   const { data: folderData, error: folderError, isLoading: foldersLoading, mutate: mutateFolders } = useFolders()
-  const folders: DocumentFolder[] = Array.isArray(folderData) ? folderData : []
+  const folders: DocumentFolder[] = useMemo(() => (Array.isArray(folderData) ? folderData : []), [folderData])
   const rows = useMemo(() => flattenFolders(folders), [folders])
 
   const [selectedFolderId, setSelectedFolderId] = useState<string | null>(null)

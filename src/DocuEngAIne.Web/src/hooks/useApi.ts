@@ -1,4 +1,4 @@
-import useSWR from 'swr'
+import useSWR, { mutate } from 'swr'
 import { acquireApiToken } from '../auth/msalConfig'
 
 /** Thrown for any non-2xx API response. Carries the HTTP status and the response body. */
@@ -379,6 +379,52 @@ export function useMcpServers() {
 
 export function useIntegrations() {
   return useSWR<IntegrationConnection[]>('/api/integrations', fetcher)
+}
+
+export type SyncRunStatus = 'Running' | 'Succeeded' | 'Failed' | 'Partial'
+
+export type SyncRun = {
+  id: string
+  integrationConnectionId: string
+  startedAt: string
+  finishedAt?: string | null
+  status: SyncRunStatus | string
+  itemsCreated: number
+  itemsUpdated: number
+  itemsSkipped: number
+  errorSummary?: string | null
+}
+
+export type IntegrationMapping = {
+  id: string
+  externalId: string
+  externalType: string
+  localEntityType: string
+  localEntityId: string
+  metadataJson?: string | null
+}
+
+function syncRunsKey(integrationId: string) {
+  return `/api/integrations/${integrationId}/runs`
+}
+
+function integrationMappingsKey(integrationId: string) {
+  return `/api/integrations/${integrationId}/mappings`
+}
+
+/** The 50 most recent sync runs for one integration. Pass undefined to skip the fetch. */
+export function useSyncRuns(integrationId: string | undefined) {
+  return useSWR<SyncRun[]>(integrationId ? syncRunsKey(integrationId) : null, fetcher)
+}
+
+/** External→local mappings recorded by past syncs. Pass undefined to skip the fetch. */
+export function useIntegrationMappings(integrationId: string | undefined) {
+  return useSWR<IntegrationMapping[]>(integrationId ? integrationMappingsKey(integrationId) : null, fetcher)
+}
+
+/** Revalidates the cached runs and mappings for one integration — call after triggering a sync. */
+export function refreshIntegrationHistory(integrationId: string) {
+  return Promise.all([mutate(syncRunsKey(integrationId)), mutate(integrationMappingsKey(integrationId))])
 }
 
 async function postJson<T>(url: string, body?: unknown): Promise<T> {
