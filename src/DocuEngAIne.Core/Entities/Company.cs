@@ -11,11 +11,18 @@ public class Company : EntityBase, ITenantScoped
     public required string Name { get; set; }
     public required string Slug { get; set; }
     public string? CompanyNumber { get; set; }
+    public string? CompanyType { get; set; }
+    public string? Nickname { get; set; }
+    public Guid? ParentCompanyId { get; set; }
+    public Company? ParentCompany { get; set; }
     public string? PrimaryDomain { get; set; }
     public string? Address { get; set; }
     public string? City { get; set; }
     public string? State { get; set; }
+    public string? Country { get; set; }
+    public string? PostalCode { get; set; }
     public string? Phone { get; set; }
+    public string? Fax { get; set; }
     public string? Website { get; set; }
     public string? Notes { get; set; }
     public string? HoursOfOperation { get; set; }
@@ -30,6 +37,7 @@ public class Company : EntityBase, ITenantScoped
     public string? NinjaPortalUrl { get; set; }
     public string? ExternalIdsJson { get; set; }
 
+    public ICollection<Company> ChildCompanies { get; set; } = [];
     public ICollection<Asset> Assets { get; set; } = [];
     public ICollection<Document> Documents { get; set; } = [];
     public ICollection<DocumentFolder> DocumentFolders { get; set; } = [];

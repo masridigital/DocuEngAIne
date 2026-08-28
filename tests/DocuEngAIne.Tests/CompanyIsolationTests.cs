@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DocuEngAIne.Api.Endpoints;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
@@ -346,5 +347,161 @@ public class CompanyIsolationTests
             Assert.Equal(companyA.Id, runbook.CompanyId);
             Assert.Equal(companyA.Id, keeper.CompanyId);
         }
+    }
+
+    [Fact]
+    public async Task Cannot_Set_ParentCompany_From_Another_Tenant()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var companyA = new Company { TenantId = tenantA, Name = "A Co", Slug = "a-co" };
+        var companyB = new Company { TenantId = tenantB, Name = "B Co", Slug = "b-co" };
+
+        var (seedA, _) = Open(dbName, tenantA);
+        await using (seedA)
+        {
+            seedA.Companies.Add(companyA);
+            await seedA.SaveChangesAsync();
+        }
+
+        var (seedB, _) = Open(dbName, tenantB);
+        await using (seedB)
+        {
+            seedB.Companies.Add(companyB);
+            await seedB.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var created = await CompanyEndpoints.CreateAsync(
+                new CreateCompanyRequest("Child", "child", ParentCompanyId: companyB.Id),
+                db,
+                user);
+            AssertParentNotFound(created);
+
+            var updated = await CompanyEndpoints.UpdateAsync(
+                companyA.Id,
+                new UpdateCompanyRequest(ParentCompanyId: companyB.Id),
+                db,
+                user);
+            AssertParentNotFound(updated);
+
+            db.ChangeTracker.Clear();
+            var reloaded = await db.Companies.ForTenant(user).SingleAsync(c => c.Id == companyA.Id);
+            Assert.Null(reloaded.ParentCompanyId);
+            Assert.False(await db.Companies.ForTenant(user).AnyAsync(c => c.Slug == "child"));
+        }
+    }
+
+    [Fact]
+    public async Task Same_Tenant_Parent_Is_Accepted_And_List_Still_Works()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var parent = new Company
+        {
+            TenantId = tenantA,
+            Name = "Parent Co",
+            Slug = "parent-co",
+            CompanyType = "Holding",
+            Nickname = "Parent",
+        };
+        var poison = new Company { TenantId = tenantB, Name = "Poison Co", Slug = "poison-co" };
+
+        var (seedA, _) = Open(dbName, tenantA);
+        await using (seedA)
+        {
+            seedA.Companies.Add(parent);
+            await seedA.SaveChangesAsync();
+        }
+
+        var (seedB, _) = Open(dbName, tenantB);
+        await using (seedB)
+        {
+            seedB.Companies.Add(poison);
+            await seedB.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var created = await CompanyEndpoints.CreateAsync(
+                new CreateCompanyRequest(
+                    "Child Co",
+                    "child-co",
+                    CompanyType: "Subsidiary",
+                    Nickname: "Kid",
+                    ParentCompanyId: parent.Id,
+                    Country: "US",
+                    PostalCode: "10001",
+                    Fax: "555-0100"),
+                db,
+                user);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(created).StatusCode);
+
+            var createdJson = JsonPayload(created);
+            Assert.Equal(parent.Id.ToString(), createdJson.GetProperty("ParentCompanyId").GetGuid().ToString());
+            Assert.Equal("Subsidiary", createdJson.GetProperty("CompanyType").GetString());
+            Assert.Equal("Kid", createdJson.GetProperty("Nickname").GetString());
+            Assert.Equal("US", createdJson.GetProperty("Country").GetString());
+            Assert.Equal("10001", createdJson.GetProperty("PostalCode").GetString());
+            Assert.Equal("555-0100", createdJson.GetProperty("Fax").GetString());
+
+            var listed = await CompanyEndpoints.ListAsync(null, db, user);
+            Assert.Equal(StatusCodes.Status200OK, Assert.IsAssignableFrom<IStatusCodeHttpResult>(listed).StatusCode);
+            var listJson = JsonPayload(listed);
+            Assert.Equal(JsonValueKind.Array, listJson.ValueKind);
+            Assert.Equal(2, listJson.GetArrayLength());
+            Assert.DoesNotContain(listJson.EnumerateArray(), item => item.GetProperty("Slug").GetString() == "poison-co");
+
+            var childRow = listJson.EnumerateArray().Single(item => item.GetProperty("Slug").GetString() == "child-co");
+            Assert.Equal(parent.Id, childRow.GetProperty("ParentCompanyId").GetGuid());
+            Assert.Equal("Subsidiary", childRow.GetProperty("CompanyType").GetString());
+            Assert.Equal("Kid", childRow.GetProperty("Nickname").GetString());
+
+            var fetched = await CompanyEndpoints.GetAsync(
+                childRow.GetProperty("Id").GetGuid(),
+                db,
+                user);
+            Assert.Equal(StatusCodes.Status200OK, Assert.IsAssignableFrom<IStatusCodeHttpResult>(fetched).StatusCode);
+            var getJson = JsonPayload(fetched);
+            Assert.Equal(parent.Id, getJson.GetProperty("ParentCompanyId").GetGuid());
+            Assert.Equal("US", getJson.GetProperty("Country").GetString());
+            Assert.Equal("10001", getJson.GetProperty("PostalCode").GetString());
+            Assert.Equal("555-0100", getJson.GetProperty("Fax").GetString());
+
+            var childId = childRow.GetProperty("Id").GetGuid();
+            var updated = await CompanyEndpoints.UpdateAsync(
+                childId,
+                new UpdateCompanyRequest(CompanyType: "Affiliate", Nickname: "Kiddo", Fax: "555-0199"),
+                db,
+                user);
+            Assert.Equal(StatusCodes.Status204NoContent, Assert.IsAssignableFrom<IStatusCodeHttpResult>(updated).StatusCode);
+
+            db.ChangeTracker.Clear();
+            var reloaded = await db.Companies.ForTenant(user).SingleAsync(c => c.Id == childId);
+            Assert.Equal(parent.Id, reloaded.ParentCompanyId);
+            Assert.Equal("Affiliate", reloaded.CompanyType);
+            Assert.Equal("Kiddo", reloaded.Nickname);
+            Assert.Equal("555-0199", reloaded.Fax);
+        }
+    }
+
+    private static void AssertParentNotFound(IResult result)
+    {
+        var status = Assert.IsAssignableFrom<IStatusCodeHttpResult>(result);
+        Assert.Equal(StatusCodes.Status400BadRequest, status.StatusCode);
+        var value = Assert.IsAssignableFrom<IValueHttpResult>(result);
+        Assert.Equal(CompanyEndpoints.ParentCompanyNotFoundMessage, value.Value);
+    }
+
+    private static JsonElement JsonPayload(IResult result)
+    {
+        var value = Assert.IsAssignableFrom<IValueHttpResult>(result);
+        var json = JsonSerializer.Serialize(value.Value);
+        return JsonSerializer.Deserialize<JsonElement>(json);
     }
 }
