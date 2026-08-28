@@ -56,13 +56,15 @@ public static class CompanyIdentity
         if (scheme >= 0)
             value = value[(scheme + 3)..];
 
-        var at = value.IndexOf('@');
-        if (at >= 0)
-            value = value[(at + 1)..];
-
+        // Trim the path before the userinfo strip, or "https://example.com/@acme" would reduce
+        // to "acme" instead of "example.com".
         var slash = value.IndexOf('/');
         if (slash >= 0)
             value = value[..slash];
+
+        var at = value.IndexOf('@');
+        if (at >= 0)
+            value = value[(at + 1)..];
 
         var colon = value.IndexOf(':');
         if (colon >= 0)

@@ -185,6 +185,14 @@ public class IntegrationSyncService : IIntegrationSyncService
             var index = new CompanyMatchIndex(
                 await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken));
 
+            // One external record per company per connection. Without this, two rows from the same
+            // provider that share a normalized name or domain ("Acme" and "ACME") would both adopt
+            // the company the first row created, and the second client would never get one.
+            var claimedCompanyIds = (await _db.IntegrationMappings.ForTenant(_user)
+                .Where(m => m.IntegrationConnectionId == connection.Id && m.ExternalType == "company")
+                .Select(m => m.LocalEntityId)
+                .ToListAsync(cancellationToken)).ToHashSet();
+
             foreach (var dto in companies)
             {
                 if (connection.SkipInactive && dto.IsInactive == true)
@@ -204,7 +212,7 @@ public class IntegrationSyncService : IIntegrationSyncService
                 {
                     // Another provider may already own this client. Adopt it instead of duplicating.
                     var match = index.Find(providerKey, dto);
-                    if (match is not null)
+                    if (match is not null && !claimedCompanyIds.Contains(match.Company.Id))
                     {
                         company = match.Company;
                         ApplyDetails(company, dto, connection);
@@ -220,6 +228,7 @@ public class IntegrationSyncService : IIntegrationSyncService
                             MetadataJson = JsonSerializer.Serialize(new { matchedBy = match.Reason }),
                         });
                         index.Add(company);
+                        claimedCompanyIds.Add(company.Id);
                         run.ItemsUpdated++;
                         continue;
                     }
@@ -253,6 +262,7 @@ public class IntegrationSyncService : IIntegrationSyncService
                         LocalEntityId = company.Id,
                     });
                     index.Add(company);
+                    claimedCompanyIds.Add(company.Id);
                     run.ItemsCreated++;
                 }
                 else
@@ -262,6 +272,7 @@ public class IntegrationSyncService : IIntegrationSyncService
                     ApplyDetails(company, dto, connection);
                     StampExternalId(company, connection, providerKey, dto.ExternalId);
                     index.Add(company);
+                    claimedCompanyIds.Add(company.Id);
                     run.ItemsUpdated++;
                 }
             }
@@ -386,7 +397,14 @@ public class IntegrationSyncService : IIntegrationSyncService
             && (connection.UpdateCompanyDetails || string.IsNullOrEmpty(company.NinjaOrganizationId)))
             company.NinjaOrganizationId = externalId;
 
-        company.ExternalIdsJson = CompanyIdentity.UpsertExternalId(company.ExternalIdsJson, providerKey, externalId);
+        // Guarded exactly like the typed columns above: without this the JSON would disagree with
+        // HaloClientId/NinjaOrganizationId, and providers with no typed column would lose their
+        // original id -- which is what provider-id matching relies on.
+        if (connection.UpdateCompanyDetails
+            || !CompanyIdentity.ReadExternalIds(company.ExternalIdsJson).ContainsKey(providerKey))
+        {
+            company.ExternalIdsJson = CompanyIdentity.UpsertExternalId(company.ExternalIdsJson, providerKey, externalId);
+        }
     }
 
     private async Task<SyncRun> FailRunAsync(IntegrationConnection connection, string error, CancellationToken cancellationToken)

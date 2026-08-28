@@ -220,6 +220,9 @@ public class CompanyConvergenceTests
         Assert.Equal("example.com", CompanyIdentity.NormalizeDomain("Example.com"));
         Assert.Equal("example.com", CompanyIdentity.NormalizeDomain("admin@example.com"));
         Assert.Equal("example.com", CompanyIdentity.NormalizeDomain("example.com:8443"));
+        Assert.Equal("example.com", CompanyIdentity.NormalizeDomain("https://user@example.com/path"));
+        // The path is trimmed before the userinfo strip, or this would reduce to "acme".
+        Assert.Equal("example.com", CompanyIdentity.NormalizeDomain("https://example.com/@acme"));
         Assert.Null(CompanyIdentity.NormalizeDomain(null));
         Assert.Null(CompanyIdentity.NormalizeDomain(" "));
     }
@@ -280,5 +283,55 @@ public class CompanyConvergenceTests
         Assert.NotNull(hit);
         Assert.Equal(target.Id, hit!.Company.Id);
         Assert.Equal(CompanyMatchIndex.MatchedByProviderId, hit.Reason);
+    }
+
+    [Fact]
+    public async Task Two_Rows_From_One_Provider_Sharing_A_Name_Do_Not_Collapse_Onto_One_Company()
+    {
+        var (db, user, sync) = Create();
+
+        var halo = await AddConnectionAsync(db, user, IntegrationProvider.Halo);
+        var run = await sync.SyncFromPayloadAsync(halo.Id, [
+            new ExternalCompanyDto("halo-1", "Acme"),
+            new ExternalCompanyDto("halo-2", "ACME"),
+        ]);
+
+        // A company this connection already claimed cannot be adopted again by a second record,
+        // so halo-2 gets its own company rather than silently vanishing onto halo-1's.
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(2, run.ItemsCreated);
+        Assert.Equal(0, run.ItemsUpdated);
+        Assert.Equal(2, await db.Companies.CountAsync());
+
+        var mappings = await db.IntegrationMappings.ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        Assert.Equal(2, mappings.Select(m => m.LocalEntityId).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task ExternalIdsJson_Does_Not_Drift_From_The_Typed_Columns()
+    {
+        var (db, user, sync) = Create();
+
+        // A company that already carries a Halo id, but is not yet mapped to this connection.
+        db.Companies.Add(new Company
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "Acme",
+            Slug = "acme",
+            HaloClientId = "halo-1",
+            ExternalIdsJson = CompanyIdentity.UpsertExternalId(null, "halo", "halo-1"),
+        });
+        await db.SaveChangesAsync();
+
+        var halo = await AddConnectionAsync(db, user, IntegrationProvider.Halo);
+        var run = await sync.SyncFromPayloadAsync(halo.Id, [new ExternalCompanyDto("halo-2", "Acme")]);
+
+        // Adopted by name. With UpdateCompanyDetails off, neither the typed column nor the JSON
+        // may be rewritten -- otherwise they disagree and flip on every subsequent run.
+        Assert.Equal(1, run.ItemsUpdated);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("halo-1", company.HaloClientId);
+        Assert.Equal("halo-1", CompanyIdentity.ReadExternalIds(company.ExternalIdsJson)["halo"]);
     }
 }
