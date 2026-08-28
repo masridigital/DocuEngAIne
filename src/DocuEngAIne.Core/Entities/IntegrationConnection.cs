@@ -34,6 +34,29 @@ public class IntegrationConnection : EntityBase, ITenantScoped
     /// <summary>Overwrite Name/Address/City/State/Website/PrimaryDomain on mapped companies. Default off (refuse clobber).</summary>
     public bool UpdateCompanyDetails { get; set; }
 
+    /// <summary>
+    /// StackJack tier for this connector, detected from <c>stackjack_session_info</c>. StackJack meters
+    /// per connector subscription, so this is a property of the connection, not of the MCP server.
+    /// </summary>
+    public StackJackPlan StackJackPlan { get; set; } = StackJackPlan.Unknown;
+
+    /// <summary>
+    /// Successful tool calls allowed per billing cycle, as reported by StackJack. Authoritative over the
+    /// tier's published number, because StackJack can set a custom limit on an individual subscription.
+    /// Null when detection has not run. <see cref="int.MaxValue"/> means unlimited.
+    /// </summary>
+    public int? MonthlyCallLimit { get; set; }
+
+    /// <summary>When the tier and limit above were last read from StackJack.</summary>
+    public DateTimeOffset? PlanDetectedAt { get; set; }
+
+    /// <summary>
+    /// Explicit override for the scheduled-check interval, in minutes. Null means derive it from the
+    /// detected allowance. Clamped to the floor in <c>SyncCadencePolicy</c> so an override cannot
+    /// out-run the plan.
+    /// </summary>
+    public int? SyncIntervalMinutesOverride { get; set; }
+
     public ICollection<IntegrationMapping> Mappings { get; set; } = [];
     public ICollection<SyncRun> SyncRuns { get; set; } = [];
 }
