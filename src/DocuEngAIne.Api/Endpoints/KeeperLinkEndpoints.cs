@@ -65,27 +65,7 @@ public static class KeeperLinkEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
-                return badCompany;
-
-            var link = new KeeperLink
-            {
-                TenantId = user.TenantId!.Value,
-                Name = request.Name,
-                UsernameHint = request.UsernameHint,
-                KeeperRecordUrl = request.KeeperRecordUrl,
-                KeeperRecordUid = request.KeeperRecordUid,
-                Notes = request.Notes,
-                AssociatedResourceType = request.AssociatedResourceType,
-                AssociatedResourceId = request.AssociatedResourceId,
-                CompanyId = request.CompanyId,
-            };
-
-            db.KeeperLinks.Add(link);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.Created($"/api/keeper/{link.Id}", MapLink(link, includeUrl: false));
-        });
+            await CreateAsync(request, db, user, cancellationToken));
 
         group.MapPut("/{id:guid}", async (
             Guid id,
@@ -93,27 +73,7 @@ public static class KeeperLinkEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            var link = await db.KeeperLinks.ForTenant(user).FirstOrDefaultAsync(k => k.Id == id, cancellationToken);
-            if (link is null)
-                return Results.NotFound();
-
-            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
-                return badCompany;
-            if (request.CompanyId is Guid companyId)
-                link.CompanyId = companyId;
-
-            link.Name = request.Name ?? link.Name;
-            link.UsernameHint = request.UsernameHint ?? link.UsernameHint;
-            link.KeeperRecordUrl = request.KeeperRecordUrl ?? link.KeeperRecordUrl;
-            link.KeeperRecordUid = request.KeeperRecordUid ?? link.KeeperRecordUid;
-            link.Notes = request.Notes ?? link.Notes;
-            link.AssociatedResourceType = request.AssociatedResourceType ?? link.AssociatedResourceType;
-            link.AssociatedResourceId = request.AssociatedResourceId ?? link.AssociatedResourceId;
-
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+            await UpdateAsync(id, request, db, user, cancellationToken));
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
@@ -131,6 +91,61 @@ public static class KeeperLinkEndpoints
         });
 
         return app;
+    }
+
+    public static async Task<IResult> CreateAsync(
+        CreateKeeperLinkRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+            return badCompany;
+
+        var link = new KeeperLink
+        {
+            TenantId = user.TenantId!.Value,
+            Name = request.Name,
+            UsernameHint = request.UsernameHint,
+            KeeperRecordUrl = request.KeeperRecordUrl,
+            KeeperRecordUid = request.KeeperRecordUid,
+            Notes = request.Notes,
+            AssociatedResourceType = request.AssociatedResourceType,
+            AssociatedResourceId = request.AssociatedResourceId,
+            CompanyId = request.CompanyId,
+        };
+
+        db.KeeperLinks.Add(link);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.Created($"/api/keeper/{link.Id}", MapLink(link, includeUrl: false));
+    }
+
+    public static async Task<IResult> UpdateAsync(
+        Guid id,
+        UpdateKeeperLinkRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var link = await db.KeeperLinks.ForTenant(user).FirstOrDefaultAsync(k => k.Id == id, cancellationToken);
+        if (link is null)
+            return Results.NotFound();
+
+        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+            return badCompany;
+        if (request.CompanyId is Guid companyId)
+            link.CompanyId = companyId;
+
+        link.Name = request.Name ?? link.Name;
+        link.UsernameHint = request.UsernameHint ?? link.UsernameHint;
+        link.KeeperRecordUrl = request.KeeperRecordUrl ?? link.KeeperRecordUrl;
+        link.KeeperRecordUid = request.KeeperRecordUid ?? link.KeeperRecordUid;
+        link.Notes = request.Notes ?? link.Notes;
+        link.AssociatedResourceType = request.AssociatedResourceType ?? link.AssociatedResourceType;
+        link.AssociatedResourceId = request.AssociatedResourceId ?? link.AssociatedResourceId;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
     }
 
     private static object MapLink(KeeperLink link, bool includeUrl) => new

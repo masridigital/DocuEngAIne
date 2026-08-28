@@ -68,8 +68,16 @@ snapshot is reconciled — if matching turns out to need an off switch.
 keep `database update` working, which hides the drift instead of resolving it.
 
 The next `migrations add` will emit `CreateTable` for tables that already exist in every deployed
-database. Run `dotnet ef migrations add Phase2IntegrationsReconcile`, confirm the generated `Up()`
-is **empty**, then drop the warning suppression so future drift fails loudly.
+database.
+
+Run **`./scripts/reconcile-model-snapshot.sh`** on a machine with the .NET 10 SDK. It regenerates
+the snapshot and then *proves* the generated `Up()` is empty — a pure catch-up with no schema
+change — failing loudly if it is not. It prints the remaining manual steps: read the snapshot diff,
+drop the `PendingModelChangesWarning` suppression in `DependencyInjection.cs`, run the tests, and
+commit the empty migration together with the regenerated snapshot.
+
+It cannot run in the Claude Code web container — `builds.dotnet.microsoft.com` is blocked there by
+egress policy, so no .NET SDK is available.
 
 This blocks any further schema work, so it comes before anything needing a column.
 
@@ -113,11 +121,25 @@ Needed before a second real tenant, not before the next demo.
 
 Back to `MASRI-NATIVE-PLAN.md` §8, now on a foundation that can hold it:
 
-- `CompanyId` on document / runbook / Keeper create and edit (assets already accept it)
 - NinjaOne devices → Computer Assets (plan lists this in 2A; only organizations ship)
 - Sync schedules + a SyncRun UI (runs are exposed by API, not shown in the SPA)
 - Blackpoint and Composio connectors
 - Phase 2C: relationship graph, Azure AI Search, client portal, Hudu import
+
+## Corrections to the older plan
+
+`MASRI-NATIVE-PLAN.md` §8 item 2 — "CompanyId on document/runbook/Keeper create-edit" — is **already
+done** and was already done before this plan was written. All six request records carry
+`Guid? CompanyId`, and all six paths validate it through `CompanyEndpoints.EnsureCompanyInTenantAsync`
+(400 + "Company not found." for an other-tenant company), exactly as `AssetEndpoints` does. An
+earlier review of this repo asserted the opposite; that was wrong, from a grep too narrow to see the
+record declarations. What was genuinely missing was endpoint-level test coverage, now added in
+`CompanyAttachmentTests.cs`.
+
+Note `null` on update means "leave unchanged", never "clear", consistently across Asset, Document,
+Runbook, KeeperLink and Folder. There is therefore **no way to detach** a resource from a company
+through the API. That is a real gap, but a deliberate, consistent one — changing it needs a sentinel
+value or a separate route, and should be decided rather than slipped in.
 
 ## Testing debt worth naming
 
