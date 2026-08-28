@@ -191,6 +191,56 @@ public class IntegrationSyncTests
         return (server, connection);
     }
 
+    private sealed class RecordingCippMcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public string TenantsJson { get; init; } = "[]";
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            var body = JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                id = "1",
+                result = new { content = new[] { new { type = "text", text = TenantsJson } } },
+            });
+            return Task.FromResult(body);
+        }
+    }
+
+    private static async Task<(McpServer Server, IntegrationConnection Connection)> SeedCippCompactAsync(
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool skipInactive = true, bool updateCompanyDetails = false)
+    {
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            Transport = McpTransport.Http,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.Cipp,
+            DisplayName = "CIPP",
+            McpServerId = server.Id,
+            SkipInactive = skipInactive,
+            UpdateCompanyDetails = updateCompanyDetails,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+        return (server, connection);
+    }
+
     [Fact]
     public async Task SyncFromPayload_Creates_Company_And_Mapping_With_HaloClientId()
     {
@@ -742,6 +792,127 @@ public class IntegrationSyncTests
                 TenantId = tenantB,
                 Provider = IntegrationProvider.NinjaOne,
                 DisplayName = "NinjaOne B",
+                McpServerId = server.Id,
+            };
+            dbB.IntegrationConnections.Add(connection);
+            await dbB.SaveChangesAsync();
+            connectionBId = connection.Id;
+        }
+
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var sync = new IntegrationSyncService(dbA, userA, mcp, new NoopAudit());
+            var result = await IntegrationEndpoints.SyncAsync(connectionBId, null, sync, dbA, userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+            Assert.Empty(mcp.Calls);
+            Assert.Empty(await dbA.IntegrationConnections.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.SyncRuns.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
+        }
+    }
+
+    [Fact]
+    public async Task Cipp_SyncAsync_Creates_Company_And_Mapping_From_CustomerId_Skips_Partner()
+    {
+        var mcp = new RecordingCippMcp { TenantsJson = CippTenantMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedCippCompactAsync(db, user, skipInactive: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsCreated);
+        Assert.Equal(1, run.ItemsSkipped);
+        Assert.Equal("cipp_list_tenants", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(server.Id, mcp.Calls[0].ServerId);
+        Assert.Contains("\"tenantsOnly\":\"true\"", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("pageSize", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("pageNo", mcp.Calls[0].Args, StringComparison.Ordinal);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("ADROC Capital, LLC", company.Name);
+        Assert.Equal("adroccap.com", company.PrimaryDomain);
+        Assert.Null(company.HaloClientId);
+        Assert.Null(company.NinjaOrganizationId);
+
+        var mapping = await db.IntegrationMappings.SingleAsync();
+        Assert.Equal("company", mapping.ExternalType);
+        Assert.Equal("8c65106e-9e7e-45d4-b55a-3cbd4b415a08", mapping.ExternalId);
+        Assert.Equal(company.Id, mapping.LocalEntityId);
+
+        Assert.DoesNotContain(await db.Companies.ToListAsync(), c => c.Name == "*Partner Tenant");
+        Assert.DoesNotContain(await db.Companies.ToListAsync(), c => c.Name == "Gone Co");
+        Assert.DoesNotContain(await db.IntegrationMappings.ToListAsync(), m => m.ExternalId == "f7812296-5bce-41dc-8102-b1b270e7c4c7");
+        Assert.DoesNotContain(await db.IntegrationMappings.ToListAsync(), m => m.ExternalId == "deadbeef-0000-0000-0000-000000000001");
+    }
+
+    [Fact]
+    public async Task Cipp_SyncAsync_SkipInactive_Skips_Excluded_True()
+    {
+        var mcp = new RecordingCippMcp { TenantsJson = CippTenantMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedCippCompactAsync(db, user, skipInactive: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsSkipped);
+        Assert.Equal(1, run.ItemsCreated);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("ADROC Capital, LLC", company.Name);
+        Assert.Equal("8c65106e-9e7e-45d4-b55a-3cbd4b415a08", (await db.IntegrationMappings.SingleAsync()).ExternalId);
+    }
+
+    [Fact]
+    public async Task Cipp_SyncAsync_Missing_McpServerId_Fails_Without_Calling_Mcp()
+    {
+        var mcp = new RecordingCippMcp { TenantsJson = CippTenantMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.Cipp,
+            DisplayName = "CIPP",
+            AuthSecretName = "kv-name-only",
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        Assert.Contains("McpServerId", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Key Vault", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
+        Assert.Empty(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Cipp_Other_Tenant_Connection_Sync_Returns_404_And_Does_Not_Call_Mcp()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var mcp = new RecordingCippMcp { TenantsJson = CippTenantMapperTests.LiveCompactListFixture };
+
+        Guid connectionBId;
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var server = new McpServer
+            {
+                TenantId = tenantB,
+                Name = "Compact B",
+                Kind = McpServerKind.StackJackCompact,
+                EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            };
+            dbB.McpServers.Add(server);
+            var connection = new IntegrationConnection
+            {
+                TenantId = tenantB,
+                Provider = IntegrationProvider.Cipp,
+                DisplayName = "CIPP B",
                 McpServerId = server.Id,
             };
             dbB.IntegrationConnections.Add(connection);

@@ -186,7 +186,7 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 | PUT | `/api/integrations/{id}` | Update connection and sync-policy bools |
 | DELETE | `/api/integrations/{id}` | Delete connection |
 | POST | `/api/integrations/{id}/test` | Test MCP/config |
-| POST | `/api/integrations/{id}/sync` | Halo or NinjaOne live pull via Compact (`halo_list_clients` / `ninja_list_organizations`), or payload upsert. Other-tenant → 404 |
+| POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, or CIPP live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants`), or payload upsert. Other-tenant → 404 |
 | GET | `/api/integrations/{id}/runs` | Recent sync runs |
 | GET | `/api/integrations/{id}/mappings` | External→local mappings |
 
@@ -312,7 +312,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Company (client space) distinct from Entra tenant
 - [x] MCP server registry + IntegrationConnection (Key Vault secrets)
 - [x] First-class MCP kinds: StackJack Compact (`https://compact.stackjack.io/mcp`) and Composio (`https://connect.composio.dev/mcp`)
-- [x] HaloPSA + NinjaOne company pull via Compact (`halo_list_clients` / `ninja_list_organizations` → `SyncFromPayload`); CIPP/Meraki/UniFi registry only
+- [x] HaloPSA + NinjaOne + CIPP company pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` → `SyncFromPayload`); Meraki/UniFi registry only
 - [x] SPA: Companies + Integrations (Compact vs Composio; Halo/Ninja/CIPP/Meraki/UniFi point at Compact)
 - [x] Company overview related lists (assets/docs/runbooks/Keeper)
 - [x] GET MCP server and integration by id; SQL cascade fix
