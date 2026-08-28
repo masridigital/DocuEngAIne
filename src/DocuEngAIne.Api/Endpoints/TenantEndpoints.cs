@@ -1,4 +1,5 @@
 using DocuEngAIne.Core.Entities;
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -65,6 +66,26 @@ public static class TenantEndpoints
             };
 
             db.Tenants.Add(tenant);
+
+            // The person who onboards the tenant becomes its Owner, in the same save as the tenant
+            // itself. Nothing else in the system writes User.Role and Entra app roles are an optional
+            // setup step, so without a deliberate grant here a tenant could hold no administrator at
+            // all. Doing it on the onboarding call rather than on first GET /api/me also removes a
+            // check-then-act race in which whichever tenant member's browser happened to revalidate
+            // first became the sole permanent Owner.
+            if (!string.IsNullOrWhiteSpace(user.ObjectId)
+                && !await db.Users.AnyAsync(u => u.TenantId == tenant.Id && u.EntraObjectId == user.ObjectId, cancellationToken))
+            {
+                db.Users.Add(new User
+                {
+                    TenantId = tenant.Id,
+                    EntraObjectId = user.ObjectId!,
+                    Email = user.Email ?? "unknown",
+                    DisplayName = user.DisplayName,
+                    Role = UserRole.Owner,
+                });
+            }
+
             await db.SaveChangesAsync(cancellationToken);
 
             return Results.Created($"/api/tenant/me", new { tenant.Id, tenant.Name, tenant.Slug });

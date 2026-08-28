@@ -1,18 +1,24 @@
-import { useState, type FormEvent } from 'react'
+import { Fragment, useState, type FormEvent } from 'react'
+import { Link } from 'react-router-dom'
 import {
   createIntegration,
   createMcpServer,
   MCP_ENDPOINTS,
   mcpKindForProvider,
+  refreshIntegrationHistory,
   syncIntegration,
   testIntegration,
   updateIntegration,
+  useIntegrationMappings,
   useIntegrations,
   useMcpServers,
+  useSyncRuns,
   type IntegrationConnection,
+  type IntegrationMapping,
   type IntegrationProvider,
   type McpServer,
   type McpServerKind,
+  type SyncRun,
 } from '../hooks/useApi'
 
 const defaultPolicy = {
@@ -29,6 +35,123 @@ function formatTimestamp(value?: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
   return date.toLocaleString()
+}
+
+function syncStatusClass(status: string) {
+  const key = status.toLowerCase()
+  if (key === 'succeeded') return 'status-completed'
+  if (key === 'failed') return 'status-failed'
+  if (key === 'partial') return 'status-partial'
+  return 'status-running'
+}
+
+const mappingLimit = 25
+
+/** "12 Company, 3 Site" — how many mappings of each external type this integration holds. */
+function mappingSummary(mappings: IntegrationMapping[]) {
+  const counts = new Map<string, number>()
+  for (const m of mappings) {
+    counts.set(m.externalType, (counts.get(m.externalType) ?? 0) + 1)
+  }
+  return Array.from(counts.entries()).map(([type, count]) => `${count} ${type}`)
+}
+
+/**
+ * Run history + mappings for one integration, expanded in place under its row so the
+ * Sync button and what that sync did stay on the same screen.
+ */
+function IntegrationHistory({ integrationId }: { integrationId: string }) {
+  const { data: runData, error: runError, isLoading: runsLoading } = useSyncRuns(integrationId)
+  const { data: mapData, error: mapError, isLoading: mapsLoading } = useIntegrationMappings(integrationId)
+  const runs: SyncRun[] = Array.isArray(runData) ? runData : []
+  const mappings: IntegrationMapping[] = Array.isArray(mapData) ? mapData : []
+
+  const summary = mappingSummary(mappings)
+
+  return (
+    <div className="sync-history">
+      <h3>Sync runs</h3>
+      {runsLoading && <p>Loading…</p>}
+      {runError && <p className="error">Failed to load sync runs.</p>}
+      {!runsLoading && !runError && runs.length === 0 && (
+        <p className="muted">No syncs yet. Use Sync to run one.</p>
+      )}
+      {runs.length > 0 && (
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>Started</th>
+              <th>Finished</th>
+              <th>Created</th>
+              <th>Updated</th>
+              <th>Skipped</th>
+              <th>Error</th>
+            </tr>
+          </thead>
+          <tbody>
+            {runs.map((r) => (
+              <tr key={r.id}>
+                <td>
+                  <span className={`tag ${syncStatusClass(r.status)}`}>{r.status}</span>
+                </td>
+                <td>{formatTimestamp(r.startedAt)}</td>
+                <td>{formatTimestamp(r.finishedAt)}</td>
+                <td>{r.itemsCreated ?? 0}</td>
+                <td>{r.itemsUpdated ?? 0}</td>
+                <td>{r.itemsSkipped ?? 0}</td>
+                <td className="sync-error">
+                  {r.errorSummary ? <span className="error">{r.errorSummary}</span> : '—'}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h3>Mappings</h3>
+      {mapsLoading && <p>Loading…</p>}
+      {mapError && <p className="error">Failed to load mappings.</p>}
+      {!mapsLoading && !mapError && mappings.length === 0 && (
+        <p className="muted">No external records mapped to local records yet.</p>
+      )}
+      {mappings.length > 0 && (
+        <>
+          <p className="muted">
+            {mappings.length === 1 ? '1 mapping' : `${mappings.length} mappings`}
+            {summary.length > 0 ? ` — ${summary.join(', ')}` : ''}
+          </p>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>External type</th>
+                <th>External id</th>
+                <th>Local entity</th>
+              </tr>
+            </thead>
+            <tbody>
+              {mappings.slice(0, mappingLimit).map((m) => (
+                <tr key={m.id}>
+                  <td>{m.externalType}</td>
+                  <td>{m.externalId}</td>
+                  <td>
+                    {m.localEntityType === 'Company' ? (
+                      <Link to={`/companies/${m.localEntityId}`}>{m.localEntityId}</Link>
+                    ) : (
+                      `${m.localEntityType} ${m.localEntityId}`
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {mappings.length > mappingLimit && (
+            <p className="muted">Showing the first {mappingLimit} of {mappings.length}.</p>
+          )}
+        </>
+      )}
+    </div>
+  )
 }
 
 export function IntegrationsPage() {
@@ -58,6 +181,7 @@ export function IntegrationsPage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionId, setActionId] = useState<string | null>(null)
+  const [historyId, setHistoryId] = useState<string | null>(null)
 
   async function onCreateMcp(e: FormEvent) {
     e.preventDefault()
@@ -206,11 +330,16 @@ export function IntegrationsPage() {
         result.itemsSkipped != null ? `${result.itemsSkipped} skipped` : null,
       ].filter(Boolean)
       setMessage(result.errorSummary || result.status || (counts.length ? counts.join(', ') : 'Sync finished'))
-      await mutateIntegrations()
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Sync failed')
     } finally {
       setActionId(null)
+      // A failed sync still writes status and lastError on the connection AND records a run, so both
+      // the row and the history must refresh either way. Refreshing only on success left the row
+      // showing stale state next to a history panel displaying the failure.
+      setHistoryId(id)
+      void mutateIntegrations().catch(() => undefined)
+      void refreshIntegrationHistory(id).catch(() => undefined)
     }
   }
 
@@ -220,6 +349,7 @@ export function IntegrationsPage() {
       <p>
         Register StackJack Compact or Composio MCP servers, then connect Halo, NinjaOne, CIPP, Meraki, or UniFi to Compact.
         Auth is a Key Vault secret name on the MCP server — never a secret in SQL. Do not add a second StackJack server.
+        History opens the recent sync runs and external→local mappings for a connection.
       </p>
       {message && <p className="banner">{message}</p>}
       {errorMessage && <p className="error">{errorMessage}</p>}
@@ -316,23 +446,39 @@ export function IntegrationsPage() {
                 </tr>
               )}
               {integrations.map((i) => (
-                <tr key={i.id}>
-                  <td>{i.provider}</td>
-                  <td>{i.status || '—'}</td>
-                  <td>{formatTimestamp(i.lastSyncAt)}</td>
-                  <td>{i.lastError || '—'}</td>
-                  <td className="row-actions">
-                    <button className="btn btn-secondary" type="button" disabled={actionId === i.id} onClick={() => onTest(i.id)}>
-                      Test
-                    </button>
-                    <button className="btn btn-secondary" type="button" disabled={actionId === i.id} onClick={() => onSync(i.id)}>
-                      Sync
-                    </button>
-                    <button className="btn btn-secondary" type="button" onClick={() => startEdit(i)}>
-                      Edit
-                    </button>
-                  </td>
-                </tr>
+                <Fragment key={i.id}>
+                  <tr>
+                    <td>{i.provider}</td>
+                    <td>{i.status || '—'}</td>
+                    <td>{formatTimestamp(i.lastSyncAt)}</td>
+                    <td>{i.lastError || '—'}</td>
+                    <td className="row-actions">
+                      <button className="btn btn-secondary" type="button" disabled={actionId === i.id} onClick={() => onTest(i.id)}>
+                        Test
+                      </button>
+                      <button className="btn btn-secondary" type="button" disabled={actionId === i.id} onClick={() => onSync(i.id)}>
+                        Sync
+                      </button>
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        onClick={() => setHistoryId(historyId === i.id ? null : i.id)}
+                      >
+                        {historyId === i.id ? 'Hide history' : 'History'}
+                      </button>
+                      <button className="btn btn-secondary" type="button" onClick={() => startEdit(i)}>
+                        Edit
+                      </button>
+                    </td>
+                  </tr>
+                  {historyId === i.id && (
+                    <tr>
+                      <td className="sync-history-cell" colSpan={5}>
+                        <IntegrationHistory integrationId={i.id} />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

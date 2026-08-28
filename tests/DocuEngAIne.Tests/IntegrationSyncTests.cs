@@ -649,7 +649,9 @@ public class IntegrationSyncTests
         Assert.Equal(SyncRunStatus.Succeeded, run.Status);
         Assert.Equal(5, run.ItemsCreated);
         Assert.Equal(0, run.ItemsSkipped);
-        Assert.Equal("ninja_list_organizations", Assert.Single(mcp.Calls).Tool);
+        // A Ninja sync now pulls organizations and then devices, so this is no longer a single call.
+        Assert.Equal("ninja_list_organizations", mcp.Calls[0].Tool);
+        Assert.Contains(mcp.Calls, c => c.Tool == NinjaDeviceMapper.ToolName);
         Assert.Equal(server.Id, mcp.Calls[0].ServerId);
         Assert.DoesNotContain("after", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.Contains("\"pageSize\":50", mcp.Calls[0].Args, StringComparison.Ordinal);

@@ -46,7 +46,10 @@ public static class ProfileEndpoints
                     EntraObjectId = user.ObjectId!,
                     Email = user.Email ?? "unknown",
                     DisplayName = user.DisplayName,
-                    Role = UserRole.Contributor,
+                    // Signing in never confers admin rights. The tenant's first Owner is granted
+                    // deliberately by POST /api/tenant/onboard; bootstrapping here instead made the
+                    // grant a race won by whichever member's browser revalidated first.
+                    Role = UserRole.Reader,
                 };
 
                 db.Users.Add(dbUser);

@@ -9,6 +9,16 @@ namespace DocuEngAIne.Infrastructure.Integrations;
 
 public class IntegrationSyncService : IIntegrationSyncService
 {
+    /// <summary><see cref="IntegrationMapping.ExternalType"/> for a remote device. Stable once shipped.</summary>
+    private const string DeviceExternalType = "device";
+
+    /// <summary>
+    /// Asset layout that synced devices land in. The plan's layout baseline names it, but nothing seeds
+    /// asset types, so the first device sync creates it rather than failing on a name an operator would
+    /// have to guess. The unique (TenantId, Name) index keeps it to one per tenant.
+    /// </summary>
+    public const string ComputerAssetTypeName = "Computer Assets";
+
     private readonly DocuEngAIneDbContext _db;
     private readonly ICurrentUser _user;
     private readonly IMcpClient _mcpClient;
@@ -104,7 +114,18 @@ public class IntegrationSyncService : IIntegrationSyncService
             try
             {
                 var companies = await PullNinjaCompaniesAsync(mcpId, cancellationToken);
-                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+
+                // Pulled before the company upsert so a device-tool failure fails the run once, in
+                // FailRunAsync, instead of leaving a succeeded company run plus a second failed run.
+                // The device *upsert* still runs after companies: it needs their mappings to exist.
+                IReadOnlyList<ExternalDeviceDto> devices = [];
+                if (!connection.SkipAssets)
+                    devices = await PullNinjaDevicesAsync(mcpId, cancellationToken);
+
+                var run = await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                if (devices.Count > 0 && run.Status == SyncRunStatus.Succeeded)
+                    await SyncDevicesAsync(connection, run, devices, cancellationToken);
+                return run;
             }
             catch (Exception ex)
             {
@@ -179,8 +200,9 @@ public class IntegrationSyncService : IIntegrationSyncService
 
         try
         {
-            // SkipContacts/SkipLocations/SkipAssets/AutoUpdateAssetNames document intent for
-            // later live Halo/Ninja pulls. v1 payload upsert is companies only.
+            // Companies only. SkipContacts/SkipLocations still document intent for later live pulls;
+            // SkipAssets/AutoUpdateAssetNames are honoured by the Ninja device pass in SyncAsync,
+            // which runs after this one so device→company mappings already exist.
             var providerKey = CompanyIdentity.ProviderKey(connection.Provider);
             var index = new CompanyMatchIndex(
                 await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken));
@@ -300,6 +322,188 @@ public class IntegrationSyncService : IIntegrationSyncService
         }
     }
 
+    /// <summary>
+    /// Upserts devices onto <see cref="Asset"/> rows for an already-synced connection. Runs after the
+    /// company upsert in the same <see cref="SyncRun"/> and contributes to the same counters.
+    /// </summary>
+    private async Task SyncDevicesAsync(
+        IntegrationConnection connection,
+        SyncRun run,
+        IReadOnlyList<ExternalDeviceDto> devices,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            // A device attaches to whatever company this connection mapped its organization to.
+            // Built as an assignment loop, not ToDictionary: a duplicate external id must not throw
+            // and abort an otherwise good run.
+            var companyByOrganization = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            var companyMappings = await _db.IntegrationMappings.ForTenant(_user)
+                .Where(m => m.IntegrationConnectionId == connection.Id
+                    && m.ExternalType == "company"
+                    && m.LocalEntityType == nameof(Company))
+                .Select(m => new { m.ExternalId, m.LocalEntityId })
+                .ToListAsync(cancellationToken);
+            foreach (var companyMapping in companyMappings)
+                companyByOrganization[companyMapping.ExternalId] = companyMapping.LocalEntityId;
+
+            var deviceMappings = await _db.IntegrationMappings.ForTenant(_user)
+                .Where(m => m.IntegrationConnectionId == connection.Id
+                    && m.ExternalType == DeviceExternalType
+                    && m.LocalEntityType == nameof(Asset))
+                .ToListAsync(cancellationToken);
+            var mappingByDevice = new Dictionary<string, IntegrationMapping>(StringComparer.OrdinalIgnoreCase);
+            foreach (var deviceMapping in deviceMappings)
+                mappingByDevice[deviceMapping.ExternalId] = deviceMapping;
+
+            // Loaded up front: a tenant can have thousands of devices and one query per device would
+            // make a sync unusable.
+            var mappedAssetIds = deviceMappings.Select(m => m.LocalEntityId).Distinct().ToList();
+            var assetsById = (await _db.Assets.ForTenant(_user)
+                .Where(a => mappedAssetIds.Contains(a.Id))
+                .ToListAsync(cancellationToken))
+                .ToDictionary(a => a.Id);
+
+            Guid? computerAssetTypeId = null;
+
+            foreach (var dto in devices)
+            {
+                if (!companyByOrganization.TryGetValue(dto.OrganizationExternalId, out var companyId))
+                {
+                    // Organization never mapped to a company on this connection (skipped as inactive,
+                    // or created in Ninja after the org page was read). Skip rather than leave an
+                    // orphan asset nobody can find from a company page.
+                    run.ItemsSkipped++;
+                    continue;
+                }
+
+                if (mappingByDevice.TryGetValue(dto.ExternalId, out var mapping)
+                    && assetsById.TryGetValue(mapping.LocalEntityId, out var existing))
+                {
+                    // AutoUpdateAssetNames is exactly this switch: default off means a local rename sticks.
+                    if (connection.AutoUpdateAssetNames)
+                        existing.Name = dto.Name;
+                    existing.CompanyId = companyId;
+                    mapping.MetadataJson = DeviceMetadataJson(dto);
+                    run.ItemsUpdated++;
+                    continue;
+                }
+
+                computerAssetTypeId ??= (await EnsureComputerAssetTypeAsync(cancellationToken)).Id;
+
+                var asset = new Asset
+                {
+                    TenantId = _user.TenantId!.Value,
+                    Name = dto.Name,
+                    CompanyId = companyId,
+                    AssetTypeId = computerAssetTypeId.Value,
+                };
+                _db.Assets.Add(asset);
+                assetsById[asset.Id] = asset;
+
+                if (mapping is null)
+                {
+                    mapping = new IntegrationMapping
+                    {
+                        TenantId = _user.TenantId!.Value,
+                        IntegrationConnectionId = connection.Id,
+                        ExternalId = dto.ExternalId,
+                        ExternalType = DeviceExternalType,
+                        LocalEntityType = nameof(Asset),
+                        LocalEntityId = asset.Id,
+                    };
+                    _db.IntegrationMappings.Add(mapping);
+                    mappingByDevice[dto.ExternalId] = mapping;
+                }
+                else
+                {
+                    // Mapping outlived its asset (deleted locally). Re-point it instead of adding a
+                    // second mapping row for the same device.
+                    mapping.LocalEntityId = asset.Id;
+                }
+
+                mapping.MetadataJson = DeviceMetadataJson(dto);
+                run.ItemsCreated++;
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+            run.FinishedAt = DateTimeOffset.UtcNow;
+            connection.LastSyncAt = run.FinishedAt;
+            // These are the run's cumulative totals, not device-only counts: the company pass already
+            // added to the same counters. Labelled so the audit trail does not overstate the device pass.
+            await _audit.LogAsync("Integration.SyncDevices", nameof(IntegrationConnection), connection.Id,
+                $"runTotals created={run.ItemsCreated} updated={run.ItemsUpdated} skipped={run.ItemsSkipped}", cancellationToken);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            run.Status = SyncRunStatus.Failed;
+            run.FinishedAt = DateTimeOffset.UtcNow;
+            run.ErrorSummary = ex.Message;
+            connection.Status = IntegrationStatus.Error;
+            connection.LastError = ex.Message;
+            await SaveFailureAsync(run, connection, cancellationToken);
+        }
+    }
+
+    /// <summary>
+    /// Persists a failed device pass without re-throwing. If the original failure was itself a
+    /// <c>SaveChanges</c> failure, the ChangeTracker still holds the entities that caused it, so saving
+    /// again would throw straight out of the catch, past <c>SyncAsync</c>, leaving the run recorded as
+    /// whatever it was before -- Succeeded, in the common case. Detach everything except the run and the
+    /// connection first, and swallow a second failure rather than lose the caller's result.
+    /// </summary>
+    private async Task SaveFailureAsync(SyncRun run, IntegrationConnection connection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            foreach (var entry in _db.ChangeTracker.Entries().ToList())
+            {
+                if (!ReferenceEquals(entry.Entity, run) && !ReferenceEquals(entry.Entity, connection))
+                    entry.State = EntityState.Detached;
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            // The failure is already on the run object in memory; losing this write is strictly better
+            // than throwing out of a catch block and returning no run at all.
+        }
+    }
+
+    /// <summary>Finds (case-insensitively) or creates the tenant's <see cref="ComputerAssetTypeName"/> layout.</summary>
+    private async Task<AssetType> EnsureComputerAssetTypeAsync(CancellationToken cancellationToken)
+    {
+        // Matched in memory, not in SQL: asset types are a handful of rows per tenant, and this keeps
+        // the comparison identical under SQL Server collation and the in-memory provider.
+        var assetTypes = await _db.AssetTypes.ForTenant(_user).ToListAsync(cancellationToken);
+        var existing = assetTypes.FirstOrDefault(t =>
+            string.Equals(t.Name, ComputerAssetTypeName, StringComparison.OrdinalIgnoreCase));
+        if (existing is not null)
+            return existing;
+
+        var assetType = new AssetType
+        {
+            TenantId = _user.TenantId!.Value,
+            Name = ComputerAssetTypeName,
+            Description = "Devices synced from RMM integrations.",
+        };
+        _db.AssetTypes.Add(assetType);
+        await _db.SaveChangesAsync(cancellationToken);
+        return assetType;
+    }
+
+    /// <summary>Remote detail kept on the mapping, not on the asset — it must never clobber a tech's edits.</summary>
+    private static string DeviceMetadataJson(ExternalDeviceDto dto)
+        => JsonSerializer.Serialize(new
+        {
+            organizationId = dto.OrganizationExternalId,
+            nodeClass = dto.NodeClass,
+            systemName = dto.SystemName,
+            dnsName = dto.DnsName,
+        });
+
     private async Task<IReadOnlyList<ExternalCompanyDto>> PullHaloCompaniesAsync(
         IntegrationConnection connection,
         Guid mcpServerId,
@@ -339,6 +543,20 @@ public class IntegrationSyncService : IIntegrationSyncService
             throw new InvalidOperationException("NinjaOne company pull requires a StackJack Compact MCP server. Composio is not a NinjaOne connector.");
 
         return await NinjaOrganizationMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<ExternalDeviceDto>> PullNinjaDevicesAsync(
+        Guid mcpServerId,
+        CancellationToken cancellationToken)
+    {
+        var server = await _db.McpServers.ForTenant(_user)
+            .FirstOrDefaultAsync(s => s.Id == mcpServerId, cancellationToken)
+            ?? throw new InvalidOperationException("MCP server not found.");
+
+        if (server.Kind != McpServerKind.StackJackCompact)
+            throw new InvalidOperationException("NinjaOne device pull requires a StackJack Compact MCP server. Composio is not a NinjaOne connector.");
+
+        return await NinjaDeviceMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
     }
 
     private async Task<IReadOnlyList<ExternalCompanyDto>> PullCippCompaniesAsync(

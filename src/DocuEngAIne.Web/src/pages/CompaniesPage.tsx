@@ -227,7 +227,7 @@ function detailRows(company: Company) {
   if (company.parentCompanyId) {
     rows.push([
       'Parent company',
-      <Link to={`/companies/${company.parentCompanyId}`}>{company.parentCompanyId}</Link>,
+      <Link key="parent-company" to={`/companies/${company.parentCompanyId}`}>{company.parentCompanyId}</Link>,
     ])
   }
   if (company.companyNumber) rows.push(['Company number', company.companyNumber])
