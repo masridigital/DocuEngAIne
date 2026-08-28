@@ -605,18 +605,18 @@ public class IntegrationSyncTests
         Assert.Contains("\"pageSize\":50", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.DoesNotContain("ninja_get_organization", mcp.Calls.Select(c => c.Tool));
 
-        var companies = await db.Companies.OrderBy(c => c.NinjaOrganizationId).ToListAsync();
+        var companies = await db.Companies.ToListAsync();
         Assert.Equal(5, companies.Count);
-        Assert.Equal("Masri Digital", companies[0].Name);
-        Assert.Equal("2", companies[0].NinjaOrganizationId);
-        Assert.Null(companies[0].HaloClientId);
+        var masri = Assert.Single(companies, c => c.NinjaOrganizationId == "2");
+        Assert.Equal("Masri Digital", masri.Name);
+        Assert.Null(masri.HaloClientId);
 
-        var mappings = await db.IntegrationMappings.OrderBy(m => m.ExternalId).ToListAsync();
+        var mappings = await db.IntegrationMappings.ToListAsync();
         Assert.Equal(5, mappings.Count);
-        Assert.Equal("2", mappings[0].ExternalId);
-        Assert.Equal("company", mappings[0].ExternalType);
-        Assert.Equal(companies[0].Id, mappings[0].LocalEntityId);
-        Assert.Equal("23", mappings[^1].ExternalId);
+        var masriMapping = Assert.Single(mappings, m => m.ExternalId == "2");
+        Assert.Equal("company", masriMapping.ExternalType);
+        Assert.Equal(masri.Id, masriMapping.LocalEntityId);
+        Assert.Contains(mappings, m => m.ExternalId == "23");
     }
 
     [Fact]
