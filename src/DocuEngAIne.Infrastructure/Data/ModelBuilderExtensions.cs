@@ -47,6 +47,7 @@ public static class ModelBuilderExtensions
         modelBuilder.Entity<McpServer>(m =>
         {
             m.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            m.Property(x => x.Kind).HasDefaultValue(DocuEngAIne.Core.Enums.McpServerKind.StackJackCompact);
         });
 
         modelBuilder.Entity<IntegrationConnection>(i =>

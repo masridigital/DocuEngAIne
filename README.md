@@ -32,7 +32,7 @@ tests/                      # xUnit + EF InMemory tests
 
 - **Tenant** — isolation boundary; seeded from the Entra `tid` claim on first login.
 - **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets.
-- **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry and PSA/RMM sync. Secrets live in Key Vault names only.
+- **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry (StackJack Compact or Composio) and PSA/RMM sync. Secrets live in Key Vault names only.
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
 - **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
 - **Document** — KB articles with full-text search and **versioning**. Optional `FolderId`.
@@ -175,20 +175,22 @@ Apply in production via a CI step or from an Azure Pipelines/SQL deployment task
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/mcp/servers` | List MCP servers |
+| GET | `/api/mcp/servers` | List MCP servers (includes `kind` + endpoint) |
 | GET | `/api/mcp/servers/{id}` | MCP server detail |
-| POST | `/api/mcp/servers` | Register MCP server |
+| POST | `/api/mcp/servers` | Register Compact or Composio (`kind`; default URL if endpoint omitted) |
 | PUT | `/api/mcp/servers/{id}` | Update MCP server |
 | DELETE | `/api/mcp/servers/{id}` | Delete MCP server |
 | GET | `/api/integrations` | List connections (includes sync-policy bools) |
 | GET | `/api/integrations/{id}` | Connection detail (includes sync-policy bools) |
-| POST | `/api/integrations` | Create connection (Halo, NinjaOne, UniFi, Blackpoint, CustomMcp) plus sync-policy bools |
+| POST | `/api/integrations` | Create connection (Halo, NinjaOne, CIPP, Meraki, UniFi, Blackpoint, Composio, CustomMcp) plus sync-policy bools |
 | PUT | `/api/integrations/{id}` | Update connection and sync-policy bools |
 | DELETE | `/api/integrations/{id}` | Delete connection |
 | POST | `/api/integrations/{id}/test` | Test MCP/config |
-| POST | `/api/integrations/{id}/sync` | Sync (payload upsert or gated live pull) |
+| POST | `/api/integrations/{id}/sync` | Halo live pull via Compact `halo_list_clients`, or payload upsert. Other-tenant → 404 |
 | GET | `/api/integrations/{id}/runs` | Recent sync runs |
 | GET | `/api/integrations/{id}/mappings` | External→local mappings |
+
+MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi). **Composio** (`https://connect.composio.dev/mcp`) is the 1000+ app Connect MCP. Auth is `McpServer.AuthSecretName` (Key Vault name only).
 
 Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipContacts` false, `SkipLocations` false, `SkipAssets` false (Ninja skip-devices), `AutoUpdateAssetNames` false, `UpdateCompanyDetails` false (refuse overwrite).
 
@@ -309,14 +311,15 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 ### Phase 2A (now) ✅
 - [x] Company (client space) distinct from Entra tenant
 - [x] MCP server registry + IntegrationConnection (Key Vault secrets)
-- [x] HaloPSA + NinjaOne sync via payload/MCP path (`SyncFromPayload` + test/sync endpoints)
-- [x] SPA: Companies + Integrations
+- [x] First-class MCP kinds: StackJack Compact (`https://compact.stackjack.io/mcp`) and Composio (`https://connect.composio.dev/mcp`)
+- [x] HaloPSA company pull via Compact `halo_list_clients` (`SyncAsync` → `SyncFromPayload`); Ninja/CIPP/Meraki/UniFi registry only
+- [x] SPA: Companies + Integrations (Compact vs Composio; Halo/Ninja/CIPP/Meraki/UniFi point at Compact)
 - [x] Company overview related lists (assets/docs/runbooks/Keeper)
 - [x] GET MCP server and integration by id; SQL cascade fix
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 - [x] Optional `Company.HaloPortalUrl` / `Company.NinjaPortalUrl` (Open in Halo / Open in Ninja)
 
-> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`), and `20260828045000_Phase2DocumentFolders` (`DocumentFolders`; `Documents.FolderId` Restrict; Parent Restrict; Company Restrict). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`), `20260828045000_Phase2DocumentFolders` (`DocumentFolders`; `Documents.FolderId` Restrict; Parent Restrict; Company Restrict), and `20260828050000_Phase2McpServerKind` (`McpServers.Kind`: StackJackCompact=0, Composio=1). Run `dotnet ef migrations add Phase2IntegrationsReconcile --project src/DocuEngAIne.Api` if the model snapshot still needs regen.
 
 
 ### Later
