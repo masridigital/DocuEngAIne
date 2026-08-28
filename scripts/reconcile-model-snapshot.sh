@@ -71,11 +71,17 @@ fi
 echo "   Up() is empty -- the snapshot is now a pure catch-up. Good."
 echo
 echo "==> Verifying EF now reports no pending model changes"
+# has-pending-model-changes exits NON-ZERO when changes are pending -- it is built for CI gating.
+# So a zero exit is the good case; do not invert this.
 if dotnet ef migrations has-pending-model-changes \
      --project src/DocuEngAIne.Api --startup-project src/DocuEngAIne.Api; then
-  echo "   (command reported pending changes -- see output above)"
-else
   echo "   No pending model changes."
+else
+  echo
+  echo "!! EF still reports pending model changes after regenerating the snapshot." >&2
+  echo "   The snapshot and the model disagree about something the empty Up() did not capture." >&2
+  echo "   Do not commit until this is understood." >&2
+  exit 3
 fi
 
 cat <<'NEXT'

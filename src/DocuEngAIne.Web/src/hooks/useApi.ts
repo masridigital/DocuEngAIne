@@ -434,6 +434,15 @@ export function testIntegration(id: string) {
   return postJson<{ ok?: boolean; message?: string }>(`/api/integrations/${id}/test`)
 }
 
+export type KeeperReveal = {
+  keeperRecordUrl?: string | null
+}
+
+/** Audit-logged on the server. Goes through apiFetch so the reveal carries a token like every other call. */
+export function revealKeeperLink(id: string) {
+  return postJson<KeeperReveal>(`/api/keeper/${id}/reveal`)
+}
+
 export function syncIntegration(id: string) {
   return postJson<{
     status?: string

@@ -90,10 +90,11 @@ public class HttpMcpClient : IMcpClient
         var token = ResolveAuthToken(server);
         var session = await EnsureSessionAsync(server, server.EndpointUrl, token, cancellationToken);
 
+        var requestId = Guid.NewGuid().ToString("N");
         var payload = new
         {
             jsonrpc = "2.0",
-            id = Guid.NewGuid().ToString("N"),
+            id = requestId,
             method,
             @params = paramsObj,
         };
@@ -103,7 +104,7 @@ public class HttpMcpClient : IMcpClient
 
         if (IsEventStream(response))
         {
-            return ParseSseMessage(body)
+            return ParseSseMessage(body, requestId)
                 ?? throw new InvalidOperationException("MCP server returned an SSE response with no message event.");
         }
 
@@ -136,7 +137,13 @@ public class HttpMcpClient : IMcpClient
 
         using (var response = await PostAsync(endpointUrl, token, session, initialize, includeProtocolVersion: false, cancellationToken))
         {
-            await ReadBodyAsync(response, cancellationToken);
+            var body = await ReadBodyAsync(response, cancellationToken);
+            if (IsEventStream(response))
+                body = ParseSseMessage(body, null) ?? body;
+
+            // A server may reject initialize with HTTP 200 and a JSON-RPC error. Treating that as a
+            // successful handshake would cache a dead session and fail every later call obscurely.
+            session.ProtocolVersion = ReadInitializeResult(body);
 
             if (response.Headers.TryGetValues(SessionIdHeader, out var sessionIds))
             {
@@ -152,9 +159,12 @@ public class HttpMcpClient : IMcpClient
             method = "notifications/initialized",
         };
 
+        // notifications/initialized is fire-and-forget: it carries no JSON-RPC id and expects no result.
+        // Servers that answer anything other than 2xx are still usable for tool calls, so a non-success
+        // status here must not throw and take every later call down with it.
         using (var response = await PostAsync(endpointUrl, token, session, initialized, includeProtocolVersion: true, cancellationToken))
         {
-            await ReadBodyAsync(response, cancellationToken);
+            await response.Content.ReadAsStringAsync(cancellationToken);
         }
 
         _sessions[server.Id] = session;
@@ -176,7 +186,7 @@ public class HttpMcpClient : IMcpClient
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(EventStreamMediaType));
 
         if (includeProtocolVersion)
-            request.Headers.TryAddWithoutValidation(ProtocolVersionHeader, ProtocolVersion);
+            request.Headers.TryAddWithoutValidation(ProtocolVersionHeader, session.ProtocolVersion ?? ProtocolVersion);
 
         if (!string.IsNullOrWhiteSpace(token))
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
@@ -200,13 +210,17 @@ public class HttpMcpClient : IMcpClient
         => string.Equals(response.Content.Headers.ContentType?.MediaType, EventStreamMediaType, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// Returns the payload of the last <c>message</c> event in an SSE body, or null when the stream carried none.
+    /// Returns the payload of the <c>message</c> event whose JSON-RPC <c>id</c> matches
+    /// <paramref name="requestId"/>, falling back to the last <c>message</c> event when no frame matches
+    /// (or when no id was supplied). Correlating by id matters because a server may emit notifications
+    /// after the result, and handing one of those to the mappers would look like an empty response.
     /// Multi-line <c>data:</c> continuations are joined with a newline, per the SSE spec. A trailing block that
     /// is not terminated by a blank line is still dispatched — servers that close the stream without one are
     /// common enough that discarding the reply would be worse than accepting it.
     /// </summary>
-    private static string? ParseSseMessage(string body)
+    private static string? ParseSseMessage(string body, string? requestId)
     {
+        string? matched = null;
         string? lastMessage = null;
         var eventName = "message";
         var data = new StringBuilder();
@@ -219,7 +233,11 @@ public class HttpMcpClient : IMcpClient
             if (line.Length == 0)
             {
                 if (hasData && eventName == "message")
+                {
                     lastMessage = data.ToString();
+                    if (matched is null && MatchesRequestId(lastMessage, requestId))
+                        matched = lastMessage;
+                }
                 eventName = "message";
                 data.Clear();
                 hasData = false;
@@ -249,9 +267,73 @@ public class HttpMcpClient : IMcpClient
         }
 
         if (hasData && eventName == "message")
+        {
             lastMessage = data.ToString();
+            if (matched is null && MatchesRequestId(lastMessage, requestId))
+                matched = lastMessage;
+        }
 
-        return lastMessage;
+        return matched ?? lastMessage;
+    }
+
+    private static bool MatchesRequestId(string frame, string? requestId)
+    {
+        if (string.IsNullOrEmpty(requestId))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(frame);
+            return doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("id", out var id)
+                && id.ValueKind == JsonValueKind.String
+                && string.Equals(id.GetString(), requestId, StringComparison.Ordinal);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Reads the negotiated protocol version out of an <c>initialize</c> result, throwing when the server
+    /// answered with a JSON-RPC error instead.
+    /// </summary>
+    private static string? ReadInitializeResult(string body)
+    {
+        JsonElement root;
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            root = doc.RootElement.Clone();
+        }
+        catch (JsonException)
+        {
+            // A server that answers initialize with something unparsable is still worth trying for
+            // tool calls; the tool call itself will surface a clearer failure.
+            return null;
+        }
+
+        if (root.ValueKind != JsonValueKind.Object)
+            return null;
+
+        if (root.TryGetProperty("error", out var error))
+        {
+            var message = error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var m)
+                ? m.GetString()
+                : error.GetRawText();
+            throw new InvalidOperationException($"MCP initialize failed: {message}");
+        }
+
+        if (root.TryGetProperty("result", out var result)
+            && result.ValueKind == JsonValueKind.Object
+            && result.TryGetProperty("protocolVersion", out var version)
+            && version.ValueKind == JsonValueKind.String)
+        {
+            return version.GetString();
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -288,5 +370,8 @@ public class HttpMcpClient : IMcpClient
     private sealed class McpSession
     {
         public string? SessionId { get; set; }
+
+        /// <summary>Version the server named at initialize, echoed on later requests. Null falls back to ours.</summary>
+        public string? ProtocolVersion { get; set; }
     }
 }

@@ -201,17 +201,18 @@ jobs:
             # Fallback: rebuild the exact string infra/main.bicep composes, from
             # the SQL admin secrets that already exist. No new secret needed.
             echo "Key Vault secret unavailable; composing connection string from SQL admin secrets."
+            if [ -z "${SQL_ADMIN_LOGIN}" ] || [ -z "${SQL_ADMIN_PASSWORD}" ]; then
+              echo "Key Vault secret was unreadable and SQL_ADMIN_LOGIN/SQL_ADMIN_PASSWORD are not set." >&2
+              echo "Set those repository secrets, or grant the deploying service principal the" >&2
+              echo "Key Vault Secrets User role on the vault." >&2
+              exit 1
+            fi
             FQDN=$(az sql server show \
               --resource-group "$AZURE_RG" \
               --name "$SQL_SERVER_NAME" \
               --query fullyQualifiedDomainName -o tsv)
             CONNECTION_STRING="Server=tcp:${FQDN},1433;Initial Catalog=${SQL_DATABASE_NAME};User ID=${SQL_ADMIN_LOGIN};Password=${SQL_ADMIN_PASSWORD};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;"
             echo "::add-mask::$CONNECTION_STRING"
-          fi
-
-          if [ -z "$CONNECTION_STRING" ]; then
-            echo "Could not resolve a SQL connection string from Key Vault or from SQL_ADMIN_* secrets." >&2
-            exit 1
           fi
 
           # upload-artifact does not preserve the executable bit.
