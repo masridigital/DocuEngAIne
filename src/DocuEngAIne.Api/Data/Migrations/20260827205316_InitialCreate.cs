@@ -172,12 +172,13 @@ namespace DocuEngAIne.Api.Data.Migrations
                         principalTable: "AssetTypes",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                    // Restrict: AssetType already cascades from Tenant — SQL Server forbids multiple cascade paths.
                     table.ForeignKey(
                         name: "FK_Assets_Tenants_TenantId",
                         column: x => x.TenantId,
                         principalTable: "Tenants",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -223,12 +224,13 @@ namespace DocuEngAIne.Api.Data.Migrations
                         principalTable: "Assets",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                    // Restrict: Asset and Document both cascade from Tenant — SQL Server forbids multiple cascade paths.
                     table.ForeignKey(
                         name: "FK_AssetDocumentLinks_Documents_DocumentId",
                         column: x => x.DocumentId,
                         principalTable: "Documents",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateTable(
@@ -251,12 +253,13 @@ namespace DocuEngAIne.Api.Data.Migrations
                         principalTable: "Assets",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Cascade);
+                    // Restrict: Asset and FieldDefinition both cascade via AssetType — SQL Server forbids multiple cascade paths.
                     table.ForeignKey(
                         name: "FK_CustomFieldValues_FieldDefinitions_FieldDefinitionId",
                         column: x => x.FieldDefinitionId,
                         principalTable: "FieldDefinitions",
                         principalColumn: "Id",
-                        onDelete: ReferentialAction.Cascade);
+                        onDelete: ReferentialAction.Restrict);
                 });
 
             migrationBuilder.CreateIndex(
