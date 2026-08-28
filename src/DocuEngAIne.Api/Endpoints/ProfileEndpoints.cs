@@ -40,13 +40,22 @@ public static class ProfileEndpoints
                     });
                 }
 
+                // Bootstrap: the first person to sign in to a freshly onboarded tenant becomes Owner.
+                // Without this the tenant would have no administrator at all — nothing else in the
+                // system ever writes User.Role, and Entra app roles are an optional setup step, so a
+                // Reader-only tenant could never reach the admin-gated integration surfaces.
+                var isFirstUserInTenant = !await db.Users
+                    .AnyAsync(u => u.TenantId == user.TenantId.Value, cancellationToken);
+
                 dbUser = new User
                 {
                     TenantId = user.TenantId.Value,
                     EntraObjectId = user.ObjectId!,
                     Email = user.Email ?? "unknown",
                     DisplayName = user.DisplayName,
-                    Role = UserRole.Contributor,
+                    // Everyone after the first starts read-only: admin rights are granted deliberately,
+                    // not handed out by the act of signing in.
+                    Role = isFirstUserInTenant ? UserRole.Owner : UserRole.Reader,
                 };
 
                 db.Users.Add(dbUser);

@@ -3,6 +3,7 @@ using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Core.Mcp;
 using DocuEngAIne.Infrastructure.Data;
+using DocuEngAIne.Infrastructure.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -19,7 +20,9 @@ public static class IntegrationEndpoints
 
     private static void MapMcpServers(IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/mcp/servers").RequireAuthorization();
+        // Admin-only as a group, reads included: an MCP server row is an outbound egress target plus
+        // the name of a Key Vault secret, so even listing it tells a caller where our credentials point.
+        var group = app.MapGroup("/api/mcp/servers").RequireAuthorization(AuthExtensions.AdminPolicy);
 
         group.MapGet("", async (DocuEngAIneDbContext db, ICurrentUser user, CancellationToken ct) =>
         {
@@ -78,7 +81,9 @@ public static class IntegrationEndpoints
 
     private static void MapIntegrations(IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/integrations").RequireAuthorization();
+        // Admin-only as a group: these routes hold PSA/RMM connection config and secret names, and
+        // /sync and /test reach out to third-party systems on the tenant's behalf.
+        var group = app.MapGroup("/api/integrations").RequireAuthorization(AuthExtensions.AdminPolicy);
 
         group.MapGet("", async (DocuEngAIneDbContext db, ICurrentUser user, CancellationToken ct) =>
         {
