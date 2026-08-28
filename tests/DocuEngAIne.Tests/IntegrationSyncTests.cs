@@ -1142,4 +1142,271 @@ public class IntegrationSyncTests
             Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
         }
     }
+
+    private sealed class RecordingUnifiMcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public string HostsJson { get; init; } = """{"data":[]}""";
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            string? nextToken = null;
+            var pageSize = UnifiHostMapper.DefaultPageSize;
+            if (!string.IsNullOrWhiteSpace(argumentsJson))
+            {
+                using var doc = JsonDocument.Parse(argumentsJson);
+                if (doc.RootElement.TryGetProperty("nextToken", out var t) && t.ValueKind == JsonValueKind.String)
+                    nextToken = t.GetString();
+                if (doc.RootElement.TryGetProperty("pageSize", out var s) && s.ValueKind == JsonValueKind.Number)
+                    pageSize = s.GetInt32();
+            }
+
+            var inner = SliceHostsJson(HostsJson, nextToken, pageSize);
+            var body = JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                id = "1",
+                result = new { content = new[] { new { type = "text", text = inner } } },
+            });
+            return Task.FromResult(body);
+        }
+
+        private static string SliceHostsJson(string json, string? nextToken, int pageSize)
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Array)
+                return """{"data":[]}""";
+
+            var all = data.EnumerateArray().ToList();
+            var start = 0;
+            if (nextToken is not null)
+            {
+                start = all.FindIndex(h =>
+                    h.ValueKind == JsonValueKind.Object
+                    && h.TryGetProperty("id", out var id)
+                    && id.GetString() == nextToken);
+                if (start < 0)
+                    start = all.Count;
+            }
+
+            var page = all.Skip(start).Take(pageSize).ToList();
+            var dataJson = "[" + string.Join(",", page.Select(p => p.GetRawText())) + "]";
+            if (start + page.Count < all.Count)
+            {
+                var outgoing = all[start + page.Count].GetProperty("id").GetString();
+                return $$"""{"data":{{dataJson}},"nextToken":"{{outgoing}}","httpStatusCode":200}""";
+            }
+
+            return $$"""{"data":{{dataJson}},"httpStatusCode":200}""";
+        }
+    }
+
+    private static async Task<(McpServer Server, IntegrationConnection Connection)> SeedUnifiCompactAsync(
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool skipInactive = true, bool updateCompanyDetails = false)
+    {
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            Transport = McpTransport.Http,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.UniFi,
+            DisplayName = "UniFi",
+            McpServerId = server.Id,
+            SkipInactive = skipInactive,
+            UpdateCompanyDetails = updateCompanyDetails,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+        return (server, connection);
+    }
+
+    [Fact]
+    public async Task UniFi_SyncAsync_Creates_Company_From_Host_Name_And_City()
+    {
+        var mcp = new RecordingUnifiMcp { HostsJson = UnifiHostMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedUnifiCompactAsync(db, user);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsCreated);
+        Assert.Equal(1, run.ItemsSkipped);
+        Assert.Equal("unifi_sm_list_hosts", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(server.Id, mcp.Calls[0].ServerId);
+        Assert.DoesNotContain("nextToken", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"pageSize\":50", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("unifi_sm_list_sites", mcp.Calls.Select(c => c.Tool));
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("Adroc Capital: 1425 RXR Plaza", company.Name);
+        Assert.Equal("Wyandanch, NY, United States", company.City);
+        Assert.Null(company.HaloClientId);
+        Assert.Null(company.NinjaOrganizationId);
+        Assert.Equal("host-1", CompanyIdentity.ReadExternalIds(company.ExternalIdsJson)["unifi"]);
+
+        var mapping = await db.IntegrationMappings.SingleAsync();
+        Assert.Equal("company", mapping.ExternalType);
+        Assert.Equal("host-1", mapping.ExternalId);
+        Assert.Equal(company.Id, mapping.LocalEntityId);
+    }
+
+    [Fact]
+    public async Task UniFi_SyncAsync_Adopts_Existing_Company_By_Name_Instead_Of_Duplicating()
+    {
+        var mcp = new RecordingUnifiMcp { HostsJson = UnifiHostMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedUnifiCompactAsync(db, user);
+
+        db.Companies.Add(new Company
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "Adroc Capital: 1425 RXR Plaza",
+            Slug = "adroc-capital-1425-rxr-plaza",
+            HaloClientId = "halo-100",
+            ExternalIdsJson = CompanyIdentity.UpsertExternalId(null, "halo", "halo-100"),
+        });
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(0, run.ItemsCreated);
+        Assert.Equal(1, run.ItemsUpdated);
+        Assert.Equal(1, run.ItemsSkipped);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("halo-100", company.HaloClientId);
+        Assert.Equal("host-1", CompanyIdentity.ReadExternalIds(company.ExternalIdsJson)["unifi"]);
+        Assert.Equal("halo-100", CompanyIdentity.ReadExternalIds(company.ExternalIdsJson)["halo"]);
+
+        var mapping = await db.IntegrationMappings.SingleAsync();
+        Assert.Equal("host-1", mapping.ExternalId);
+        Assert.Equal(company.Id, mapping.LocalEntityId);
+        Assert.Contains(CompanyMatchIndex.MatchedByName, mapping.MetadataJson!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task UniFi_SkipInactive_Drops_IsBlocked_True()
+    {
+        var mcp = new RecordingUnifiMcp { HostsJson = UnifiHostMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedUnifiCompactAsync(db, user, skipInactive: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsSkipped);
+        Assert.Equal(1, run.ItemsCreated);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("Adroc Capital: 1425 RXR Plaza", company.Name);
+        Assert.DoesNotContain(await db.Companies.ToListAsync(), c => c.Name == "Blocked Co");
+        Assert.DoesNotContain(await db.IntegrationMappings.ToListAsync(), m => m.ExternalId == "host-2");
+    }
+
+    [Fact]
+    public async Task UniFi_List_Hosts_Cursor_Second_CallToolAsync_Receives_NextToken()
+    {
+        var mcp = new RecordingUnifiMcp { HostsJson = UnifiHostMapperTests.LiveCompactListFixture };
+        var (db, user, _) = Create(mcp);
+        var (server, _) = await SeedUnifiCompactAsync(db, user);
+
+        var companies = await UnifiHostMapper.PullAsync(mcp, server.Id, pageSize: 1);
+
+        Assert.Equal(2, companies.Count);
+        Assert.Equal("host-1", companies[0].ExternalId);
+        Assert.Equal("Adroc Capital: 1425 RXR Plaza", companies[0].Name);
+        Assert.Equal("Wyandanch, NY, United States", companies[0].City);
+        Assert.Equal(2, mcp.Calls.Count);
+        Assert.All(mcp.Calls, c => Assert.Equal("unifi_sm_list_hosts", c.Tool));
+        Assert.Equal(server.Id, mcp.Calls[0].ServerId);
+        Assert.DoesNotContain("nextToken", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"pageSize\":1", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.Contains("\"nextToken\":\"host-2\"", mcp.Calls[1].Args, StringComparison.Ordinal);
+        Assert.Contains("\"pageSize\":1", mcp.Calls[1].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("unifi_sm_list_sites", mcp.Calls.Select(c => c.Tool));
+    }
+
+    [Fact]
+    public async Task UniFi_SyncAsync_Missing_McpServerId_Fails_Without_Calling_Mcp()
+    {
+        var mcp = new RecordingUnifiMcp { HostsJson = UnifiHostMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.UniFi,
+            DisplayName = "UniFi",
+            AuthSecretName = "kv-name-only",
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        Assert.Contains("McpServerId", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Key Vault", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
+        Assert.Empty(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task UniFi_Other_Tenant_Connection_Sync_Returns_404_And_Does_Not_Call_Mcp()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var mcp = new RecordingUnifiMcp { HostsJson = UnifiHostMapperTests.LiveCompactListFixture };
+
+        Guid connectionBId;
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var server = new McpServer
+            {
+                TenantId = tenantB,
+                Name = "Compact B",
+                Kind = McpServerKind.StackJackCompact,
+                EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            };
+            dbB.McpServers.Add(server);
+            var connection = new IntegrationConnection
+            {
+                TenantId = tenantB,
+                Provider = IntegrationProvider.UniFi,
+                DisplayName = "UniFi B",
+                McpServerId = server.Id,
+            };
+            dbB.IntegrationConnections.Add(connection);
+            await dbB.SaveChangesAsync();
+            connectionBId = connection.Id;
+        }
+
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var sync = new IntegrationSyncService(dbA, userA, mcp, new NoopAudit());
+            var result = await IntegrationEndpoints.SyncAsync(connectionBId, null, sync, dbA, userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+            Assert.Empty(mcp.Calls);
+            Assert.Empty(await dbA.IntegrationConnections.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.SyncRuns.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
+        }
+    }
 }

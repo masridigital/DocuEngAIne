@@ -160,6 +160,39 @@ public class CompanyConvergenceTests
     }
 
     [Fact]
+    public async Task UniFi_Adopts_Existing_Company_By_Name_And_Records_Host_Id()
+    {
+        var (db, user, sync) = Create();
+        var halo = await AddConnectionAsync(db, user, IntegrationProvider.Halo);
+        await sync.SyncFromPayloadAsync(halo.Id, [
+            new ExternalCompanyDto("halo-100", "Adroc Capital: 1425 RXR Plaza")
+        ]);
+
+        var unifi = await AddConnectionAsync(db, user, IntegrationProvider.UniFi);
+        var run = await sync.SyncFromPayloadAsync(unifi.Id, [
+            new ExternalCompanyDto("host-1", "Adroc Capital: 1425 RXR Plaza", City: "Wyandanch, NY, United States")
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(0, run.ItemsCreated);
+        Assert.Equal(1, run.ItemsUpdated);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("halo-100", company.HaloClientId);
+        Assert.Null(company.NinjaOrganizationId);
+
+        var ids = CompanyIdentity.ReadExternalIds(company.ExternalIdsJson);
+        Assert.Equal("halo-100", ids["halo"]);
+        Assert.Equal("host-1", ids["unifi"]);
+
+        var mappings = await db.IntegrationMappings.ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
+        var unifiMapping = Assert.Single(mappings, m => m.ExternalId == "host-1");
+        Assert.Contains(CompanyMatchIndex.MatchedByName, unifiMapping.MetadataJson!, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task Re_Running_The_Same_Connection_Updates_Through_The_Mapping()
     {
         var (db, user, sync) = Create();
