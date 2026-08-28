@@ -10,6 +10,7 @@ import { FlagsPage } from './pages/FlagsPage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
 import { KeeperPage } from './pages/KeeperPage'
 import { RunbooksPage } from './pages/RunbooksPage'
+import { RunsPage } from './pages/RunsPage'
 
 function App() {
   return (
@@ -22,6 +23,7 @@ function App() {
           <Route path="assets" element={<AssetsPage />} />
           <Route path="documents" element={<DocumentsPage />} />
           <Route path="runbooks" element={<RunbooksPage />} />
+          <Route path="runs" element={<RunsPage />} />
           <Route path="expirations" element={<ExpirationsPage />} />
           <Route path="flags" element={<FlagsPage />} />
           <Route path="keeper" element={<KeeperPage />} />

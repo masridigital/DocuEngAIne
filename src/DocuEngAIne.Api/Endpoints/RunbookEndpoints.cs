@@ -10,6 +10,8 @@ namespace DocuEngAIne.Api.Endpoints;
 public static class RunbookEndpoints
 {
     public const string NotRunningMessage = "Run is not running.";
+    public const string UnknownStatusMessage = "Unknown status.";
+    public const int RecentTake = 100;
 
     public static IEndpointRouteBuilder MapRunbookEndpoints(this IEndpointRouteBuilder app)
     {
@@ -24,6 +26,15 @@ public static class RunbookEndpoints
             var runbooks = await ListPublishedAsync(db, user, search, cancellationToken);
             return Results.Ok(runbooks);
         });
+
+        // Literal /runs before /{id:guid} so the tenant rollup is not captured as an id.
+        group.MapGet("/runs", async (
+            [FromQuery] string? status,
+            [FromQuery] Guid? companyId,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            CancellationToken cancellationToken) =>
+            await ListRecentRunsResultAsync(status, companyId, db, user, cancellationToken));
 
         group.MapGet("/{id:guid}", async (
             Guid id,
@@ -226,6 +237,55 @@ public static class RunbookEndpoints
             runCount));
     }
 
+    public static async Task<IResult> ListRecentRunsResultAsync(
+        string? status,
+        Guid? companyId,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        if (!TryParseStatus(status, out var parsed, out var error))
+            return Results.BadRequest(error);
+
+        var items = await ListRecentRunsAsync(db, user, parsed, companyId, cancellationToken);
+        return Results.Ok(items);
+    }
+
+    public static async Task<IReadOnlyList<RunbookRunRollupItem>> ListRecentRunsAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        RunbookRunStatus? status = null,
+        Guid? companyId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var query = db.RunbookRuns.ForTenant(user).AsNoTracking().AsQueryable();
+
+        if (status is RunbookRunStatus s)
+            query = query.Where(r => r.Status == s);
+
+        if (companyId is Guid cid)
+        {
+            // ForTenant on company: unknown / other-tenant ids yield empty, never 500.
+            var companyInTenant = await db.Companies.ForTenant(user)
+                .AsNoTracking()
+                .AnyAsync(c => c.Id == cid, cancellationToken);
+            if (!companyInTenant)
+                return [];
+
+            query = query.Where(r => r.CompanyId == cid);
+        }
+
+        var runs = await query
+            .Include(r => r.Runbook)
+            .Include(r => r.Company)
+            .OrderByDescending(r => r.StartedAt)
+            .ThenByDescending(r => r.Id)
+            .Take(RecentTake)
+            .ToListAsync(cancellationToken);
+
+        return runs.Select(MapRollup).ToList();
+    }
+
     public static async Task<IResult> ListRunsAsync(
         Guid id,
         DocuEngAIneDbContext db,
@@ -320,10 +380,39 @@ public static class RunbookEndpoints
         return Results.Ok(MapRun(run));
     }
 
+    internal static bool TryParseStatus(string? status, out RunbookRunStatus? parsed, out string? error)
+    {
+        parsed = null;
+        error = null;
+        if (string.IsNullOrWhiteSpace(status))
+            return true;
+
+        if (Enum.TryParse<RunbookRunStatus>(status.Trim(), ignoreCase: true, out var value)
+            && Enum.IsDefined(value))
+        {
+            parsed = value;
+            return true;
+        }
+
+        error = UnknownStatusMessage;
+        return false;
+    }
+
     private static RunbookRunItem MapRun(RunbookRun run) => new(
         run.Id,
         run.RunbookId,
         run.CompanyId,
+        run.Status,
+        run.StartedAt,
+        run.FinishedAt,
+        run.StartedByObjectId);
+
+    private static RunbookRunRollupItem MapRollup(RunbookRun run) => new(
+        run.Id,
+        run.RunbookId,
+        run.Runbook.Title,
+        run.CompanyId,
+        run.Company?.Name,
         run.Status,
         run.StartedAt,
         run.FinishedAt,
@@ -392,6 +481,17 @@ public record RunbookRunItem(
     Guid Id,
     Guid RunbookId,
     Guid? CompanyId,
+    RunbookRunStatus Status,
+    DateTimeOffset StartedAt,
+    DateTimeOffset? FinishedAt,
+    string? StartedByObjectId);
+
+public record RunbookRunRollupItem(
+    Guid Id,
+    Guid RunbookId,
+    string RunbookTitle,
+    Guid? CompanyId,
+    string? CompanyName,
     RunbookRunStatus Status,
     DateTimeOffset StartedAt,
     DateTimeOffset? FinishedAt,

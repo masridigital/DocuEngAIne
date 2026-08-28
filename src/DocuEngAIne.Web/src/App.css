@@ -81,6 +81,15 @@ body {
   color: var(--text-muted);
 }
 
+.page a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.page a:hover {
+  text-decoration: underline;
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -491,4 +500,19 @@ body {
   .kb-layout {
     grid-template-columns: 1fr;
   }
+}
+
+.status-running {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.status-completed {
+  color: #4ade80;
+  font-weight: 600;
+}
+
+.status-cancelled {
+  color: var(--text-muted);
+  font-weight: 600;
 }
