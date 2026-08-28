@@ -72,6 +72,7 @@ app.MapExpirationEndpoints();
 app.MapFlagEndpoints();
 app.MapLinkEndpoints();
 app.MapDocumentEndpoints();
+app.MapFolderEndpoints();
 app.MapKeeperLinkEndpoints();
 app.MapRunbookEndpoints();
 app.MapProfileEndpoints();

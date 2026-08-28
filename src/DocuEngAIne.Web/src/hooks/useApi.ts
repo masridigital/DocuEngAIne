@@ -194,8 +194,44 @@ export function useAssets() {
   return useSWR('/api/assets', fetcher)
 }
 
-export function useDocuments() {
-  return useSWR('/api/documents', fetcher)
+export type DocumentFolder = {
+  id: string
+  name: string
+  parentId?: string | null
+  companyId?: string | null
+  updatedAt?: string
+}
+
+export type KbDocument = {
+  id: string
+  title: string
+  slug?: string | null
+  summary?: string | null
+  tags?: string | null
+  companyId?: string | null
+  folderId?: string | null
+  updatedAt?: string
+}
+
+export function useFolders(opts?: { companyId?: string; parentId?: string }) {
+  const params = new URLSearchParams()
+  if (opts?.companyId) params.set('companyId', opts.companyId)
+  if (opts?.parentId) params.set('parentId', opts.parentId)
+  const qs = params.toString()
+  return useSWR<DocumentFolder[]>(`/api/folders${qs ? `?${qs}` : ''}`, fetcher)
+}
+
+export function useDocuments(opts?: { search?: string; folderId?: string }) {
+  const params = new URLSearchParams()
+  const term = opts?.search?.trim()
+  if (term) params.set('search', term)
+  if (opts?.folderId) params.set('folderId', opts.folderId)
+  const qs = params.toString()
+  return useSWR<KbDocument[]>(`/api/documents${qs ? `?${qs}` : ''}`, fetcher)
+}
+
+export function createFolder(input: { name: string; parentId?: string | null; companyId?: string | null }) {
+  return postJson<DocumentFolder>('/api/folders', input)
 }
 
 export type Runbook = {

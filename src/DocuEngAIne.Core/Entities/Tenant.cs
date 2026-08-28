@@ -14,6 +14,7 @@ public class Tenant : EntityBase
     public ICollection<AssetType> AssetTypes { get; set; } = [];
     public ICollection<Asset> Assets { get; set; } = [];
     public ICollection<Document> Documents { get; set; } = [];
+    public ICollection<DocumentFolder> DocumentFolders { get; set; } = [];
     public ICollection<KeeperLink> KeeperLinks { get; set; } = [];
     public ICollection<Runbook> Runbooks { get; set; } = [];
     public ICollection<ResourceRoleAssignment> ResourceRoleAssignments { get; set; } = [];

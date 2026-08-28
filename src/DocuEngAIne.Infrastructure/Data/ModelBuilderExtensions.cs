@@ -18,6 +18,7 @@ public static class ModelBuilderExtensions
             // Restrict: AssetType already cascades from Tenant — SQL Server forbids multiple cascade paths.
             t.HasMany(x => x.Assets).WithOne(a => a.Tenant).HasForeignKey(a => a.TenantId).OnDelete(DeleteBehavior.Restrict);
             t.HasMany(x => x.Documents).WithOne(d => d.Tenant).HasForeignKey(d => d.TenantId).OnDelete(DeleteBehavior.Cascade);
+            t.HasMany(x => x.DocumentFolders).WithOne(f => f.Tenant).HasForeignKey(f => f.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.KeeperLinks).WithOne(s => s.Tenant).HasForeignKey(s => s.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.Runbooks).WithOne(r => r.Tenant).HasForeignKey(r => r.TenantId).OnDelete(DeleteBehavior.Cascade);
             // Restrict: User already cascades from Tenant — SQL Server forbids multiple cascade paths.
@@ -35,6 +36,7 @@ public static class ModelBuilderExtensions
             // Restrict: Company and Tenant/AssetType both reach these tables — SQL Server forbids multiple cascade paths (including SET NULL).
             c.HasMany(x => x.Assets).WithOne(a => a.Company).HasForeignKey(a => a.CompanyId).OnDelete(DeleteBehavior.Restrict);
             c.HasMany(x => x.Documents).WithOne(d => d.Company).HasForeignKey(d => d.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            c.HasMany(x => x.DocumentFolders).WithOne(f => f.Company).HasForeignKey(f => f.CompanyId).OnDelete(DeleteBehavior.Restrict);
             c.HasMany(x => x.Runbooks).WithOne(r => r.Company).HasForeignKey(r => r.CompanyId).OnDelete(DeleteBehavior.Restrict);
             c.HasMany(x => x.KeeperLinks).WithOne(k => k.Company).HasForeignKey(k => k.CompanyId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -105,13 +107,26 @@ public static class ModelBuilderExtensions
             v.HasOne(x => x.FieldDefinition).WithMany().HasForeignKey(x => x.FieldDefinitionId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<DocumentFolder>(f =>
+        {
+            f.HasIndex(x => new { x.TenantId, x.Name });
+            f.HasIndex(x => new { x.TenantId, x.CompanyId });
+            f.HasIndex(x => x.ParentId);
+            f.Property(x => x.Name).HasMaxLength(450);
+            // Restrict: Tenant already cascades to DocumentFolders — SQL Server forbids a second cascade on the self-ref.
+            f.HasOne(x => x.Parent).WithMany(x => x.Children).HasForeignKey(x => x.ParentId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<Document>(d =>
         {
             d.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
             d.HasIndex(x => x.Tags);
+            d.HasIndex(x => x.FolderId);
             // Restrict: Asset already cascades to AssetDocumentLink — SQL Server forbids multiple cascade paths.
             d.HasMany(x => x.LinkedAssets).WithOne(l => l.Document).HasForeignKey(l => l.DocumentId).OnDelete(DeleteBehavior.Restrict);
             d.HasMany(x => x.Versions).WithOne(v => v.Document).HasForeignKey(v => v.DocumentId).OnDelete(DeleteBehavior.Cascade);
+            // Restrict: Tenant already cascades to Documents and DocumentFolders — SQL Server forbids multiple cascade paths.
+            d.HasOne(x => x.Folder).WithMany(f => f.Documents).HasForeignKey(x => x.FolderId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<DocumentVersion>(v =>

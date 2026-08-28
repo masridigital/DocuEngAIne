@@ -217,6 +217,9 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<Guid?>("FolderId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsPublished")
                         .HasColumnType("bit");
 
@@ -241,6 +244,8 @@ namespace DocuEngAIne.Api.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("FolderId");
+
                     b.HasIndex("Tags");
 
                     b.HasIndex("TenantId", "Slug")
@@ -248,6 +253,45 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .HasFilter("[Slug] IS NOT NULL");
 
                     b.ToTable("Documents");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.DocumentFolder", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<Guid?>("ParentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("ParentId");
+
+                    b.HasIndex("TenantId", "CompanyId");
+
+                    b.HasIndex("TenantId", "Name");
+
+                    b.ToTable("DocumentFolders");
                 });
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.DocumentVersion", b =>
@@ -821,11 +865,36 @@ namespace DocuEngAIne.Api.Data.Migrations
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Document", b =>
                 {
+                    b.HasOne("DocuEngAIne.Core.Entities.DocumentFolder", "Folder")
+                        .WithMany("Documents")
+                        .HasForeignKey("FolderId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
                         .WithMany("Documents")
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Folder");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.DocumentFolder", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.DocumentFolder", "Parent")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany("DocumentFolders")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Parent");
 
                     b.Navigation("Tenant");
                 });
@@ -999,6 +1068,13 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Navigation("Versions");
                 });
 
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.DocumentFolder", b =>
+                {
+                    b.Navigation("Children");
+
+                    b.Navigation("Documents");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Runbook", b =>
                 {
                     b.Navigation("Runs");
@@ -1016,6 +1092,8 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Navigation("AssetTypes");
 
                     b.Navigation("Assets");
+
+                    b.Navigation("DocumentFolders");
 
                     b.Navigation("Documents");
 

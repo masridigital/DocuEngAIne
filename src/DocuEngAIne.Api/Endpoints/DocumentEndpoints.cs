@@ -14,28 +14,12 @@ public static class DocumentEndpoints
 
         group.MapGet("", async (
             [FromQuery] string? search,
+            [FromQuery] Guid? folderId,
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
         {
-            var query = db.Documents
-                .ForTenant(user)
-                .AsNoTracking()
-                .Where(d => d.IsPublished);
-
-            if (!string.IsNullOrWhiteSpace(search))
-            {
-                query = query.Where(d =>
-                    (d.Title != null && d.Title.Contains(search)) ||
-                    (d.Summary != null && d.Summary.Contains(search)) ||
-                    (d.Tags != null && d.Tags.Contains(search)));
-            }
-
-            var docs = await query
-                .OrderBy(d => d.Title)
-                .Select(d => new { d.Id, d.Title, d.Slug, d.Summary, d.Tags, d.CompanyId, d.UpdatedAt })
-                .ToListAsync(cancellationToken);
-
+            var docs = await ListAsync(db, user, search, folderId, cancellationToken);
             return Results.Ok(docs);
         });
 
@@ -59,6 +43,7 @@ public static class DocumentEndpoints
                 doc.Content,
                 doc.Tags,
                 doc.CompanyId,
+                doc.FolderId,
                 doc.IsPublished,
                 doc.UpdatedAt,
             });
@@ -69,26 +54,7 @@ public static class DocumentEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
-                return badCompany;
-
-            var doc = new Document
-            {
-                TenantId = user.TenantId!.Value,
-                Title = request.Title,
-                Slug = request.Slug ?? request.Title.ToLowerInvariant().Replace(' ', '-'),
-                Summary = request.Summary,
-                Content = request.Content,
-                Tags = request.Tags,
-                IsPublished = request.IsPublished,
-                CompanyId = request.CompanyId,
-            };
-
-            db.Documents.Add(doc);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.Created($"/api/documents/{doc.Id}", new { doc.Id, doc.Title, doc.Slug });
-        });
+            await CreateAsync(request, db, user, cancellationToken));
 
         group.MapPut("/{id:guid}", async (
             Guid id,
@@ -96,44 +62,7 @@ public static class DocumentEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            var doc = await db.Documents
-                .ForTenant(user)
-                .Include(d => d.Versions.OrderByDescending(v => v.VersionNumber).Take(1))
-                .FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
-
-            if (doc is null)
-                return Results.NotFound();
-
-            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
-                return badCompany;
-            if (request.CompanyId is Guid companyId)
-                doc.CompanyId = companyId;
-
-            var nextVersionNumber = (doc.Versions.Max(v => (int?)v.VersionNumber) ?? 0) + 1;
-
-            db.DocumentVersions.Add(new DocumentVersion
-            {
-                DocumentId = doc.Id,
-                VersionNumber = nextVersionNumber,
-                Title = doc.Title,
-                Slug = doc.Slug,
-                Summary = doc.Summary,
-                Content = doc.Content,
-                Tags = doc.Tags,
-                ChangeNote = request.ChangeNote,
-            });
-
-            doc.Title = request.Title ?? doc.Title;
-            doc.Slug = request.Slug ?? doc.Slug;
-            doc.Summary = request.Summary ?? doc.Summary;
-            doc.Content = request.Content ?? doc.Content;
-            doc.Tags = request.Tags ?? doc.Tags;
-            doc.IsPublished = request.IsPublished ?? doc.IsPublished;
-
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+            await UpdateAsync(id, request, db, user, cancellationToken));
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
@@ -237,7 +166,138 @@ public static class DocumentEndpoints
 
         return app;
     }
+
+    public static async Task<IReadOnlyList<DocumentListItem>> ListAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        string? search = null,
+        Guid? folderId = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (folderId is Guid fid)
+        {
+            var folderInTenant = await db.DocumentFolders.ForTenant(user).AsNoTracking()
+                .AnyAsync(f => f.Id == fid, cancellationToken);
+            if (!folderInTenant)
+                return [];
+        }
+
+        var query = db.Documents
+            .ForTenant(user)
+            .AsNoTracking()
+            .Where(d => d.IsPublished);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            query = query.Where(d =>
+                (d.Title != null && d.Title.Contains(search)) ||
+                (d.Summary != null && d.Summary.Contains(search)) ||
+                (d.Tags != null && d.Tags.Contains(search)));
+        }
+
+        if (folderId is Guid folderFilter)
+            query = query.Where(d => d.FolderId == folderFilter);
+
+        var docs = await query
+            .OrderBy(d => d.Title)
+            .Select(d => new DocumentListItem(d.Id, d.Title, d.Slug, d.Summary, d.Tags, d.CompanyId, d.FolderId, d.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
+        return docs;
+    }
+
+    public static async Task<IResult> CreateAsync(
+        CreateDocumentRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        if (user.TenantId is null)
+            return Results.Unauthorized();
+
+        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+            return badCompany;
+        if (await FolderEndpoints.EnsureFolderInTenantAsync(db, user, request.FolderId, cancellationToken) is { } badFolder)
+            return badFolder;
+
+        var doc = new Document
+        {
+            TenantId = user.TenantId.Value,
+            Title = request.Title,
+            Slug = request.Slug ?? request.Title.ToLowerInvariant().Replace(' ', '-'),
+            Summary = request.Summary,
+            Content = request.Content,
+            Tags = request.Tags,
+            IsPublished = request.IsPublished,
+            CompanyId = request.CompanyId,
+            FolderId = request.FolderId,
+        };
+
+        db.Documents.Add(doc);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.Created($"/api/documents/{doc.Id}", new { doc.Id, doc.Title, doc.Slug, doc.FolderId });
+    }
+
+    public static async Task<IResult> UpdateAsync(
+        Guid id,
+        UpdateDocumentRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var doc = await db.Documents
+            .ForTenant(user)
+            .Include(d => d.Versions.OrderByDescending(v => v.VersionNumber).Take(1))
+            .FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
+
+        if (doc is null)
+            return Results.NotFound();
+
+        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+            return badCompany;
+        if (request.CompanyId is Guid companyId)
+            doc.CompanyId = companyId;
+
+        if (await FolderEndpoints.EnsureFolderInTenantAsync(db, user, request.FolderId, cancellationToken) is { } badFolder)
+            return badFolder;
+        if (request.FolderId is Guid folderId)
+            doc.FolderId = folderId;
+
+        var nextVersionNumber = (doc.Versions.Max(v => (int?)v.VersionNumber) ?? 0) + 1;
+
+        db.DocumentVersions.Add(new DocumentVersion
+        {
+            DocumentId = doc.Id,
+            VersionNumber = nextVersionNumber,
+            Title = doc.Title,
+            Slug = doc.Slug,
+            Summary = doc.Summary,
+            Content = doc.Content,
+            Tags = doc.Tags,
+            ChangeNote = request.ChangeNote,
+        });
+
+        doc.Title = request.Title ?? doc.Title;
+        doc.Slug = request.Slug ?? doc.Slug;
+        doc.Summary = request.Summary ?? doc.Summary;
+        doc.Content = request.Content ?? doc.Content;
+        doc.Tags = request.Tags ?? doc.Tags;
+        doc.IsPublished = request.IsPublished ?? doc.IsPublished;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
+    }
 }
+
+public sealed record DocumentListItem(
+    Guid Id,
+    string Title,
+    string? Slug,
+    string? Summary,
+    string? Tags,
+    Guid? CompanyId,
+    Guid? FolderId,
+    DateTimeOffset UpdatedAt);
 
 public record CreateDocumentRequest(
     string Title,
@@ -246,7 +306,8 @@ public record CreateDocumentRequest(
     string? Content,
     string? Tags,
     bool IsPublished = true,
-    Guid? CompanyId = null);
+    Guid? CompanyId = null,
+    Guid? FolderId = null);
 
 public record UpdateDocumentRequest(
     string? Title,
@@ -256,6 +317,7 @@ public record UpdateDocumentRequest(
     string? Tags,
     bool? IsPublished,
     string? ChangeNote,
-    Guid? CompanyId = null);
+    Guid? CompanyId = null,
+    Guid? FolderId = null);
 
 public record RestoreVersionRequest(Guid VersionId);

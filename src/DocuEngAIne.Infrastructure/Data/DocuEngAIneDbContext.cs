@@ -27,6 +27,7 @@ public class DocuEngAIneDbContext : DbContext
     public DbSet<Asset> Assets => Set<Asset>();
     public DbSet<CustomFieldValue> CustomFieldValues => Set<CustomFieldValue>();
     public DbSet<Document> Documents => Set<Document>();
+    public DbSet<DocumentFolder> DocumentFolders => Set<DocumentFolder>();
     public DbSet<DocumentVersion> DocumentVersions => Set<DocumentVersion>();
     public DbSet<AssetDocumentLink> AssetDocumentLinks => Set<AssetDocumentLink>();
     public DbSet<KeeperLink> KeeperLinks => Set<KeeperLink>();

@@ -213,13 +213,13 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Top nav — Dashboard | Masri hub (assets/docs/runbooks/Keeper). Recents/expirations later. Not Magic Dash. | Phase1 | Open `/`. No Hudu widgets. |
 | Top nav — Companies | `Company` client space ≠ Entra tenant. `/companies`. | Phase2A | List + detail. Halo/Ninja IDs shown. |
 | Top nav — Global views | Tenant-wide Assets/Docs/Runbooks/Keeper lists. | Phase1 | Cross-company filter later. |
-| Top nav — Central KB | Tenant-wide Documents. Folders/public later. | Phase1 | `/documents` is MSP-wide, not Hudu folders. |
+| Top nav — Central KB | Tenant-wide Documents with folders. Public/share later. | Phase2 | `/documents` folder list + articles. Not Hudu chrome. |
 | Top nav — My Vault | Do not replicate. Keeper is the vault. | skip | No password/TOTP tables. |
 | Top nav — Admin | Entra + RBAC + audit. Azure for SMTP/license. | Phase1 | Users/roles/audit exist. Layouts UI later. |
 | Company home | Overview + related counts/lists (assets, docs, runbooks, Keeper). | Phase2A | `/companies/:id`. Not Hudu tab chrome. |
 | Company passwords | `KeeperLink` filtered by `CompanyId`. Reveal audits. | Phase2A | Links only. Open in Keeper. |
 | Company processes | Extend **Runbook** (not a second product): `RunbookRun` with Running/Completed/Cancelled, optional `CompanyId` (`ForTenant`), `runCount` + start-run. Tenant-wide books = templates (Hudu admin Process Templates had 0); per-company books = checklists (ExampleCo had 2 ad-hoc). Global Process Completion rollup later. | Phase2C | `/runbooks` shows runCount + Start run. Company detail lists runCount. Other-tenant runbook start = 404. |
-| Company KB | Documents filtered by `CompanyId`. | Phase2A | Same Document model as central KB. |
+| Company KB | Documents filtered by `CompanyId`. Folders may be company-scoped. | Phase2A | Same Document model as central KB. |
 | Company photos | Blob storage later. | later | |
 | Company IPAM | UniFi/MCP owns live network. No IPAM product line day one. | later | |
 | Company racks | Defer unless a tenant demands it. | later | |
@@ -238,7 +238,7 @@ Hudu jobs we observed. Masri ships the **job**, not the Hudu screen. Status is c
 | Integrations — Blackpoint | First-class Masri MCP later. | later | |
 | Integrations — 32-tile catalog | MCP registry; add on demand. | skip | |
 | Hudu Bridge / Hudini / leaderboard | Skip. Masri AI = our RAG + MCP later. | skip | |
-| Central KB folders / public share | Tags now. Folders/share later. | later | Distinct from company-filtered docs. |
+| Central KB folders / public share | `DocumentFolder` + `Document.FolderId`. Public/share later. | Phase2 | `/api/folders` CRUD, `GET /api/documents?folderId=`. Other-tenant folder → 400. Distinct from company-filtered docs. |
 | Global expirations | Same rollup without `companyId`. Search `q` + show-expired toggle. Types are field names (Expiration Date, End Date, License Expiration, Renewal Date, Next Battery Replacement, SSL Certificate, Domain, …) or `Expiration` for the asset shortcut. | Phase2C | `/expirations`. Table: Name, Company, Type, Date, days. |
 | Flags / Flag Review | Named color labels (`FlagDefinition`: Name + hex Color + IsActive) applied to Company, Asset, Document, Runbook, KeeperLink (`FlagAssignment`). Admin CRUD. `GET /api/flags/review?entityType=` joins names via existing tables, ForTenant. Not Hudu label chrome. Alerts/workflows are separate. | Phase2C | `/flags`. Other-tenant entity assign = 400. |
 | Client portal | Phase 2C. Keeper reveal only, never local secrets. | later | |
