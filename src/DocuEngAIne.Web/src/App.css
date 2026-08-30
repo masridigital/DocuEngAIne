@@ -623,3 +623,12 @@ details.advanced > summary {
   white-space: normal;
   font-size: 0.85rem;
 }
+
+.portal-page section {
+  margin-top: 28px;
+}
+
+.portal-page section h2 {
+  margin: 0 0 8px;
+  font-size: 1.15rem;
+}

@@ -10,6 +10,8 @@ namespace DocuEngAIne.Tests;
 /// on the endpoint groups, anonymous health, tenant isolation through <c>ForTenant</c> on the
 /// request path, and the <see cref="AuthExtensions.AdminPolicy"/> gate on integrations.
 /// </summary>
+file sealed record CreatedPortalCompany(Guid Id);
+
 public class HttpPipelineTests : IClassFixture<TestHost>
 {
     private readonly TestHost _host;
@@ -97,6 +99,78 @@ public class HttpPipelineTests : IClassFixture<TestHost>
         var response = await client.GetAsync("/api/tokens");
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Unauthenticated_Portal_Returns_401()
+    {
+        using var client = _host.CreateAnonymousClient();
+
+        var response = await client.GetAsync("/api/portal");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Other_Tenant_Portal_Company_Returns_404()
+    {
+        using var client = _host.CreateReaderClient();
+
+        var response = await client.GetAsync($"/api/portal/companies/{_host.OtherTenantCompanyId}");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+        Assert.DoesNotContain("PoisonCo", await response.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
+    public async Task Portal_Describe_Is_Read_Only_Without_Reveal()
+    {
+        using var client = _host.CreateReaderClient();
+
+        var response = await client.GetAsync("/api/portal");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("\"readOnly\":true", body);
+        Assert.Contains("\"passwordVault\":false", body);
+        Assert.Contains("ForTenant", body);
+        Assert.DoesNotContain("\"reveal\":true", body);
+        Assert.Contains("\"reveal\":false", body);
+    }
+
+    [Fact]
+    public async Task Portal_Lists_Only_Own_Tenant_PortalEnabled_Companies()
+    {
+        Guid companyId;
+        using (var owner = _host.CreateOwnerClient())
+        {
+            var created = await owner.PostAsJsonAsync(
+                "/api/companies",
+                new CreateCompanyRequest("PortalCo", "portalco", PortalEnabled: true));
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            var body = await created.Content.ReadFromJsonAsync<CreatedPortalCompany>();
+            Assert.NotNull(body);
+            companyId = body.Id;
+        }
+
+        using var reader = _host.CreateReaderClient();
+        var list = await reader.GetAsync("/api/portal/companies");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+        var json = await list.Content.ReadAsStringAsync();
+        Assert.Contains("PortalCo", json);
+        Assert.DoesNotContain("PoisonCo", json);
+
+        var detail = await reader.GetAsync($"/api/portal/companies/{companyId}");
+        Assert.Equal(HttpStatusCode.OK, detail.StatusCode);
+        Assert.Contains("PortalCo", await detail.Content.ReadAsStringAsync());
+
+        var keepers = await reader.GetAsync($"/api/portal/companies/{companyId}/keeper-links");
+        Assert.Equal(HttpStatusCode.OK, keepers.StatusCode);
+        var keeperJson = await keepers.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("reveal", keeperJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("keeperRecordUrl", keeperJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("usernameHint", keeperJson, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("notes", keeperJson, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]

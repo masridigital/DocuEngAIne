@@ -42,6 +42,7 @@ function CompanyList() {
   const [ninjaOrganizationId, setNinjaOrganizationId] = useState('')
   const [haloPortalUrl, setHaloPortalUrl] = useState('')
   const [ninjaPortalUrl, setNinjaPortalUrl] = useState('')
+  const [portalEnabled, setPortalEnabled] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
 
@@ -69,6 +70,7 @@ function CompanyList() {
         ninjaOrganizationId: ninjaOrganizationId.trim() || null,
         haloPortalUrl: haloPortalUrl.trim() || null,
         ninjaPortalUrl: ninjaPortalUrl.trim() || null,
+        portalEnabled,
       })
       setName('')
       setSlug('')
@@ -79,6 +81,7 @@ function CompanyList() {
       setNinjaOrganizationId('')
       setHaloPortalUrl('')
       setNinjaPortalUrl('')
+      setPortalEnabled(false)
       await mutate()
     } catch (err) {
       setFormError(err instanceof Error ? err.message : 'Failed to create company.')
@@ -205,6 +208,14 @@ function CompanyList() {
               onChange={(e) => setNinjaPortalUrl(e.target.value)}
             />
           </label>
+          <label className="check-label">
+            <input
+              type="checkbox"
+              checked={portalEnabled}
+              onChange={(e) => setPortalEnabled(e.target.checked)}
+            />
+            Enable client portal
+          </label>
         </div>
         <button className="btn" type="submit" disabled={submitting}>
           {submitting ? 'Creating…' : 'Create company'}
@@ -221,7 +232,14 @@ function detailRows(company: Company) {
     ['HaloClientId', company.haloClientId || '—'],
     ['NinjaOrganizationId', company.ninjaOrganizationId || '—'],
     ['IsActive', isActive(company) ? 'Yes' : 'No'],
+    ['PortalEnabled', company.portalEnabled ? 'Yes' : 'No'],
   ]
+  if (company.portalEnabled) {
+    rows.push([
+      'Client portal',
+      <Link key="client-portal" to={`/portal/${company.id}`}>Open client portal</Link>,
+    ])
+  }
   if (company.nickname) rows.push(['Nickname', company.nickname])
   if (company.companyType) rows.push(['Company type', company.companyType])
   if (company.parentCompanyId) {
@@ -447,6 +465,7 @@ function CompanyDetail({ id }: { id: string }) {
   const { mutate: mutateGraph } = useCompanyGraph(id)
   const [haloPortalUrl, setHaloPortalUrl] = useState('')
   const [ninjaPortalUrl, setNinjaPortalUrl] = useState('')
+  const [portalEnabled, setPortalEnabled] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [hydrated, setHydrated] = useState<string | null>(null)
@@ -454,6 +473,7 @@ function CompanyDetail({ id }: { id: string }) {
   if (company && hydrated !== company.id) {
     setHaloPortalUrl(company.haloPortalUrl ?? '')
     setNinjaPortalUrl(company.ninjaPortalUrl ?? '')
+    setPortalEnabled(company.portalEnabled === true)
     setHydrated(company.id)
   }
 
@@ -465,6 +485,7 @@ function CompanyDetail({ id }: { id: string }) {
       await updateCompany(id, {
         haloPortalUrl: haloPortalUrl.trim() || '',
         ninjaPortalUrl: ninjaPortalUrl.trim() || '',
+        portalEnabled,
       })
       await mutate()
     } catch (err) {
@@ -530,6 +551,14 @@ function CompanyDetail({ id }: { id: string }) {
                   value={ninjaPortalUrl}
                   onChange={(e) => setNinjaPortalUrl(e.target.value)}
                 />
+              </label>
+              <label className="check-label">
+                <input
+                  type="checkbox"
+                  checked={portalEnabled}
+                  onChange={(e) => setPortalEnabled(e.target.checked)}
+                />
+                Enable client portal (documents, expirations, Keeper titles)
               </label>
             </div>
             <button className="btn" type="submit" disabled={submitting}>
