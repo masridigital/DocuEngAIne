@@ -391,4 +391,89 @@ public class RunbookTests
             Assert.Single(Assert.IsAssignableFrom<IReadOnlyList<RunbookRunRollupItem>>(running.Value));
         }
     }
+
+    [Fact]
+    public async Task Promote_Creates_Document_From_Completed_Run()
+    {
+        var (tenantA, _, companyA, _, runbookA, _, dbName) = await SeedAsync();
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var book = await db.Runbooks.Include(r => r.Steps).FirstAsync(r => r.Id == runbookA);
+            book.Steps.Add(new RunbookStep { Order = 1, Title = "Create tenant", Details = "Open the portal." });
+            book.Steps.Add(new RunbookStep { Order = 2, Title = "Add primary contact" });
+            await db.SaveChangesAsync();
+
+            var started = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(), db, user);
+            var runId = Assert.IsType<RunbookRunItem>(Assert.IsAssignableFrom<IValueHttpResult>(started).Value).Id;
+            var completed = await RunbookEndpoints.CompleteRunAsync(runbookA, runId, db, user);
+            var done = Assert.IsType<RunbookRunItem>(Assert.IsAssignableFrom<IValueHttpResult>(completed).Value);
+
+            var promoted = await RunbookEndpoints.PromoteRunAsync(runbookA, runId, db, user);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(promoted).StatusCode);
+            var created = Assert.IsType<PromoteRunResult>(Assert.IsAssignableFrom<IValueHttpResult>(promoted).Value);
+
+            db.ChangeTracker.Clear();
+            var doc = await db.Documents.ForTenant(user).AsNoTracking().SingleAsync();
+            Assert.Equal(created.Id, doc.Id);
+            Assert.Equal(companyA, doc.CompanyId);
+            Assert.Equal(RunbookEndpoints.PromotedDocumentTitle("Onboard ExampleCo", done.FinishedAt!.Value), doc.Title);
+            Assert.Equal(RunbookEndpoints.PromotedDocumentSlug(runId), doc.Slug);
+            Assert.Contains("Status: Completed", doc.Content, StringComparison.Ordinal);
+            Assert.Contains("1. Create tenant", doc.Content, StringComparison.Ordinal);
+            Assert.Contains("Open the portal.", doc.Content, StringComparison.Ordinal);
+            Assert.Contains("2. Add primary contact", doc.Content, StringComparison.Ordinal);
+            Assert.Empty(await db.DocumentVersions.Where(v => v.DocumentId == doc.Id).ToListAsync());
+        }
+    }
+
+    [Fact]
+    public async Task Promote_Second_Call_Does_Not_Duplicate()
+    {
+        var (tenantA, _, _, _, runbookA, _, dbName) = await SeedAsync();
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var started = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(), db, user);
+            var runId = Assert.IsType<RunbookRunItem>(Assert.IsAssignableFrom<IValueHttpResult>(started).Value).Id;
+            await RunbookEndpoints.CompleteRunAsync(runbookA, runId, db, user);
+
+            var first = await RunbookEndpoints.PromoteRunAsync(runbookA, runId, db, user);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(first).StatusCode);
+            var created = Assert.IsType<PromoteRunResult>(Assert.IsAssignableFrom<IValueHttpResult>(first).Value);
+
+            var second = await RunbookEndpoints.PromoteRunAsync(runbookA, runId, db, user);
+            Assert.Equal(StatusCodes.Status200OK, Assert.IsAssignableFrom<IStatusCodeHttpResult>(second).StatusCode);
+            var again = Assert.IsType<PromoteRunResult>(Assert.IsAssignableFrom<IValueHttpResult>(second).Value);
+            Assert.Equal(created.Id, again.Id);
+
+            Assert.Equal(1, await db.Documents.ForTenant(user).CountAsync());
+            Assert.Empty(await db.DocumentVersions.ToListAsync());
+        }
+    }
+
+    [Fact]
+    public async Task Promote_Other_Tenant_Is_Not_Found()
+    {
+        var (tenantA, tenantB, _, _, runbookA, _, dbName) = await SeedAsync();
+        Guid runId;
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var started = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(), db, user);
+            runId = Assert.IsType<RunbookRunItem>(Assert.IsAssignableFrom<IValueHttpResult>(started).Value).Id;
+            await RunbookEndpoints.CompleteRunAsync(runbookA, runId, db, user);
+            var promoted = await RunbookEndpoints.PromoteRunAsync(runbookA, runId, db, user);
+            Assert.Equal(StatusCodes.Status201Created, Assert.IsAssignableFrom<IStatusCodeHttpResult>(promoted).StatusCode);
+        }
+
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var stolen = await RunbookEndpoints.PromoteRunAsync(runbookA, runId, dbB, userB);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(stolen).StatusCode);
+            Assert.Empty(await dbB.Documents.ForTenant(userB).ToListAsync());
+            Assert.Equal(1, await dbB.Documents.CountAsync());
+        }
+    }
 }

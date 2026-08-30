@@ -10,6 +10,7 @@ namespace DocuEngAIne.Api.Endpoints;
 public static class RunbookEndpoints
 {
     public const string NotRunningMessage = "Run is not running.";
+    public const string NotCompletedMessage = "Run is not completed.";
     public const string UnknownStatusMessage = "Unknown status.";
     public const int RecentTake = 100;
 
@@ -141,6 +142,25 @@ public static class RunbookEndpoints
                 return denied;
 
             return await CancelRunAsync(id, runId, db, user, cancellationToken);
+        });
+
+        // One-click promote: writes a Document from the completed run. Creating a document gates
+        // on the tenant-wide Document role (same as POST /api/documents); the run itself is keyed
+        // to the parent runbook, which is the resource a grant can name.
+        group.MapPost("/{id:guid}/runs/{runId:guid}/promote", async (
+            Guid id,
+            Guid runId,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            IResourceAuthorizationService authorization,
+            CancellationToken cancellationToken) =>
+        {
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
+                return denied;
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Document, cancellationToken) is { } deniedDoc)
+                return deniedDoc;
+
+            return await PromoteRunAsync(id, runId, db, user, cancellationToken);
         });
 
         return app;
@@ -413,6 +433,54 @@ public static class RunbookEndpoints
         CancellationToken cancellationToken = default) =>
         FinishRunAsync(id, runId, RunbookRunStatus.Cancelled, db, user, cancellationToken);
 
+    public static async Task<IResult> PromoteRunAsync(
+        Guid id,
+        Guid runId,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        if (user.TenantId is null)
+            return Results.Unauthorized();
+
+        var run = await db.RunbookRuns.ForTenant(user)
+            .Include(r => r.Runbook)
+            .ThenInclude(b => b.Steps)
+            .FirstOrDefaultAsync(r => r.Id == runId && r.RunbookId == id, cancellationToken);
+        if (run is null)
+            return Results.NotFound();
+        if (run.Status != RunbookRunStatus.Completed)
+            return Results.BadRequest(NotCompletedMessage);
+
+        var slug = PromotedDocumentSlug(run.Id);
+        var existing = await db.Documents.ForTenant(user)
+            .AsNoTracking()
+            .FirstOrDefaultAsync(d => d.Slug == slug, cancellationToken);
+        if (existing is not null)
+            return Results.Ok(new PromoteRunResult(existing.Id, existing.Title, existing.Slug));
+
+        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, run.CompanyId, cancellationToken) is { } badCompany)
+            return badCompany;
+
+        var when = run.FinishedAt ?? run.StartedAt;
+        var title = PromotedDocumentTitle(run.Runbook.Title, when);
+        var doc = new Document
+        {
+            TenantId = user.TenantId.Value,
+            Title = title,
+            Slug = slug,
+            Summary = $"Promoted from completed run of {run.Runbook.Title}.",
+            Content = BuildPromotedDocumentBody(run.Runbook, run),
+            Tags = run.Runbook.Tags,
+            IsPublished = true,
+            CompanyId = run.CompanyId,
+        };
+
+        db.Documents.Add(doc);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.Created($"/api/documents/{doc.Id}", new PromoteRunResult(doc.Id, doc.Title, doc.Slug));
+    }
+
     private static async Task<IResult> FinishRunAsync(
         Guid runbookId,
         Guid runId,
@@ -450,6 +518,35 @@ public static class RunbookEndpoints
 
         error = UnknownStatusMessage;
         return false;
+    }
+
+    internal static string PromotedDocumentSlug(Guid runId) => $"run-{runId:N}";
+
+    internal static string PromotedDocumentTitle(string runbookTitle, DateTimeOffset when) =>
+        $"{runbookTitle} — {when.UtcDateTime:yyyy-MM-dd}";
+
+    internal static string BuildPromotedDocumentBody(Runbook runbook, RunbookRun run)
+    {
+        var lines = new List<string>
+        {
+            $"Status: {run.Status}",
+        };
+        if (run.FinishedAt is DateTimeOffset finished)
+            lines.Add($"Finished: {finished.UtcDateTime:yyyy-MM-dd HH:mm} UTC");
+
+        var steps = runbook.Steps.OrderBy(s => s.Order).ToList();
+        if (steps.Count > 0)
+        {
+            lines.Add(string.Empty);
+            foreach (var step in steps)
+            {
+                lines.Add($"{step.Order}. {step.Title}");
+                if (!string.IsNullOrWhiteSpace(step.Details))
+                    lines.Add(step.Details);
+            }
+        }
+
+        return string.Join('\n', lines);
     }
 
     private static RunbookRunItem MapRun(RunbookRun run) => new(
@@ -550,3 +647,5 @@ public record RunbookRunRollupItem(
     DateTimeOffset StartedAt,
     DateTimeOffset? FinishedAt,
     string? StartedByObjectId);
+
+public record PromoteRunResult(Guid Id, string Title, string? Slug);

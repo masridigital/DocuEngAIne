@@ -374,6 +374,16 @@ export function startRunbookRun(runbookId: string, companyId?: string | null) {
   return postJson<RunbookRun>(`/api/runbooks/${runbookId}/runs`, { companyId: companyId ?? null })
 }
 
+export type PromotedDocument = {
+  id: string
+  title: string
+  slug?: string | null
+}
+
+export function promoteRunbookRun(runbookId: string, runId: string) {
+  return postJson<PromotedDocument>(`/api/runbooks/${runbookId}/runs/${runId}/promote`)
+}
+
 export function useKeeperLinks() {
   return useSWR('/api/keeper', fetcher)
 }
