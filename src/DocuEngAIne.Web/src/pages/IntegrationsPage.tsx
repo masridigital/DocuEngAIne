@@ -52,9 +52,8 @@ function formatInterval(minutes: number) {
 }
 
 /**
- * "Business · every 44m". The cadence is what the connector's allowance would support, not a
- * schedule — nothing runs syncs on a timer, so the column header and the note above the table
- * both say so rather than leaving the number to imply it.
+ * "Business · every 44m". The cadence is the scheduled-check interval: override if set,
+ * otherwise the interval the detected plan can afford.
  */
 function planSummary(i: IntegrationConnection) {
   const plan = i.stackJackPlan && i.stackJackPlan !== 'Unknown' ? i.stackJackPlan : 'Plan not detected'
@@ -73,7 +72,7 @@ function planTitle(i: IntegrationConnection) {
   }
   if (i.planDetectedAt) lines.push(`Read from StackJack ${formatTimestamp(i.planDetectedAt)}`)
   if (i.syncIntervalMinutesOverride != null) lines.push(`Override: ${i.syncIntervalMinutesOverride} minutes`)
-  if (i.nextSyncDueAt) lines.push(`A check would fall due ${formatTimestamp(i.nextSyncDueAt)} — nothing runs it; press Sync.`)
+  if (i.nextSyncDueAt) lines.push(`Next scheduled check ${formatTimestamp(i.nextSyncDueAt)}`)
   if (lines.length === 0) lines.push('Press Test to read the plan and allowance from StackJack.')
   return lines.join('\n')
 }
@@ -84,6 +83,23 @@ function syncStatusClass(status: string) {
   if (key === 'failed') return 'status-failed'
   if (key === 'partial') return 'status-partial'
   return 'status-running'
+}
+
+/** Last SyncRun status + time from GET /api/integrations/{id}/runs. SWR shares the cache with History. */
+function LastRunCell({ integrationId, lastSyncAt }: { integrationId: string; lastSyncAt?: string | null }) {
+  const { data, isLoading } = useSyncRuns(integrationId)
+  const runs: SyncRun[] = Array.isArray(data) ? data : []
+  const last = runs[0]
+  if (!last) {
+    return <span>{isLoading ? '…' : formatTimestamp(lastSyncAt)}</span>
+  }
+  return (
+    <>
+      <span className={`tag ${syncStatusClass(last.status)}`}>{last.status}</span>
+      {' '}
+      {formatTimestamp(last.finishedAt ?? last.startedAt)}
+    </>
+  )
 }
 
 const mappingLimit = 25
@@ -415,9 +431,9 @@ export function IntegrationsPage() {
         Composio, CustomMcp and Blackpoint still need a server registered under Advanced.
       </p>
       <p className="muted">
-        Nothing syncs on a timer yet. Syncs run only when you press Sync; Test also reads the StackJack plan
-        behind the connection, and the cadence shown is the fastest unattended check that plan&rsquo;s allowance
-        would support once a scheduler exists.
+        Enabled connections with a Compact server and a detected plan sync on the cadence shown
+        (or the override, if set). You can still press Sync to run one now. Test reads the StackJack
+        plan behind the connection.
       </p>
       {message && <p className="banner">{message}</p>}
       {errorMessage && <p className="error">{errorMessage}</p>}
@@ -432,8 +448,8 @@ export function IntegrationsPage() {
               <tr>
                 <th>Provider</th>
                 <th>Status</th>
-                <th>Plan · supported cadence</th>
-                <th>LastSyncAt</th>
+                <th>Plan · cadence</th>
+                <th>Last run</th>
                 <th>LastError</th>
                 <th></th>
               </tr>
@@ -450,7 +466,7 @@ export function IntegrationsPage() {
                     <td>{i.provider}</td>
                     <td>{i.status || '—'}</td>
                     <td title={planTitle(i)}>{planSummary(i)}</td>
-                    <td>{formatTimestamp(i.lastSyncAt)}</td>
+                    <td><LastRunCell integrationId={i.id} lastSyncAt={i.lastSyncAt} /></td>
                     <td>{i.lastError || '—'}</td>
                     <td className="row-actions">
                       <button className="btn btn-secondary" type="button" disabled={actionId === i.id} onClick={() => onTest(i.id)}>
@@ -582,7 +598,7 @@ export function IntegrationsPage() {
             {editingId && (
               <p className="muted">
                 An override may be slower than the plan allows, never faster. Enter 0 to clear it and go back to the
-                derived cadence. Nothing runs on a timer yet either way.
+                derived cadence. The scheduler uses this interval.
               </p>
             )}
           </details>

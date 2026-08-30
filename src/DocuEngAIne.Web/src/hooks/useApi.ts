@@ -195,7 +195,7 @@ export type IntegrationConnection = {
   syncIntervalMinutesOverride?: number | null
   /** Derived server-side from the allowance and the override. Null means manual only. */
   syncIntervalMinutes?: number | null
-  /** When a check at that cadence would next fall due. Nothing runs it — there is no scheduler yet. */
+  /** When a check at that cadence would next fall due for the background scheduler. */
   nextSyncDueAt?: string | null
 } & Partial<SyncPolicy>
 
