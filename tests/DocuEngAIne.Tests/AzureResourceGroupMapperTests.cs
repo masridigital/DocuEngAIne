@@ -164,7 +164,12 @@ public class AzureResourceGroupMapperTests
             maxItems: 0);
         Assert.Contains("\"maxItems\":1", low, StringComparison.Ordinal);
         Assert.Contains("\"entraTenant\":\"contoso.onmicrosoft.com\"", low, StringComparison.Ordinal);
-        Assert.Contains("tagName eq 'environment'", low, StringComparison.Ordinal);
+        using (var doc = JsonDocument.Parse(low))
+        {
+            Assert.Equal(
+                "tagName eq 'environment' and tagValue eq 'production'",
+                doc.RootElement.GetProperty("filter").GetString());
+        }
 
         var high = AzureResourceGroupMapper.BuildArgumentsJson(
             "11111111-1111-1111-1111-111111111111",
