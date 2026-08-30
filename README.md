@@ -130,10 +130,12 @@ The app reads `ConnectionStrings:DocuEngAIne` from Key Vault via a Key Vault ref
 
 `.github/workflows/azure-deploy.yml`:
 
-1. Builds the React SPA into the API's `wwwroot/` (with the `VITE_ENTRA_*` values above).
+1. Builds and lints the React SPA into the API's `wwwroot/` (with the `VITE_ENTRA_*` values above).
 2. Builds, tests, and publishes the .NET API, and builds a self-contained EF migrations bundle.
 3. Deploys Bicep infrastructure.
 4. **Applies migrations** with the bundle, then deploys the published zip to Azure App Service.
+
+`infra`, `migrate`, and `deploy-api` run only when the repository variable `DEPLOY_AZURE` is `true`.
 
 The `migrate` job runs between `infra` and `deploy-api`, and `deploy-api` depends on it — a failed migration blocks the deploy rather than shipping code against a schema that does not exist. `sql.bicep` only allows Azure services, which does not cover GitHub-hosted runners, so the job opens a run-scoped SQL firewall rule for the runner IP and removes it afterwards.
 
