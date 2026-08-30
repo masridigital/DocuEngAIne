@@ -13,4 +13,5 @@ public enum IntegrationProvider
     Action1 = 8,
     Autotask = 9,
     DefensX = 10,
+    Pax8 = 11,
 }
