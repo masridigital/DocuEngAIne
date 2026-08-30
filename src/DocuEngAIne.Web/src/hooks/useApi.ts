@@ -230,6 +230,19 @@ export function useProfile() {
   return useSWR('/api/me', fetcher)
 }
 
+export type RecentItem = {
+  entityType: string
+  id: string
+  name: string
+  companyId?: string | null
+  companyName?: string | null
+  updatedAt: string
+}
+
+export function useRecents() {
+  return useSWR<RecentItem[]>('/api/me/recents', fetcher)
+}
+
 export type ExpirationItem = {
   sourceType: 'AssetField' | 'Asset' | string
   id: string

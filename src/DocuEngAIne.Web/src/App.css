@@ -116,6 +116,41 @@ body {
   font-size: 0.9rem;
 }
 
+.card h3 a {
+  color: inherit;
+}
+
+.widget-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.widget-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 0.9rem;
+}
+
+.widget-list a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.widget-list a:hover {
+  text-decoration: underline;
+}
+
+.widget-meta {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+}
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
