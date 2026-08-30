@@ -31,6 +31,12 @@ public sealed class TestHost : WebApplicationFactory<Program>
 
     private readonly string _databaseName = Guid.NewGuid().ToString();
 
+    public TestHost()
+    {
+        // Must be set before Program.Main / CreateBuilder reads configuration.
+        ApplyHostConfiguration();
+    }
+
     public Guid TenantAId { get; } = Guid.NewGuid();
     public Guid TenantBId { get; } = Guid.NewGuid();
     public string OwnerObjectId { get; } = Guid.NewGuid().ToString();
@@ -42,13 +48,13 @@ public sealed class TestHost : WebApplicationFactory<Program>
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Testing");
+        ApplyHostConfiguration();
+
         builder.ConfigureAppConfiguration((_, config) =>
         {
-            // Placeholder Entra values satisfy AddDocuEngAIneAuthentication's null check.
-            // The test scheme is the default, so JwtBearer never fetches metadata.
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["ConnectionStrings:DocuEngAIne"] = "Server=(localdb)\\pipeline-tests;Database=unused;Trusted_Connection=True;",
+                ["ConnectionStrings:DocuEngAIne"] = "Server=pipeline-tests;Database=unused;",
                 ["EntraId:Authority"] = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000001/v2.0",
                 ["EntraId:Audience"] = "api://docuengaine-pipeline-tests",
                 ["Azure:KeyVault:VaultUri"] = "",
@@ -78,9 +84,21 @@ public sealed class TestHost : WebApplicationFactory<Program>
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
+        ApplyHostConfiguration();
         var host = base.CreateHost(builder);
         Seed(host.Services);
         return host;
+    }
+
+    private static void ApplyHostConfiguration()
+    {
+        // Host settings lose to appsettings.json's empty connection string. Environment
+        // variables are applied after JSON in WebApplication.CreateBuilder, so they win
+        // and satisfy AddDocuEngAIneInfrastructure before we swap the DbContext.
+        Environment.SetEnvironmentVariable("ConnectionStrings__DocuEngAIne", "Server=pipeline-tests;Database=unused;");
+        Environment.SetEnvironmentVariable("EntraId__Authority", "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000001/v2.0");
+        Environment.SetEnvironmentVariable("EntraId__Audience", "api://docuengaine-pipeline-tests");
+        Environment.SetEnvironmentVariable("Azure__KeyVault__VaultUri", "");
     }
 
     public HttpClient CreateAnonymousClient() => CreateClient();
