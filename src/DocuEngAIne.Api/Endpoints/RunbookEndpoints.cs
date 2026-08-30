@@ -285,10 +285,10 @@ public static class RunbookEndpoints
         if (runbook is null)
             return Results.NotFound();
 
-        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+        if (await CompanyEndpoints.ApplyCompanyIdOnUpdateAsync(
+                db, user, request.CompanyId, request.CompanyIdClear, value => runbook.CompanyId = value, cancellationToken)
+            is { } badCompany)
             return badCompany;
-        if (request.CompanyId is Guid companyId)
-            runbook.CompanyId = companyId;
 
         runbook.Title = request.Title ?? runbook.Title;
         runbook.Slug = request.Slug ?? runbook.Slug;
@@ -590,7 +590,8 @@ public record UpdateRunbookRequest(
     string? Tags,
     bool? IsPublished,
     List<RunbookStepRequest>? Steps,
-    Guid? CompanyId = null);
+    Guid? CompanyId = null,
+    bool CompanyIdClear = false);
 
 public record RunbookStepRequest(
     string Title,

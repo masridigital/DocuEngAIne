@@ -168,10 +168,9 @@ earlier review of this repo asserted the opposite; that was wrong, from a grep t
 record declarations. What was genuinely missing was endpoint-level test coverage, now added in
 `CompanyAttachmentTests.cs`.
 
-Note `null` on update means "leave unchanged", never "clear", consistently across Asset, Document,
-Runbook, KeeperLink and Folder. There is therefore **no way to detach** a resource from a company
-through the API. That is a real gap, but a deliberate, consistent one — changing it needs a sentinel
-value or a separate route, and should be decided rather than slipped in.
+Note `null` on update still means "leave unchanged", never "clear", consistently across Asset,
+Document, Runbook, KeeperLink and Folder. Detach is explicit: `companyIdClear: true` or the empty
+GUID sentinel on those update records. Other-tenant company is still 400.
 
 ## AI surface — direction captured 2026-08-28
 
@@ -215,13 +214,10 @@ defers to Phase 3 for photos — same dependency, so the two should be planned t
 Two things that are harmless today only because nothing has been deployed, and become real the moment
 something is:
 
-- **Any tenant that already has `User` rows has no Owner.** The Owner grant lives in
-  `POST /api/tenant/onboard`, which returns `Conflict` for a tenant that already exists, and the only
-  role-writing route sits behind the same admin policy it would need to escape. A tenant created before
-  this round — including a local development database — is therefore permanently 403 on
-  `/api/integrations`, `/api/mcp/servers`, `/api/users` and `/api/resource-access`. Recovery is a direct
-  `UPDATE Users SET Role = 4` or defining the Entra app roles. Drop the local database rather than
-  fighting it; **write a backfill before the first real deployment carries tenants across.**
+- **Owner backfill is in place.** Tenants created before onboard granted Owner recover through
+  `POST /api/tenant/claim-owner`: if the tenant has zero active Owner/Admin users, the first
+  authenticated caller becomes Owner; a second caller (or a tenant that already has an Owner) gets
+  409. SQL `UPDATE` / Entra app roles remain available but are no longer the only path.
 - **`ENTRA_CLIENT_ID`, `ENTRA_AUTHORITY` and `ENTRA_API_SCOPE` are baked into the SPA bundle at build
   time.** Missing secrets give a green build that ships a front end telling every visitor sign-in is not
   configured, while the API still requires a bearer token. CI now emits a warning annotation when any is

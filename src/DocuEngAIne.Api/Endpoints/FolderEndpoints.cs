@@ -140,10 +140,10 @@ public static class FolderEndpoints
             folder.Name = name;
         }
 
-        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+        if (await CompanyEndpoints.ApplyCompanyIdOnUpdateAsync(
+                db, user, request.CompanyId, request.CompanyIdClear, value => folder.CompanyId = value, cancellationToken)
+            is { } badCompany)
             return badCompany;
-        if (request.CompanyId is Guid companyId)
-            folder.CompanyId = companyId;
 
         if (await EnsureFolderInTenantAsync(db, user, request.ParentId, cancellationToken) is { } badParent)
             return badParent;
@@ -238,4 +238,4 @@ public sealed record FolderItem(
 
 public record CreateFolderRequest(string Name, Guid? ParentId = null, Guid? CompanyId = null);
 
-public record UpdateFolderRequest(string? Name = null, Guid? ParentId = null, Guid? CompanyId = null);
+public record UpdateFolderRequest(string? Name = null, Guid? ParentId = null, Guid? CompanyId = null, bool CompanyIdClear = false);

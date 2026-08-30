@@ -8,10 +8,10 @@ using Microsoft.EntityFrameworkCore;
 namespace DocuEngAIne.Tests;
 
 /// <summary>
-/// Documents, runbooks and Keeper links accept an optional CompanyId on create and update,
-/// exactly as assets do. A company from another tenant is rejected with 400, and a null
-/// CompanyId on update means "leave unchanged" (never "clear"), matching every other
-/// optional field on those update endpoints.
+/// Documents, runbooks, Keeper links, assets and folders accept an optional CompanyId on
+/// create and update. A company from another tenant is rejected with 400. A null CompanyId
+/// on update means "leave unchanged"; detach is explicit via <c>companyIdClear</c> or the
+/// empty GUID sentinel.
 /// </summary>
 public class CompanyAttachmentTests
 {
@@ -189,6 +189,51 @@ public class CompanyAttachmentTests
         }
     }
 
+    [Fact]
+    public async Task Document_Update_Detaches_Company()
+    {
+        var (dbName, tenantA, companyA, _, _) = await SeedAsync();
+        var docId = Guid.NewGuid();
+
+        var (seed, _) = Open(dbName, tenantA);
+        await using (seed)
+        {
+            seed.Documents.Add(new Document { Id = docId, TenantId = tenantA, Title = "Doc", Slug = "doc", CompanyId = companyA });
+            await seed.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var cleared = await DocumentEndpoints.UpdateAsync(
+                docId,
+                new UpdateDocumentRequest(null, null, null, null, null, null, null, CompanyIdClear: true),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, cleared);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.Documents.ForTenant(user).AsNoTracking().SingleAsync(d => d.Id == docId)).CompanyId);
+
+            var reattached = await DocumentEndpoints.UpdateAsync(
+                docId,
+                new UpdateDocumentRequest(null, null, null, null, null, null, null, companyA),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, reattached);
+
+            var emptied = await DocumentEndpoints.UpdateAsync(
+                docId,
+                new UpdateDocumentRequest(null, null, null, null, null, null, null, Guid.Empty),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, emptied);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.Documents.ForTenant(user).AsNoTracking().SingleAsync(d => d.Id == docId)).CompanyId);
+        }
+    }
+
     // ----- Runbook -----
 
     [Fact]
@@ -303,6 +348,51 @@ public class CompanyAttachmentTests
         }
     }
 
+    [Fact]
+    public async Task Runbook_Update_Detaches_Company()
+    {
+        var (dbName, tenantA, companyA, _, _) = await SeedAsync();
+        var runbookId = Guid.NewGuid();
+
+        var (seed, _) = Open(dbName, tenantA);
+        await using (seed)
+        {
+            seed.Runbooks.Add(new Runbook { Id = runbookId, TenantId = tenantA, Title = "SOP", Slug = "sop", CompanyId = companyA });
+            await seed.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var cleared = await RunbookEndpoints.UpdateAsync(
+                runbookId,
+                new UpdateRunbookRequest(null, null, null, null, null, null, CompanyIdClear: true),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, cleared);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.Runbooks.ForTenant(user).AsNoTracking().SingleAsync(r => r.Id == runbookId)).CompanyId);
+
+            var reattached = await RunbookEndpoints.UpdateAsync(
+                runbookId,
+                new UpdateRunbookRequest(null, null, null, null, null, null, companyA),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, reattached);
+
+            var emptied = await RunbookEndpoints.UpdateAsync(
+                runbookId,
+                new UpdateRunbookRequest(null, null, null, null, null, null, Guid.Empty),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, emptied);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.Runbooks.ForTenant(user).AsNoTracking().SingleAsync(r => r.Id == runbookId)).CompanyId);
+        }
+    }
+
     // ----- Keeper link -----
 
     [Fact]
@@ -410,6 +500,254 @@ public class CompanyAttachmentTests
             var stored = await db.KeeperLinks.ForTenant(user).AsNoTracking().SingleAsync(k => k.Id == linkId);
             Assert.Equal(secondCompanyA, stored.CompanyId);
             Assert.Equal("Renamed vault", stored.Name);
+        }
+    }
+
+    [Fact]
+    public async Task KeeperLink_Update_Detaches_Company()
+    {
+        var (dbName, tenantA, companyA, _, _) = await SeedAsync();
+        var linkId = Guid.NewGuid();
+
+        var (seed, _) = Open(dbName, tenantA);
+        await using (seed)
+        {
+            seed.KeeperLinks.Add(new KeeperLink { Id = linkId, TenantId = tenantA, Name = "Vault", KeeperRecordUrl = KeeperUrl, CompanyId = companyA });
+            await seed.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var cleared = await KeeperLinkEndpoints.UpdateAsync(
+                linkId,
+                new UpdateKeeperLinkRequest(null, null, null, null, null, null, null, CompanyIdClear: true),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, cleared);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.KeeperLinks.ForTenant(user).AsNoTracking().SingleAsync(k => k.Id == linkId)).CompanyId);
+
+            var reattached = await KeeperLinkEndpoints.UpdateAsync(
+                linkId,
+                new UpdateKeeperLinkRequest(null, null, null, null, null, null, null, companyA),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, reattached);
+
+            var emptied = await KeeperLinkEndpoints.UpdateAsync(
+                linkId,
+                new UpdateKeeperLinkRequest(null, null, null, null, null, null, null, Guid.Empty),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, emptied);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.KeeperLinks.ForTenant(user).AsNoTracking().SingleAsync(k => k.Id == linkId)).CompanyId);
+        }
+    }
+
+    // ----- Asset -----
+
+    [Fact]
+    public async Task Asset_Update_Rejects_Other_Tenant_Company()
+    {
+        var (dbName, tenantA, companyA, _, companyB) = await SeedAsync();
+        var assetId = Guid.NewGuid();
+
+        var (seed, _) = Open(dbName, tenantA);
+        await using (seed)
+        {
+            var type = new AssetType { TenantId = tenantA, Name = "Server" };
+            seed.AssetTypes.Add(type);
+            await seed.SaveChangesAsync();
+            seed.Assets.Add(new Asset { Id = assetId, TenantId = tenantA, Name = "Box", AssetTypeId = type.Id, CompanyId = companyA });
+            await seed.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var updated = await AssetEndpoints.UpdateAsync(
+                assetId,
+                new UpdateAssetRequest(null, null, null, null, null, companyB),
+                db,
+                user);
+            AssertCompanyNotFound(updated);
+
+            db.ChangeTracker.Clear();
+            var stored = await db.Assets.ForTenant(user).AsNoTracking().SingleAsync(a => a.Id == assetId);
+            Assert.Equal(companyA, stored.CompanyId);
+        }
+    }
+
+    [Fact]
+    public async Task Asset_Update_Null_CompanyId_Leaves_Company_Unchanged()
+    {
+        var (dbName, tenantA, companyA, secondCompanyA, _) = await SeedAsync();
+        var assetId = Guid.NewGuid();
+
+        var (seed, _) = Open(dbName, tenantA);
+        await using (seed)
+        {
+            var type = new AssetType { TenantId = tenantA, Name = "Server" };
+            seed.AssetTypes.Add(type);
+            await seed.SaveChangesAsync();
+            seed.Assets.Add(new Asset { Id = assetId, TenantId = tenantA, Name = "Box", AssetTypeId = type.Id, CompanyId = companyA });
+            await seed.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var moved = await AssetEndpoints.UpdateAsync(
+                assetId,
+                new UpdateAssetRequest(null, null, null, null, null, secondCompanyA),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, moved);
+
+            db.ChangeTracker.Clear();
+            Assert.Equal(
+                secondCompanyA,
+                (await db.Assets.ForTenant(user).AsNoTracking().SingleAsync(a => a.Id == assetId)).CompanyId);
+
+            var renamed = await AssetEndpoints.UpdateAsync(
+                assetId,
+                new UpdateAssetRequest("Renamed box", null, null, null, null, null),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, renamed);
+
+            db.ChangeTracker.Clear();
+            var stored = await db.Assets.ForTenant(user).AsNoTracking().SingleAsync(a => a.Id == assetId);
+            Assert.Equal(secondCompanyA, stored.CompanyId);
+            Assert.Equal("Renamed box", stored.Name);
+        }
+    }
+
+    [Fact]
+    public async Task Asset_Update_Detaches_Company()
+    {
+        var (dbName, tenantA, companyA, _, _) = await SeedAsync();
+        var assetId = Guid.NewGuid();
+
+        var (seed, _) = Open(dbName, tenantA);
+        await using (seed)
+        {
+            var type = new AssetType { TenantId = tenantA, Name = "Server" };
+            seed.AssetTypes.Add(type);
+            await seed.SaveChangesAsync();
+            seed.Assets.Add(new Asset { Id = assetId, TenantId = tenantA, Name = "Box", AssetTypeId = type.Id, CompanyId = companyA });
+            await seed.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var cleared = await AssetEndpoints.UpdateAsync(
+                assetId,
+                new UpdateAssetRequest(null, null, null, null, null, CompanyIdClear: true),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, cleared);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.Assets.ForTenant(user).AsNoTracking().SingleAsync(a => a.Id == assetId)).CompanyId);
+
+            var reattached = await AssetEndpoints.UpdateAsync(
+                assetId,
+                new UpdateAssetRequest(null, null, null, null, null, companyA),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, reattached);
+
+            var emptied = await AssetEndpoints.UpdateAsync(
+                assetId,
+                new UpdateAssetRequest(null, null, null, null, null, Guid.Empty),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, emptied);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.Assets.ForTenant(user).AsNoTracking().SingleAsync(a => a.Id == assetId)).CompanyId);
+        }
+    }
+
+    // ----- Folder -----
+
+    [Fact]
+    public async Task Folder_Update_Rejects_Other_Tenant_Company()
+    {
+        var (dbName, tenantA, companyA, _, companyB) = await SeedAsync();
+        var folderId = Guid.NewGuid();
+
+        var (seed, _) = Open(dbName, tenantA);
+        await using (seed)
+        {
+            seed.DocumentFolders.Add(new DocumentFolder { Id = folderId, TenantId = tenantA, Name = "KB", CompanyId = companyA });
+            await seed.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var updated = await FolderEndpoints.UpdateAsync(
+                folderId,
+                new UpdateFolderRequest(CompanyId: companyB),
+                db,
+                user);
+            AssertCompanyNotFound(updated);
+
+            db.ChangeTracker.Clear();
+            var stored = await db.DocumentFolders.ForTenant(user).AsNoTracking().SingleAsync(f => f.Id == folderId);
+            Assert.Equal(companyA, stored.CompanyId);
+        }
+    }
+
+    [Fact]
+    public async Task Folder_Update_Detaches_Company()
+    {
+        var (dbName, tenantA, companyA, _, _) = await SeedAsync();
+        var folderId = Guid.NewGuid();
+
+        var (seed, _) = Open(dbName, tenantA);
+        await using (seed)
+        {
+            seed.DocumentFolders.Add(new DocumentFolder { Id = folderId, TenantId = tenantA, Name = "KB", CompanyId = companyA });
+            await seed.SaveChangesAsync();
+        }
+
+        var (db, user) = Open(dbName, tenantA);
+        await using (db)
+        {
+            var cleared = await FolderEndpoints.UpdateAsync(
+                folderId,
+                new UpdateFolderRequest(CompanyIdClear: true),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, cleared);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.DocumentFolders.ForTenant(user).AsNoTracking().SingleAsync(f => f.Id == folderId)).CompanyId);
+
+            var reattached = await FolderEndpoints.UpdateAsync(
+                folderId,
+                new UpdateFolderRequest(CompanyId: companyA),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, reattached);
+
+            var emptied = await FolderEndpoints.UpdateAsync(
+                folderId,
+                new UpdateFolderRequest(CompanyId: Guid.Empty),
+                db,
+                user);
+            AssertStatus(StatusCodes.Status204NoContent, emptied);
+
+            db.ChangeTracker.Clear();
+            Assert.Null((await db.DocumentFolders.ForTenant(user).AsNoTracking().SingleAsync(f => f.Id == folderId)).CompanyId);
         }
     }
 }

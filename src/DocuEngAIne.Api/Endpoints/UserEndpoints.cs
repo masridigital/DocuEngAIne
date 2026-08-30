@@ -13,10 +13,12 @@ namespace DocuEngAIne.Api.Endpoints;
 /// <see cref="UserRole"/> each of them holds.
 /// </summary>
 /// <remarks>
-/// This group exists because until now nothing in the system could write <see cref="User.Role"/>
-/// after the row was created. <c>POST /api/tenant/onboard</c> grants the onboarding caller
-/// <see cref="UserRole.Owner"/> and every later sign-in provisions a <see cref="UserRole.Reader"/>,
-/// so a tenant had exactly one administrator forever and no in-app recovery if that person left.
+/// This group exists because until role management landed, nothing in the system could write
+/// <see cref="User.Role"/> after the row was created. <c>POST /api/tenant/onboard</c> grants the
+/// onboarding caller <see cref="UserRole.Owner"/> and every later sign-in provisions a
+/// <see cref="UserRole.Reader"/>, so a tenant had exactly one administrator forever and no in-app
+/// recovery if that person left. Pre-grant tenants (User rows, no Owner) recover through
+/// <c>POST /api/tenant/claim-owner</c> rather than this route — this group is admin-gated.
 /// The whole point of the endpoint is therefore to make the admin gate *usable* without ever making
 /// it *empty*, which is why <see cref="SetRoleAsync"/> reads more like a set of refusals than an
 /// update handler.

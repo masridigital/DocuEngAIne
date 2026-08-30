@@ -176,7 +176,8 @@ Production migrations are applied by the `migrate` job in `.github/workflows/azu
 | GET | `/api/me` | Current user profile (auto-provisions on first login) |
 | GET | `/api/tenant/me` | Current tenant |
 | GET | `/api/tenant/settings` | Tenant settings |
-| POST | `/api/tenant/onboard` | Onboard tenant from Entra `tid` |
+| POST | `/api/tenant/onboard` | Onboard tenant from Entra `tid` (grants the caller Owner; existing tenant → 409) |
+| POST | `/api/tenant/claim-owner` | Recover Owner when the tenant has zero active Owner/Admin users. First authenticated caller wins; a second caller (or any tenant that already has an Owner) → 409. |
 
 ### Companies
 
@@ -210,7 +211,7 @@ Production migrations are applied by the `migrate` job in `.github/workflows/azu
 
 The MCP client speaks Streamable HTTP: it runs the `initialize` handshake, echoes `Mcp-Session-Id` and `MCP-Protocol-Version`, sends `Accept: application/json, text/event-stream`, and unwraps `text/event-stream` replies. A configured `AuthSecretName` that cannot be resolved throws rather than sending an unauthenticated request.
 
-**Admin only.** `/api/mcp/servers` and `/api/integrations` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`.
+**Admin only.** `/api/mcp/servers` and `/api/integrations` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
 
 MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask). **Composio** (`https://connect.composio.dev/mcp`) is the 1000+ app Connect MCP. Auth is `McpServer.AuthSecretName` (Key Vault name only).
 
@@ -228,7 +229,7 @@ Company matching (`CompanyIdentity` / `CompanyMatchIndex`): before creating a co
 | GET | `/api/assets` | List assets |
 | GET | `/api/assets/{id}` | Asset detail |
 | POST | `/api/assets` | Create asset (`expiresAt` optional) |
-| PUT | `/api/assets/{id}` | Update asset (`expiresAt` optional) |
+| PUT | `/api/assets/{id}` | Update asset (`expiresAt` optional). `companyId` null = leave unchanged; detach with `companyIdClear: true` or empty GUID. Other-tenant company → 400. |
 | DELETE | `/api/assets/{id}` | Delete asset |
 
 ### Expirations
@@ -266,7 +267,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 | GET | `/api/documents` | List published documents (`search`, `folderId`). Other-tenant `folderId` → empty. |
 | GET | `/api/documents/{id}` | Document detail |
 | POST | `/api/documents` | Create document (optional `folderId`; other-tenant folder → 400) |
-| PUT | `/api/documents/{id}` | Update document (creates a version; optional `folderId`) |
+| PUT | `/api/documents/{id}` | Update document (creates a version; optional `folderId`). `companyId` null = leave unchanged; detach with `companyIdClear: true` or empty GUID. Other-tenant company → 400. |
 | DELETE | `/api/documents/{id}` | Delete document |
 | GET | `/api/documents/{id}/versions` | List versions |
 | GET | `/api/documents/{id}/versions/{versionId}` | Version detail |
@@ -279,7 +280,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 | GET | `/api/folders` | List folders (`companyId`, `parentId`). `ForTenant`. Other-tenant company → empty. |
 | GET | `/api/folders/{id}` | Folder detail |
 | POST | `/api/folders` | Create folder (`name`, optional `parentId` / `companyId`) |
-| PUT | `/api/folders/{id}` | Update folder |
+| PUT | `/api/folders/{id}` | Update folder. `companyId` null = leave unchanged; detach with `companyIdClear: true` or empty GUID. Other-tenant company → 400. |
 | DELETE | `/api/folders/{id}` | Delete folder (reparents children, unfiles articles) |
 
 ### Runbooks
@@ -289,7 +290,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 | GET | `/api/runbooks` | Search runbooks (includes `runCount`) |
 | GET | `/api/runbooks/{id}` | Runbook detail with steps and `runCount` |
 | POST | `/api/runbooks` | Create runbook |
-| PUT | `/api/runbooks/{id}` | Update runbook and steps |
+| PUT | `/api/runbooks/{id}` | Update runbook and steps. `companyId` null = leave unchanged; detach with `companyIdClear: true` or empty GUID. Other-tenant company → 400. |
 | DELETE | `/api/runbooks/{id}` | Delete runbook |
 | GET | `/api/runbooks/runs` | Tenant-scoped process completion rollup (`status`, `companyId`). Joins runbook title and company name. Other-tenant / unknown company → empty. |
 | GET | `/api/runbooks/{id}/runs` | List runs (`ForTenant`; other-tenant runbook → 404) |
@@ -305,7 +306,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 | GET | `/api/keeper` | List Keeper links |
 | GET | `/api/keeper/{id}` | Keeper link detail |
 | POST | `/api/keeper` | Create Keeper link |
-| PUT | `/api/keeper/{id}` | Update Keeper link |
+| PUT | `/api/keeper/{id}` | Update Keeper link. `companyId` null = leave unchanged; detach with `companyIdClear: true` or empty GUID. Other-tenant company → 400. |
 | DELETE | `/api/keeper/{id}` | Delete Keeper link |
 | POST | `/api/keeper/{id}/reveal` | Audit-log and return Keeper URL |
 
