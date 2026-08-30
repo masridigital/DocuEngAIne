@@ -206,7 +206,7 @@ public static class LinkEndpoints
             : new RelatedLinkListItem(link.Id, link.FromType, link.FromId, link.FromName, link.Label);
     }
 
-    private static async Task<Dictionary<(string Type, Guid Id), string>> LoadEntityNamesAsync(
+    public static async Task<Dictionary<(string Type, Guid Id), string>> LoadEntityNamesAsync(
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IReadOnlyList<ResourceLink> links,

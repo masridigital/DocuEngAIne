@@ -141,7 +141,7 @@ Back to `MASRI-NATIVE-PLAN.md` §8, now on a foundation that can hold it:
 
 - Sync schedules + a SyncRun UI (runs are exposed by API, not shown in the SPA)
 - Blackpoint and Composio connectors
-- Phase 2C: relationship graph, Azure AI Search, client portal, Hudu import
+- Phase 2C: relationship graph (shipped: `GET /api/companies/{id}/graph`), Azure AI Search, client portal, Hudu import
 
 ## Azure deploy: intentionally not started
 

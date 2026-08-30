@@ -43,7 +43,7 @@ tests/                      # xUnit + EF InMemory tests
 - **AuditLog** — action trail (tenant-scoped where applicable).
 - **ApiToken** — per-tenant outbound MCP credential. SHA-256 hash stored; plaintext shown once at create. Restrict tenant FK.
 - **FlagDefinition / FlagAssignment** — named color labels on companies, assets, documents, runbooks, and Keeper links. Drive the review queue. No local secrets.
-- **ResourceLink** — directed related-item links between Company, Asset, Document, Runbook, and KeeperLink. Optional label. Not a graph visualization. `AssetDocumentLink` remains the asset↔document convenience. No local secrets.
+- **ResourceLink** — directed related-item links between Company, Asset, Document, Runbook, and KeeperLink. Optional label. `GET /api/companies/{id}/graph` returns nodes + edges for that company (`ForTenant`). Not a Hudu visualization. `AssetDocumentLink` remains the asset↔document convenience. No local secrets.
 
 All tenant-scoped queries use `ForTenant(currentUser)`; `SaveChangesAsync` stamps `TenantId` and audit timestamps automatically.
 
@@ -225,6 +225,7 @@ Per-tenant credentials for the outbound MCP server. Not a browser JWT. Hash stor
 | GET | `/api/companies` | List companies (`q` search) |
 | GET | `/api/companies/{id}` | Company detail + related counts/lists (includes `relatedLinks`) |
 | GET | `/api/companies/{id}/summary` | Related counts/lists only |
+| GET | `/api/companies/{id}/graph` | Relationship graph: `nodes` + `edges` from `ResourceLink` for that company (documents, assets, runbooks, Keeper links). Other-tenant / unknown → 404. `ForTenant`. |
 | POST | `/api/companies` | Create company |
 | PUT | `/api/companies/{id}` | Update company |
 | DELETE | `/api/companies/{id}` | Delete company |
@@ -320,7 +321,7 @@ IT Glue is **not** a live company-sync system of record. There is no `Integratio
 | POST | `/api/links` | Create `{ fromType, fromId, toType, toId, label? }`. Both ends must exist `ForTenant` or 400. Unique per tenant pair. |
 | DELETE | `/api/links/{id}` | Delete link |
 
-Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (other-end type + name). Not Hudu tabs; not a graph viz.
+Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (other-end type + name). `GET /api/companies/{id}/graph` returns the company-centered ResourceLink graph (`nodes`: id/type/name, `edges`: from/to/label). Other-tenant company is 404. Not Hudu tabs.
 
 ### Documents
 
@@ -415,14 +416,14 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 
 
 ### Later
-- [ ] Asset relationship graph
+- [x] Company relationship graph (`GET /api/companies/{id}/graph` nodes+edges from ResourceLink; Companies page Relationships section)
 - [ ] Azure AI Search + Azure OpenAI RAG
 - [ ] UniFi / Blackpoint as MCP connectors
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
 - [x] Flags (`GET/POST /api/flags`, assign, `/flags` review queue)
 - [x] Runbook runs (`POST/GET /api/runbooks/{id}/runs`, complete/cancel/promote, `runCount`)
 - [x] Process completion rollup (`GET /api/runbooks/runs?status=&companyId=`, `/runs`)
-- [x] Related items (`ResourceLink`, `GET/POST/DELETE /api/links`, company `relatedLinks`). Graph visualization later.
+- [x] Related items (`ResourceLink`, `GET/POST/DELETE /api/links`, company `relatedLinks`, `GET /api/companies/{id}/graph`).
 - [x] Document folders (`CRUD /api/folders`, `folderId` on documents, `/documents` folder list). Other-tenant folder attach → 400.
 - [ ] Client portal
 - [x] Switch SQL auth to managed identity (production AD Default; local SQL auth / user-secrets unchanged; contained user via `infra/grant-sql-contained-user.sh`)

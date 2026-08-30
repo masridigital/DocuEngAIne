@@ -453,6 +453,31 @@ export function useCompany(id: string | undefined) {
   return useSWR<Company>(id ? `/api/companies/${id}` : null, fetcher)
 }
 
+export type CompanyGraphNode = {
+  id: string
+  type: string
+  name: string
+}
+
+export type CompanyGraphEdge = {
+  id: string
+  fromType: string
+  fromId: string
+  toType: string
+  toId: string
+  label?: string | null
+}
+
+export type CompanyGraph = {
+  companyId: string
+  nodes: CompanyGraphNode[]
+  edges: CompanyGraphEdge[]
+}
+
+export function useCompanyGraph(id: string | undefined) {
+  return useSWR<CompanyGraph>(id ? `/api/companies/${id}/graph` : null, fetcher)
+}
+
 export function useMcpServers() {
   return useSWR<McpServer[]>('/api/mcp/servers', fetcher)
 }

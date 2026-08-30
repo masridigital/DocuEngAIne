@@ -410,6 +410,28 @@ details.advanced > summary {
   text-decoration: underline;
 }
 
+.graph-panel {
+  grid-column: 1 / -1;
+}
+
+.graph-nodes,
+.graph-edges {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.graph-nodes {
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+}
+
+.graph-arrow {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
 .muted {
   color: var(--text-muted);
   font-weight: 500;
