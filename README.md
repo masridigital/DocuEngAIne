@@ -44,6 +44,7 @@ tests/                      # xUnit + EF InMemory tests
 - **ApiToken** — per-tenant outbound MCP credential. SHA-256 hash stored; plaintext shown once at create. Restrict tenant FK.
 - **FlagDefinition / FlagAssignment** — named color labels on companies, assets, documents, runbooks, and Keeper links. Drive the review queue. No local secrets.
 - **ResourceLink** — directed related-item links between Company, Asset, Document, Runbook, and KeeperLink. Optional label. `GET /api/companies/{id}/graph` returns nodes + edges for that company (`ForTenant`). Not a Hudu visualization. `AssetDocumentLink` remains the asset↔document convenience. No local secrets.
+- **LLM** — tenant-scoped chat completion (`ILlmClient`) for later doc assist. Providers: Ollama (self-hosted default), Together AI, Anthropic. Config / Key Vault only; chat bodies are not persisted. See [`docs/LLM.md`](docs/LLM.md).
 
 All tenant-scoped queries use `ForTenant(currentUser)`; `SaveChangesAsync` stamps `TenantId` and audit timestamps automatically.
 
@@ -251,6 +252,15 @@ Per-tenant credentials for the outbound MCP server. Not a browser JWT. Hash stor
 
 The MCP client speaks Streamable HTTP: it runs the `initialize` handshake, echoes `Mcp-Session-Id` and `MCP-Protocol-Version`, sends `Accept: application/json, text/event-stream`, and unwraps `text/event-stream` replies. A configured `AuthSecretName` that cannot be resolved throws rather than sending an unauthenticated request.
 
+### LLM
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/llm/config` | Current provider + model (no secrets). Authenticated. |
+| POST | `/api/llm/chat` | Stateless chat `{ messages, model? }` → `{ content, model, provider }`. Audit-logs that a chat happened; does not store the prompt. Authenticated. |
+
+See [`docs/LLM.md`](docs/LLM.md) for `LLM__Provider`, `LLM__Ollama__BaseUrl`, `TogetherApiKey`, and `AnthropicApiKey`.
+
 **Admin only.** `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, and `/api/tokens` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
 
 ### Outbound MCP (`/mcp`)
@@ -439,6 +449,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 
 ### Later
 - [x] Company relationship graph (`GET /api/companies/{id}/graph` nodes+edges from ResourceLink; Companies page Relationships section)
+- [x] LLM providers (Ollama default, Together, Anthropic) — `ILlmClient`, `/api/llm/chat`, `/api/llm/config`
 - [x] Azure AI Search scaffolding (`ISearchService`, in-memory stub, `GET /api/search?q=`; live Azure Search + OpenAI RAG later)
 - [ ] UniFi / Blackpoint as MCP connectors
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
