@@ -16,8 +16,8 @@ param entraAudience string
 @description('Key Vault name that holds secrets')
 param keyVaultName string
 
-@description('Secret URI for the SQL connection string')
-param sqlConnectionStringKeyVaultSecretUri string
+@description('SQL connection string for the app. Production is Authentication=Active Directory Default (no password).')
+param sqlConnectionString string
 
 @description('Allowed CORS origins')
 param allowedOrigins array = []
@@ -71,7 +71,7 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
       connectionStrings: [
         {
           name: 'DocuEngAIne'
-          connectionString: '@Microsoft.KeyVault(SecretUri=${sqlConnectionStringKeyVaultSecretUri})'
+          connectionString: sqlConnectionString
           type: 'SQLAzure'
         }
       ]
@@ -87,6 +87,10 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'Azure__KeyVault__VaultUri'
           value: keyVault.properties.vaultUri
+        }
+        {
+          name: 'Azure__Sql__UseManagedIdentity'
+          value: 'true'
         }
         {
           name: 'ASPNETCORE_ENVIRONMENT'

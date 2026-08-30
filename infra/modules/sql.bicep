@@ -20,6 +20,12 @@ param skuName string = 'Basic'
 @description('Database SKU tier')
 param skuTier string = 'Basic'
 
+@description('Optional Entra ID admin display name or UPN. Required for CREATE USER FROM EXTERNAL PROVIDER. Leave empty to set later via infra/grant-sql-contained-user.sh.')
+param entraAdminLogin string = ''
+
+@description('Optional Entra ID admin object ID (user, group, or service principal).')
+param entraAdminObjectId string = ''
+
 resource sqlServer 'Microsoft.Sql/servers@2023-08-01-preview' = {
   name: serverName
   location: location
@@ -38,6 +44,20 @@ resource firewall 'Microsoft.Sql/servers/firewallRules@2023-08-01-preview' = {
   properties: {
     startIpAddress: '0.0.0.0'
     endIpAddress: '0.0.0.0'
+  }
+}
+
+// Entra admin enables Azure AD authentication alongside SQL auth. The App Service
+// identity is not the server admin; grant it a contained user with
+// infra/grant-sql-contained-user.sh after the first deploy.
+resource entraAdmin 'Microsoft.Sql/servers/administrators@2023-08-01-preview' = if (!empty(entraAdminLogin) && !empty(entraAdminObjectId)) {
+  parent: sqlServer
+  name: 'ActiveDirectory'
+  properties: {
+    administratorType: 'ActiveDirectory'
+    login: entraAdminLogin
+    sid: entraAdminObjectId
+    tenantId: subscription().tenantId
   }
 }
 

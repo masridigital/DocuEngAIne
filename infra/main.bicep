@@ -20,6 +20,12 @@ param entraAudience string
 @description('Optional allowed CORS origins')
 param allowedOrigins array = []
 
+@description('Optional Entra ID admin display name or UPN for the SQL server. Leave empty and run infra/grant-sql-contained-user.sh after deploy.')
+param entraAdminLogin string = ''
+
+@description('Optional Entra ID admin object ID for the SQL server.')
+param entraAdminObjectId string = ''
+
 var baseName = 'docuengaine-${environment}'
 var vaultName = take('de${uniqueString(resourceGroup().id)}${environment}', 24)
 
@@ -31,17 +37,22 @@ module sql 'modules/sql.bicep' = {
     location: location
     adminLogin: sqlAdminLogin
     adminPassword: sqlAdminPassword
+    entraAdminLogin: entraAdminLogin
+    entraAdminObjectId: entraAdminObjectId
   }
 }
 
-var sqlConnectionString = 'Server=tcp:${sql.outputs.serverFqdn},1433;Initial Catalog=${sql.outputs.databaseName};User ID=${sqlAdminLogin};Password=${sqlAdminPassword};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+// SQL-auth string stays in Key Vault for the migrate job (efbundle) and break-glass.
+// The App Service does not use it; production uses Authentication=Active Directory Default.
+var sqlAdminConnectionString = 'Server=tcp:${sql.outputs.serverFqdn},1433;Initial Catalog=${sql.outputs.databaseName};User ID=${sqlAdminLogin};Password=${sqlAdminPassword};Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
+var sqlManagedIdentityConnectionString = 'Server=tcp:${sql.outputs.serverFqdn},1433;Initial Catalog=${sql.outputs.databaseName};Authentication=Active Directory Default;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;'
 
 module keyvault 'modules/keyvault.bicep' = {
   name: 'keyvaultDeploy'
   params: {
     vaultName: vaultName
     location: location
-    sqlConnectionString: sqlConnectionString
+    sqlConnectionString: sqlAdminConnectionString
   }
 }
 
@@ -54,11 +65,15 @@ module app 'modules/app.bicep' = {
     entraAuthority: entraAuthority
     entraAudience: entraAudience
     keyVaultName: vaultName
-    sqlConnectionStringKeyVaultSecretUri: keyvault.outputs.sqlConnectionStringSecretUri
+    sqlConnectionString: sqlManagedIdentityConnectionString
     allowedOrigins: allowedOrigins
   }
 }
 
 output appUrl string = app.outputs.url
+output appName string = '${baseName}-app'
+output appPrincipalId string = app.outputs.principalId
+output sqlServerName string = '${baseName}-sql'
 output sqlServerFqdn string = sql.outputs.serverFqdn
+output sqlDatabaseName string = sql.outputs.databaseName
 output keyVaultName string = vaultName

@@ -26,9 +26,9 @@ public static class DependencyInjection
         services.AddSingleton<IntegrationSyncRunner>();
         services.AddHostedService<IntegrationSyncHostedService>();
 
-        var connectionString = configuration.GetConnectionString("DocuEngAIne");
-        if (string.IsNullOrWhiteSpace(connectionString))
-            throw new InvalidOperationException("ConnectionStrings:DocuEngAIne is missing.");
+        var connectionString = SqlConnectionDefaults.Resolve(
+            configuration.GetConnectionString("DocuEngAIne"),
+            configuration.GetValue<bool>("Azure:Sql:UseManagedIdentity"));
 
         services.AddDbContext<DocuEngAIneDbContext>(options =>
         {
