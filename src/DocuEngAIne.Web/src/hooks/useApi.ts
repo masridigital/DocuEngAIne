@@ -18,7 +18,8 @@ function describeBody(contentType: string | null, text: string) {
   if (!text) return ''
   if (contentType?.includes('json')) {
     try {
-      const parsed = JSON.parse(text) as { detail?: string; title?: string; message?: string }
+      const parsed = JSON.parse(text) as string | { detail?: string; title?: string; message?: string }
+      if (typeof parsed === 'string') return parsed
       return parsed.detail ?? parsed.title ?? parsed.message ?? text
     } catch {
       return text
@@ -226,8 +227,49 @@ export type UpdateIntegrationInput = {
   syncIntervalMinutesOverride?: number
 } & Partial<SyncPolicy>
 
+/** Tenant-wide roles as they travel on the wire (JsonStringEnumConverter). */
+export type UserRole = 'None' | 'Reader' | 'Contributor' | 'Admin' | 'Owner'
+
+export const USER_ROLES: UserRole[] = ['None', 'Reader', 'Contributor', 'Admin', 'Owner']
+
+export function canManageUsers(role?: string | null): boolean {
+  return role === 'Admin' || role === 'Owner'
+}
+
+export type Profile = {
+  id?: string
+  entraObjectId?: string
+  objectId?: string
+  email?: string
+  displayName?: string
+  role?: UserRole
+  lastSeenAt?: string
+  onboardingRequired?: boolean
+  tenant?: { id: string; name: string; slug: string; primaryDomain?: string } | null
+}
+
+export type TenantUser = {
+  id: string
+  entraObjectId: string
+  email: string
+  displayName?: string | null
+  role: UserRole
+  isActive: boolean
+  lastSeenAt?: string | null
+}
+
 export function useProfile() {
-  return useSWR('/api/me', fetcher)
+  return useSWR<Profile>('/api/me', fetcher)
+}
+
+/** Admin-gated roster. Pass false to skip the request (Reader/Contributor). */
+export function useUsers(enabled = true) {
+  return useSWR<TenantUser[]>(enabled ? '/api/users' : null, fetcher)
+}
+
+/** PUT /api/users/{id}/role — body is `{ "role": "Contributor" }`. 204 on success. */
+export function updateUserRole(id: string, role: UserRole) {
+  return putJson(`/api/users/${id}/role`, { role })
 }
 
 export type ExpirationItem = {
