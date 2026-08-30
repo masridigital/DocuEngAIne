@@ -399,9 +399,8 @@ public class RunbookTests
         var (db, user) = Open(dbName, tenantA);
         await using (db)
         {
-            var book = await db.Runbooks.Include(r => r.Steps).FirstAsync(r => r.Id == runbookA);
-            book.Steps.Add(new RunbookStep { Order = 1, Title = "Create tenant", Details = "Open the portal." });
-            book.Steps.Add(new RunbookStep { Order = 2, Title = "Add primary contact" });
+            db.RunbookSteps.Add(new RunbookStep { RunbookId = runbookA, Order = 1, Title = "Create tenant", Details = "Open the portal." });
+            db.RunbookSteps.Add(new RunbookStep { RunbookId = runbookA, Order = 2, Title = "Add primary contact" });
             await db.SaveChangesAsync();
 
             var started = await RunbookEndpoints.StartRunAsync(runbookA, new StartRunbookRunRequest(), db, user);
