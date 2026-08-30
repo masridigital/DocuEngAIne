@@ -13,12 +13,30 @@ public class IntegrationSyncService : IIntegrationSyncService
     /// <summary><see cref="IntegrationMapping.ExternalType"/> for a remote device. Stable once shipped.</summary>
     private const string DeviceExternalType = "device";
 
+    /// <summary><see cref="IntegrationMapping.ExternalType"/> for a remote contact / Halo user.</summary>
+    private const string ContactExternalType = "contact";
+
+    /// <summary><see cref="IntegrationMapping.ExternalType"/> for a remote site / location / UniFi site.</summary>
+    private const string LocationExternalType = "location";
+
+    /// <summary><see cref="IntegrationMapping.ExternalType"/> for a remote Meraki network.</summary>
+    private const string NetworkExternalType = "network";
+
     /// <summary>
     /// Asset layout that synced devices land in. The plan's layout baseline names it, but nothing seeds
     /// asset types, so the first device sync creates it rather than failing on a name an operator would
     /// have to guess. The unique (TenantId, Name) index keeps it to one per tenant.
     /// </summary>
     public const string ComputerAssetTypeName = "Computer Assets";
+
+    /// <summary>People layout for PSA contacts (Halo users). Not Entra <c>User</c>.</summary>
+    public const string PeopleAssetTypeName = "People";
+
+    /// <summary>Locations layout for Halo sites and UniFi Site Manager sites.</summary>
+    public const string LocationAssetTypeName = "Locations";
+
+    /// <summary>LAN layout for Meraki networks (location-like, but not a site).</summary>
+    public const string NetworkAssetTypeName = "LAN";
 
     private readonly DocuEngAIneDbContext _db;
     private readonly ICurrentUser _user;
@@ -97,7 +115,25 @@ public class IntegrationSyncService : IIntegrationSyncService
             try
             {
                 var companies = await PullHaloCompaniesAsync(connection, mcpId, cancellationToken);
-                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+
+                // Pulled before the company upsert so a site/user-tool failure fails the run once.
+                // Upsert still runs after companies: it needs their mappings to exist.
+                IReadOnlyList<ExternalLocationDto> sites = [];
+                IReadOnlyList<ExternalContactDto> contacts = [];
+                if (!connection.SkipLocations)
+                    sites = await HaloSiteMapper.PullAsync(_mcpClient, mcpId, cancellationToken: cancellationToken);
+                if (!connection.SkipContacts)
+                    contacts = await HaloUserMapper.PullAsync(_mcpClient, mcpId, cancellationToken: cancellationToken);
+
+                var run = await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                if (run.Status == SyncRunStatus.Succeeded)
+                {
+                    if (sites.Count > 0)
+                        await SyncLocationsAsync(connection, run, sites, cancellationToken);
+                    if (contacts.Count > 0)
+                        await SyncContactsAsync(connection, run, contacts, cancellationToken);
+                }
+                return run;
             }
             catch (Exception ex)
             {
@@ -140,7 +176,14 @@ public class IntegrationSyncService : IIntegrationSyncService
             try
             {
                 var companies = await PullCippCompaniesAsync(mcpId, cancellationToken);
-                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                IReadOnlyList<ExternalDeviceDto> devices = [];
+                if (!connection.SkipAssets)
+                    devices = await PullCippDevicesAsync(mcpId, companies, connection, cancellationToken);
+
+                var run = await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                if (devices.Count > 0 && run.Status == SyncRunStatus.Succeeded)
+                    await SyncDevicesAsync(connection, run, devices, cancellationToken);
+                return run;
             }
             catch (Exception ex)
             {
@@ -156,7 +199,16 @@ public class IntegrationSyncService : IIntegrationSyncService
             try
             {
                 var companies = await PullMerakiCompaniesAsync(mcpId, cancellationToken);
-                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                // Networks are location-like: SkipLocations is the policy flag (present on the
+                // connection). Fall back to SkipAssets only if that flag did not exist.
+                IReadOnlyList<ExternalNetworkDto> networks = [];
+                if (!connection.SkipLocations)
+                    networks = await PullMerakiNetworksAsync(mcpId, companies, cancellationToken);
+
+                var run = await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                if (networks.Count > 0 && run.Status == SyncRunStatus.Succeeded)
+                    await SyncNetworksAsync(connection, run, networks, cancellationToken);
+                return run;
             }
             catch (Exception ex)
             {
@@ -172,7 +224,22 @@ public class IntegrationSyncService : IIntegrationSyncService
             try
             {
                 var companies = await PullUniFiCompaniesAsync(mcpId, cancellationToken);
-                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                IReadOnlyList<ExternalUnifiSiteDto> sites = [];
+                IReadOnlyList<ExternalDeviceDto> devices = [];
+                if (!connection.SkipLocations)
+                    sites = await UnifiSiteMapper.PullAsync(_mcpClient, mcpId, cancellationToken: cancellationToken);
+                if (!connection.SkipAssets)
+                    devices = await UnifiDeviceMapper.PullAsync(_mcpClient, mcpId, cancellationToken: cancellationToken);
+
+                var run = await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                if (run.Status == SyncRunStatus.Succeeded)
+                {
+                    if (sites.Count > 0)
+                        await SyncUnifiSitesAsync(connection, run, sites, cancellationToken);
+                    if (devices.Count > 0)
+                        await SyncDevicesAsync(connection, run, devices, cancellationToken);
+                }
+                return run;
             }
             catch (Exception ex)
             {
@@ -188,7 +255,14 @@ public class IntegrationSyncService : IIntegrationSyncService
             try
             {
                 var companies = await PullAction1CompaniesAsync(mcpId, cancellationToken);
-                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                IReadOnlyList<ExternalDeviceDto> devices = [];
+                if (!connection.SkipAssets)
+                    devices = await PullAction1DevicesAsync(mcpId, companies, cancellationToken);
+
+                var run = await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                if (devices.Count > 0 && run.Status == SyncRunStatus.Succeeded)
+                    await SyncDevicesAsync(connection, run, devices, cancellationToken);
+                return run;
             }
             catch (Exception ex)
             {
@@ -385,9 +459,9 @@ public class IntegrationSyncService : IIntegrationSyncService
 
         try
         {
-            // Companies only. SkipContacts/SkipLocations still document intent for later live pulls;
-            // SkipAssets/AutoUpdateAssetNames are honoured by the Ninja device pass in SyncAsync,
-            // which runs after this one so device→company mappings already exist.
+            // Companies only. SkipContacts/SkipLocations/SkipAssets are honoured by the live
+            // contact/location/device passes in SyncAsync, which run after this one so
+            // device→company (and contact/location→company) mappings already exist.
             var providerKey = CompanyIdentity.ProviderKey(connection.Provider);
             var index = new CompanyMatchIndex(
                 await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken));
@@ -632,6 +706,223 @@ public class IntegrationSyncService : IIntegrationSyncService
     }
 
     /// <summary>
+    /// Upserts Halo users onto People <see cref="Asset"/> rows. <c>SkipContacts</c> is applied by
+    /// the caller (the tool is never invoked). <c>SkipInactive</c> drops <c>inactive==true</c> here.
+    /// </summary>
+    private async Task SyncContactsAsync(
+        IntegrationConnection connection,
+        SyncRun run,
+        IReadOnlyList<ExternalContactDto> contacts,
+        CancellationToken cancellationToken)
+    {
+        var items = new List<MappedAssetDto>(contacts.Count);
+        foreach (var dto in contacts)
+        {
+            if (connection.SkipInactive && dto.IsInactive == true)
+            {
+                run.ItemsSkipped++;
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(dto.ClientExternalId))
+            {
+                run.ItemsSkipped++;
+                continue;
+            }
+
+            items.Add(new MappedAssetDto(
+                dto.ExternalId, dto.ClientExternalId, dto.Name, ContactMetadataJson(dto)));
+        }
+
+        await SyncMappedAssetsAsync(
+            connection, run, items, ContactExternalType, PeopleAssetTypeName,
+            "People synced from PSA integrations.", "Integration.SyncContacts", cancellationToken);
+    }
+
+    /// <summary>
+    /// Upserts Halo sites onto Locations <see cref="Asset"/> rows. <c>SkipLocations</c> is applied
+    /// by the caller. <c>SkipInactive</c> drops <c>inactive==true</c> here.
+    /// </summary>
+    private async Task SyncLocationsAsync(
+        IntegrationConnection connection,
+        SyncRun run,
+        IReadOnlyList<ExternalLocationDto> locations,
+        CancellationToken cancellationToken)
+    {
+        var items = new List<MappedAssetDto>(locations.Count);
+        foreach (var dto in locations)
+        {
+            if (connection.SkipInactive && dto.IsInactive == true)
+            {
+                run.ItemsSkipped++;
+                continue;
+            }
+
+            items.Add(new MappedAssetDto(
+                dto.ExternalId, dto.ClientExternalId, dto.Name, LocationMetadataJson(dto)));
+        }
+
+        await SyncMappedAssetsAsync(
+            connection, run, items, LocationExternalType, LocationAssetTypeName,
+            "Locations synced from PSA integrations.", "Integration.SyncLocations", cancellationToken);
+    }
+
+    /// <summary>Upserts Meraki networks onto LAN <see cref="Asset"/> rows.</summary>
+    private Task SyncNetworksAsync(
+        IntegrationConnection connection,
+        SyncRun run,
+        IReadOnlyList<ExternalNetworkDto> networks,
+        CancellationToken cancellationToken)
+    {
+        var items = networks.Select(dto => new MappedAssetDto(
+            dto.ExternalId, dto.OrganizationExternalId, dto.Name, NetworkMetadataJson(dto))).ToList();
+        return SyncMappedAssetsAsync(
+            connection, run, items, NetworkExternalType, NetworkAssetTypeName,
+            "Networks synced from Meraki integrations.", "Integration.SyncNetworks", cancellationToken);
+    }
+
+    /// <summary>Upserts UniFi Site Manager sites onto Locations <see cref="Asset"/> rows.</summary>
+    private Task SyncUnifiSitesAsync(
+        IntegrationConnection connection,
+        SyncRun run,
+        IReadOnlyList<ExternalUnifiSiteDto> sites,
+        CancellationToken cancellationToken)
+    {
+        var items = new List<MappedAssetDto>(sites.Count);
+        foreach (var dto in sites)
+        {
+            if (string.IsNullOrWhiteSpace(dto.HostExternalId))
+            {
+                run.ItemsSkipped++;
+                continue;
+            }
+
+            items.Add(new MappedAssetDto(
+                dto.ExternalId, dto.HostExternalId, dto.Name, UnifiSiteMetadataJson(dto)));
+        }
+
+        return SyncMappedAssetsAsync(
+            connection, run, items, LocationExternalType, LocationAssetTypeName,
+            "Locations synced from PSA integrations.", "Integration.SyncLocations", cancellationToken);
+    }
+
+    /// <summary>
+    /// Shared asset upsert used by contacts, locations, networks, and UniFi sites. Same rules as
+    /// <see cref="SyncDevicesAsync"/>: resolve the parent through this connection's company
+    /// mappings, skip unmatched orgs, honour <c>AutoUpdateAssetNames</c>, ForTenant.
+    /// </summary>
+    private async Task SyncMappedAssetsAsync(
+        IntegrationConnection connection,
+        SyncRun run,
+        IReadOnlyList<MappedAssetDto> items,
+        string externalType,
+        string assetTypeName,
+        string assetTypeDescription,
+        string auditAction,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var companyByOrganization = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+            var companyMappings = await _db.IntegrationMappings.ForTenant(_user)
+                .Where(m => m.IntegrationConnectionId == connection.Id
+                    && m.ExternalType == "company"
+                    && m.LocalEntityType == nameof(Company))
+                .Select(m => new { m.ExternalId, m.LocalEntityId })
+                .ToListAsync(cancellationToken);
+            foreach (var companyMapping in companyMappings)
+                companyByOrganization[companyMapping.ExternalId] = companyMapping.LocalEntityId;
+
+            var existingMappings = await _db.IntegrationMappings.ForTenant(_user)
+                .Where(m => m.IntegrationConnectionId == connection.Id
+                    && m.ExternalType == externalType
+                    && m.LocalEntityType == nameof(Asset))
+                .ToListAsync(cancellationToken);
+            var mappingByExternal = new Dictionary<string, IntegrationMapping>(StringComparer.OrdinalIgnoreCase);
+            foreach (var existing in existingMappings)
+                mappingByExternal[existing.ExternalId] = existing;
+
+            var mappedAssetIds = existingMappings.Select(m => m.LocalEntityId).Distinct().ToList();
+            var assetsById = (await _db.Assets.ForTenant(_user)
+                .Where(a => mappedAssetIds.Contains(a.Id))
+                .ToListAsync(cancellationToken))
+                .ToDictionary(a => a.Id);
+
+            Guid? assetTypeId = null;
+
+            foreach (var dto in items)
+            {
+                if (!companyByOrganization.TryGetValue(dto.OrganizationExternalId, out var companyId))
+                {
+                    run.ItemsSkipped++;
+                    continue;
+                }
+
+                if (mappingByExternal.TryGetValue(dto.ExternalId, out var mapping)
+                    && assetsById.TryGetValue(mapping.LocalEntityId, out var existingAsset))
+                {
+                    if (connection.AutoUpdateAssetNames)
+                        existingAsset.Name = dto.Name;
+                    existingAsset.CompanyId = companyId;
+                    mapping.MetadataJson = dto.MetadataJson;
+                    run.ItemsUpdated++;
+                    continue;
+                }
+
+                assetTypeId ??= (await EnsureAssetTypeAsync(assetTypeName, assetTypeDescription, cancellationToken)).Id;
+
+                var asset = new Asset
+                {
+                    TenantId = _user.TenantId!.Value,
+                    Name = dto.Name,
+                    CompanyId = companyId,
+                    AssetTypeId = assetTypeId.Value,
+                };
+                _db.Assets.Add(asset);
+                assetsById[asset.Id] = asset;
+
+                if (mapping is null)
+                {
+                    mapping = new IntegrationMapping
+                    {
+                        TenantId = _user.TenantId!.Value,
+                        IntegrationConnectionId = connection.Id,
+                        ExternalId = dto.ExternalId,
+                        ExternalType = externalType,
+                        LocalEntityType = nameof(Asset),
+                        LocalEntityId = asset.Id,
+                    };
+                    _db.IntegrationMappings.Add(mapping);
+                    mappingByExternal[dto.ExternalId] = mapping;
+                }
+                else
+                {
+                    mapping.LocalEntityId = asset.Id;
+                }
+
+                mapping.MetadataJson = dto.MetadataJson;
+                run.ItemsCreated++;
+            }
+
+            await _db.SaveChangesAsync(cancellationToken);
+            run.FinishedAt = DateTimeOffset.UtcNow;
+            connection.LastSyncAt = run.FinishedAt;
+            await _audit.LogAsync(auditAction, nameof(IntegrationConnection), connection.Id,
+                $"runTotals created={run.ItemsCreated} updated={run.ItemsUpdated} skipped={run.ItemsSkipped}", cancellationToken);
+            await _db.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            run.Status = SyncRunStatus.Failed;
+            run.FinishedAt = DateTimeOffset.UtcNow;
+            run.ErrorSummary = ex.Message;
+            connection.Status = IntegrationStatus.Error;
+            connection.LastError = ex.Message;
+            await SaveFailureAsync(run, connection, cancellationToken);
+        }
+    }
+
+    /// <summary>
     /// Persists a failed device pass without re-throwing. If the original failure was itself a
     /// <c>SaveChanges</c> failure, the ChangeTracker still holds the entities that caused it, so saving
     /// again would throw straight out of the catch, past <c>SyncAsync</c>, leaving the run recorded as
@@ -658,21 +949,26 @@ public class IntegrationSyncService : IIntegrationSyncService
     }
 
     /// <summary>Finds (case-insensitively) or creates the tenant's <see cref="ComputerAssetTypeName"/> layout.</summary>
-    private async Task<AssetType> EnsureComputerAssetTypeAsync(CancellationToken cancellationToken)
+    private Task<AssetType> EnsureComputerAssetTypeAsync(CancellationToken cancellationToken)
+        => EnsureAssetTypeAsync(ComputerAssetTypeName, "Devices synced from RMM integrations.", cancellationToken);
+
+    /// <summary>Finds (case-insensitively) or creates a tenant asset layout by name.</summary>
+    private async Task<AssetType> EnsureAssetTypeAsync(
+        string name, string description, CancellationToken cancellationToken)
     {
         // Matched in memory, not in SQL: asset types are a handful of rows per tenant, and this keeps
         // the comparison identical under SQL Server collation and the in-memory provider.
         var assetTypes = await _db.AssetTypes.ForTenant(_user).ToListAsync(cancellationToken);
         var existing = assetTypes.FirstOrDefault(t =>
-            string.Equals(t.Name, ComputerAssetTypeName, StringComparison.OrdinalIgnoreCase));
+            string.Equals(t.Name, name, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
             return existing;
 
         var assetType = new AssetType
         {
             TenantId = _user.TenantId!.Value,
-            Name = ComputerAssetTypeName,
-            Description = "Devices synced from RMM integrations.",
+            Name = name,
+            Description = description,
         };
         _db.AssetTypes.Add(assetType);
         await _db.SaveChangesAsync(cancellationToken);
@@ -688,6 +984,50 @@ public class IntegrationSyncService : IIntegrationSyncService
             systemName = dto.SystemName,
             dnsName = dto.DnsName,
         });
+
+    private static string ContactMetadataJson(ExternalContactDto dto)
+        => JsonSerializer.Serialize(new
+        {
+            clientId = dto.ClientExternalId,
+            email = dto.Email,
+            siteId = dto.SiteExternalId,
+            inactive = dto.IsInactive,
+        });
+
+    private static string LocationMetadataJson(ExternalLocationDto dto)
+        => JsonSerializer.Serialize(new
+        {
+            clientId = dto.ClientExternalId,
+            address = dto.Address,
+            city = dto.City,
+            inactive = dto.IsInactive,
+        });
+
+    private static string NetworkMetadataJson(ExternalNetworkDto dto)
+        => JsonSerializer.Serialize(new
+        {
+            organizationId = dto.OrganizationExternalId,
+            productTypes = dto.ProductTypes,
+            tags = dto.Tags,
+        });
+
+    private static string UnifiSiteMetadataJson(ExternalUnifiSiteDto dto)
+        => JsonSerializer.Serialize(new
+        {
+            hostId = dto.HostExternalId,
+            timezone = dto.Timezone,
+        });
+
+    /// <summary>
+    /// One remote row bound for an <see cref="Asset"/>, already filtered (inactive / missing parent
+    /// id). <see cref="SyncMappedAssetsAsync"/> resolves <see cref="OrganizationExternalId"/> through
+    /// company mappings the same way <see cref="SyncDevicesAsync"/> does.
+    /// </summary>
+    private readonly record struct MappedAssetDto(
+        string ExternalId,
+        string OrganizationExternalId,
+        string Name,
+        string MetadataJson);
 
     private async Task<IReadOnlyList<ExternalCompanyDto>> PullHaloCompaniesAsync(
         IntegrationConnection connection,
@@ -760,6 +1100,31 @@ public class IntegrationSyncService : IIntegrationSyncService
         return await CippTenantMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken);
     }
 
+    /// <summary>
+    /// One <c>cipp_list_devices</c> call per mapped tenant. Compact <c>tenantFilter</c> is the
+    /// company mapping's <c>ExternalId</c> (CIPP <c>customerId</c>). Devices are stamped with that
+    /// same id so <see cref="SyncDevicesAsync"/> can resolve them through company mappings.
+    /// Inactive / excluded tenants are not pulled — SkipInactive already dropped them from ingest.
+    /// </summary>
+    private async Task<IReadOnlyList<ExternalDeviceDto>> PullCippDevicesAsync(
+        Guid mcpServerId,
+        IReadOnlyList<ExternalCompanyDto> companies,
+        IntegrationConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var devices = new List<ExternalDeviceDto>();
+        foreach (var company in companies)
+        {
+            if (connection.SkipInactive && company.IsInactive == true)
+                continue;
+            if (string.IsNullOrWhiteSpace(company.ExternalId))
+                continue;
+            devices.AddRange(await CippDeviceMapper.PullAsync(
+                _mcpClient, mcpServerId, company.ExternalId, company.ExternalId, cancellationToken));
+        }
+        return devices;
+    }
+
     private async Task<IReadOnlyList<ExternalCompanyDto>> PullMerakiCompaniesAsync(
         Guid mcpServerId,
         CancellationToken cancellationToken)
@@ -772,6 +1137,26 @@ public class IntegrationSyncService : IIntegrationSyncService
             throw new InvalidOperationException("Meraki organization pull requires a StackJack Compact MCP server. Composio is not a Meraki connector.");
 
         return await MerakiOrganizationMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// One <c>meraki_get_organization_networks</c> call per pulled org. <c>organizationId</c> is
+    /// the company <c>ExternalId</c> from <c>meraki_get_organizations</c>.
+    /// </summary>
+    private async Task<IReadOnlyList<ExternalNetworkDto>> PullMerakiNetworksAsync(
+        Guid mcpServerId,
+        IReadOnlyList<ExternalCompanyDto> companies,
+        CancellationToken cancellationToken)
+    {
+        var networks = new List<ExternalNetworkDto>();
+        foreach (var company in companies)
+        {
+            if (string.IsNullOrWhiteSpace(company.ExternalId))
+                continue;
+            networks.AddRange(await MerakiNetworkMapper.PullAsync(
+                _mcpClient, mcpServerId, company.ExternalId, cancellationToken: cancellationToken));
+        }
+        return networks;
     }
 
     private async Task<IReadOnlyList<ExternalCompanyDto>> PullUniFiCompaniesAsync(
@@ -800,6 +1185,26 @@ public class IntegrationSyncService : IIntegrationSyncService
             throw new InvalidOperationException("Action1 organization pull requires a StackJack Compact MCP server. Composio is not an Action1 connector.");
 
         return await Action1OrganizationMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
+    }
+
+    /// <summary>
+    /// One <c>action1_list_endpoints</c> call per pulled org. <c>orgId</c> is the company
+    /// <c>ExternalId</c> from <c>action1_list_organizations</c>.
+    /// </summary>
+    private async Task<IReadOnlyList<ExternalDeviceDto>> PullAction1DevicesAsync(
+        Guid mcpServerId,
+        IReadOnlyList<ExternalCompanyDto> companies,
+        CancellationToken cancellationToken)
+    {
+        var devices = new List<ExternalDeviceDto>();
+        foreach (var company in companies)
+        {
+            if (string.IsNullOrWhiteSpace(company.ExternalId))
+                continue;
+            devices.AddRange(await Action1EndpointMapper.PullAsync(
+                _mcpClient, mcpServerId, company.ExternalId, cancellationToken: cancellationToken));
+        }
+        return devices;
     }
 
     private async Task<IReadOnlyList<ExternalCompanyDto>> PullAutotaskCompaniesAsync(
