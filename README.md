@@ -268,7 +268,7 @@ Read-only tools: `list_companies`, `get_company`, `list_assets`, `get_asset`, `l
 
 `Accept: application/json, text/event-stream` returns JSON. An event-stream-only Accept wraps the same JSON-RPC result as one `message` SSE event.
 
-MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8, Slide). **Composio** (`https://connect.composio.dev/mcp`) is the 1000+ app Connect MCP. Auth is `McpServer.AuthSecretName` (Key Vault name only).
+MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8, Slide). **Composio** (`https://connect.composio.dev/mcp`) is the second harness — the 1000+ app Connect MCP, allowlisted to `github`, `cloudflare`, `outlook`, and `notion`. Ads and social toolkits (`googleads`, `facebook`, `instagram`, `linkedin`, `reddit`) are skipped and never invoked. Auth is `McpServer.AuthSecretName` (Key Vault name only).
 
 Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipContacts` false, `SkipLocations` false, `SkipAssets` false (Ninja skip-devices), `AutoUpdateAssetNames` false, `UpdateCompanyDetails` false (refuse overwrite).
 
