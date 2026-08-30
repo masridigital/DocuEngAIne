@@ -44,6 +44,6 @@ public static class IntegrationSyncWork
         if (runningConnectionIds.Contains(connection.Id))
             return false;
 
-        return SyncCadencePolicy.NextDueAt(connection) is DateTimeOffset due && due <= utcNow;
+        return SyncCadencePolicy.NextDueAt(connection, utcNow) is DateTimeOffset due && due <= utcNow;
     }
 }

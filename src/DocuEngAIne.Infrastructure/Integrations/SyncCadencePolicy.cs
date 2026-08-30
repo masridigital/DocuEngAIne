@@ -92,7 +92,7 @@ public static class SyncCadencePolicy
     };
 
     /// <summary>When the next scheduled check is due, or null when the connection is manual-only or disabled.</summary>
-    public static DateTimeOffset? NextDueAt(IntegrationConnection connection)
+    public static DateTimeOffset? NextDueAt(IntegrationConnection connection, DateTimeOffset? utcNow = null)
     {
         if (!connection.IsEnabled)
             return null;
@@ -101,8 +101,9 @@ public static class SyncCadencePolicy
         if (interval is null)
             return null;
 
+        var now = utcNow ?? DateTimeOffset.UtcNow;
         // Never synced: due now.
-        return (connection.LastSyncAt ?? DateTimeOffset.UtcNow.AddMinutes(-interval.Value))
+        return (connection.LastSyncAt ?? now.AddMinutes(-interval.Value))
             .AddMinutes(interval.Value);
     }
 }

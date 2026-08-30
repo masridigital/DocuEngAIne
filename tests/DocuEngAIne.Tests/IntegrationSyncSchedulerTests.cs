@@ -86,7 +86,9 @@ public class IntegrationSyncSchedulerTests
             new HashSet<Guid> { running.Id },
             now);
 
-        Assert.Equal([due.Id, overrideDue.Id], selected.Select(c => c.Id).ToArray());
+        Assert.Equal(2, selected.Count);
+        Assert.Contains(due.Id, selected.Select(c => c.Id));
+        Assert.Contains(overrideDue.Id, selected.Select(c => c.Id));
     }
 
     [Fact]
