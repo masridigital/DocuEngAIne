@@ -84,3 +84,7 @@ app.UseStaticFiles();
 app.MapFallbackToFile("index.html");
 
 app.Run();
+
+// Public so WebApplicationFactory<Program> in the test host can resolve the entry point.
+// Top-level statements otherwise emit an internal Program type.
+public partial class Program;
