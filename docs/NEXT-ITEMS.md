@@ -148,8 +148,8 @@ Back to `MASRI-NATIVE-PLAN.md` §8, now on a foundation that can hold it:
 ## Azure deploy: intentionally not started
 
 Azure has not been provisioned yet — the project is not at the testing stage. `AZURE_CREDENTIALS` is
-therefore unset **by design**, so on every `main` push the `infra` job stops at `Azure login`,
-`deploy-api` is skipped, and the workflow run is marked failed. That is expected, not a defect.
+therefore unset **by design**. `infra` / `migrate` / `deploy-api` now run only when the repository
+variable `DEPLOY_AZURE` is `true`, so `main` stays green until you turn deployment on.
 
 What follows from it, and matters when Azure *is* set up:
 
@@ -159,11 +159,6 @@ What follows from it, and matters when Azure *is* set up:
   but never run**. The first real deploy exercises all of them at once — budget time for that rather
   than expecting it to be clean.
 - `build-and-test` is the check that actually gates code today, and it is green.
-
-One side effect worth deciding on: because the deploy jobs always fail, **every** run on `main` shows
-red, so a genuine failure would not stand out. If that becomes a problem before Azure is ready, gate
-the `infra` / `migrate` / `deploy-api` jobs on a repository variable (or move them to
-`workflow_dispatch`) so `main` reads green until you deliberately turn deployment on.
 
 ## Corrections to the older plan
 
@@ -239,4 +234,3 @@ something is:
 - No HTTP-level tests. The test project has no `Microsoft.AspNetCore.Mvc.Testing` reference, so the
   per-endpoint other-tenant 404/400 behaviours documented in the README are asserted at the service
   layer, not through the pipeline that enforces them.
-- CI runs `npm run build` (which typechecks) but never `npm run lint`; oxlint is configured and unused.

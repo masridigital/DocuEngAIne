@@ -57,6 +57,10 @@ jobs:
           fi
           npm run build
 
+      - name: Lint SPA
+        working-directory: src/DocuEngAIne.Web
+        run: npm run lint
+
       - name: Restore
         run: dotnet restore
 
@@ -109,7 +113,8 @@ jobs:
 
   infra:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    # AZURE_CREDENTIALS is unset until Azure is provisioned. Skip rather than fail every main run.
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_AZURE == 'true'
     needs: build-and-test
     steps:
       - uses: actions/checkout@v4
@@ -146,7 +151,7 @@ jobs:
   # code against a schema that does not exist yet.
   migrate:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_AZURE == 'true'
     needs: infra
     steps:
       - name: Download migrations bundle
@@ -243,7 +248,7 @@ jobs:
 
   deploy-api:
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_AZURE == 'true'
     needs: migrate
     steps:
       - name: Download artifact
