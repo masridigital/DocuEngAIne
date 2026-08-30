@@ -1,4 +1,5 @@
 using DocuEngAIne.Infrastructure.Data;
+using Microsoft.Data.SqlClient;
 
 namespace DocuEngAIne.Tests;
 
@@ -19,11 +20,14 @@ public class SqlConnectionDefaultsTests
     public void Resolve_Strips_Sql_Credentials_And_Sets_Active_Directory_Default()
     {
         var resolved = SqlConnectionDefaults.Resolve(SqlAuth, useManagedIdentity: true);
+        var builder = new SqlConnectionStringBuilder(resolved);
 
-        Assert.Contains("Authentication=Active Directory Default", resolved, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("User ID=sa", resolved, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("Password=Secret", resolved, StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("Initial Catalog=DocuEngAIne", resolved, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(SqlAuthenticationMethod.ActiveDirectoryDefault, builder.Authentication);
+        Assert.True(string.IsNullOrEmpty(builder.UserID));
+        Assert.True(string.IsNullOrEmpty(builder.Password));
+        Assert.Equal("DocuEngAIne", builder.InitialCatalog);
+        Assert.DoesNotContain("sa", resolved, StringComparison.Ordinal);
+        Assert.DoesNotContain("Secret", resolved, StringComparison.Ordinal);
     }
 
     [Fact]
