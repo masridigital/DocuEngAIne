@@ -12,4 +12,5 @@ public enum IntegrationProvider
     Composio = 7,
     Action1 = 8,
     Autotask = 9,
+    DefensX = 10,
 }

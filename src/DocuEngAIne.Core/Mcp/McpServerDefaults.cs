@@ -27,7 +27,8 @@ public static class McpServerDefaults
             or IntegrationProvider.UniFi
             or IntegrationProvider.Action1
             or IntegrationProvider.Autotask
-            or IntegrationProvider.Blackpoint => true,
+            or IntegrationProvider.Blackpoint
+            or IntegrationProvider.DefensX => true,
         _ => false,
     };
 
