@@ -10,4 +10,5 @@ public enum IntegrationProvider
     Cipp = 5,
     Meraki = 6,
     Composio = 7,
+    Action1 = 8,
 }

@@ -32,6 +32,7 @@ public static class StackJackPlanDetector
         IntegrationProvider.Cipp => "Cipp",
         IntegrationProvider.Meraki => "Meraki",
         IntegrationProvider.UniFi => "UniFi",
+        IntegrationProvider.Action1 => "Action1",
         IntegrationProvider.Blackpoint => "CompassOne",
         _ => null,
     };

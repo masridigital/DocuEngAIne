@@ -27,7 +27,8 @@ public static class McpServerDefaults
             or IntegrationProvider.NinjaOne
             or IntegrationProvider.Cipp
             or IntegrationProvider.Meraki
-            or IntegrationProvider.UniFi => true,
+            or IntegrationProvider.UniFi
+            or IntegrationProvider.Action1 => true,
         _ => false,
     };
 
