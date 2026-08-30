@@ -31,7 +31,7 @@ tests/                      # xUnit + EF InMemory tests
 ## Domain Model
 
 - **Tenant** — isolation boundary; seeded from the Entra `tid` claim on first login.
-- **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets. Every provider's external id is also recorded in `ExternalIdsJson`, which is how sync converges Halo/Ninja/CIPP/Meraki/UniFi onto one company instead of one per connection.
+- **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets. Every provider's external id is also recorded in `ExternalIdsJson`, which is how sync converges Halo/Ninja/CIPP/Meraki/UniFi/Action1 onto one company instead of one per connection.
 - **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry (StackJack Compact or Composio) and PSA/RMM sync. Secrets live in Key Vault names only.
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
 - **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
@@ -198,11 +198,11 @@ Production migrations are applied by the `migrate` job in `.github/workflows/azu
 | DELETE | `/api/mcp/servers/{id}` | Delete MCP server |
 | GET | `/api/integrations` | List connections (includes sync-policy bools) |
 | GET | `/api/integrations/{id}` | Connection detail (includes sync-policy bools) |
-| POST | `/api/integrations` | Create connection (Halo, NinjaOne, CIPP, Meraki, UniFi, Blackpoint, Composio, CustomMcp) plus sync-policy bools |
+| POST | `/api/integrations` | Create connection (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Blackpoint, Composio, CustomMcp) plus sync-policy bools |
 | PUT | `/api/integrations/{id}` | Update connection and sync-policy bools |
 | DELETE | `/api/integrations/{id}` | Delete connection |
 | POST | `/api/integrations/{id}/test` | Test MCP/config |
-| POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, CIPP, Meraki, or UniFi live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts`), or payload upsert. NinjaOne additionally pulls `ninja_list_devices` into Computer Assets unless `SkipAssets`. Other-tenant → 404 |
+| POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, CIPP, Meraki, UniFi, or Action1 live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` / `action1_list_organizations`), or payload upsert. NinjaOne additionally pulls `ninja_list_devices` into Computer Assets unless `SkipAssets`. Other-tenant → 404 |
 | GET | `/api/integrations/{id}/runs` | Recent sync runs |
 | GET | `/api/integrations/{id}/mappings` | External→local mappings |
 
@@ -210,7 +210,7 @@ The MCP client speaks Streamable HTTP: it runs the `initialize` handshake, echoe
 
 **Admin only.** `/api/mcp/servers` and `/api/integrations` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`.
 
-MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi). **Composio** (`https://connect.composio.dev/mcp`) is the 1000+ app Connect MCP. Auth is `McpServer.AuthSecretName` (Key Vault name only).
+MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1). **Composio** (`https://connect.composio.dev/mcp`) is the 1000+ app Connect MCP. Auth is `McpServer.AuthSecretName` (Key Vault name only).
 
 Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipContacts` false, `SkipLocations` false, `SkipAssets` false (Ninja skip-devices), `AutoUpdateAssetNames` false, `UpdateCompanyDetails` false (refuse overwrite).
 
@@ -335,8 +335,8 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Company (client space) distinct from Entra tenant
 - [x] MCP server registry + IntegrationConnection (Key Vault secrets)
 - [x] First-class MCP kinds: StackJack Compact (`https://compact.stackjack.io/mcp`) and Composio (`https://connect.composio.dev/mcp`)
-- [x] HaloPSA + NinjaOne + CIPP + Meraki + UniFi company pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` → `SyncFromPayload`)
-- [x] SPA: Companies + Integrations (Compact vs Composio; Halo/Ninja/CIPP/Meraki/UniFi point at Compact)
+- [x] HaloPSA + NinjaOne + CIPP + Meraki + UniFi + Action1 company pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` / `action1_list_organizations` → `SyncFromPayload`)
+- [x] SPA: Companies + Integrations (Compact vs Composio; Halo/Ninja/CIPP/Meraki/UniFi/Action1 point at Compact)
 - [x] Company overview related lists (assets/docs/runbooks/Keeper)
 - [x] GET MCP server and integration by id; SQL cascade fix
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)

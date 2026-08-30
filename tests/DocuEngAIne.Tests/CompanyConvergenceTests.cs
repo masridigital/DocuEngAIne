@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DocuEngAIne.Tests;
 
 /// <summary>
-/// Halo, NinjaOne, CIPP, Meraki and UniFi each own their own mapping rows. Without a match step
+/// Halo, NinjaOne, CIPP, Meraki, UniFi and Action1 each own their own mapping rows. Without a match step
 /// the same client is created once per connection. These cover the convergence path.
 /// </summary>
 public class CompanyConvergenceTests
@@ -190,6 +190,38 @@ public class CompanyConvergenceTests
         Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
         var unifiMapping = Assert.Single(mappings, m => m.ExternalId == "host-1");
         Assert.Contains(CompanyMatchIndex.MatchedByName, unifiMapping.MetadataJson!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Action1_Adopts_The_Company_Already_Created_And_Records_ExternalId()
+    {
+        var (db, user, sync) = Create();
+        var halo = await AddConnectionAsync(db, user, IntegrationProvider.Halo);
+        await sync.SyncFromPayloadAsync(halo.Id, [
+            new ExternalCompanyDto("halo-100", "Adroc Capital")
+        ]);
+
+        var action1 = await AddConnectionAsync(db, user, IntegrationProvider.Action1);
+        var action1Run = await sync.SyncFromPayloadAsync(action1.Id, [
+            new ExternalCompanyDto("4702a030-5f67-11f0-9cb3-e3f0bda36034", "Adroc Capital")
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, action1Run.Status);
+        Assert.Equal(0, action1Run.ItemsCreated);
+        Assert.Equal(1, action1Run.ItemsUpdated);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("halo-100", company.HaloClientId);
+        Assert.Null(company.NinjaOrganizationId);
+
+        var ids = CompanyIdentity.ReadExternalIds(company.ExternalIdsJson);
+        Assert.Equal("halo-100", ids["halo"]);
+        Assert.Equal("4702a030-5f67-11f0-9cb3-e3f0bda36034", ids["action1"]);
+
+        var mappings = await db.IntegrationMappings.ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
+        Assert.Contains(mappings, m => m.ExternalId == "4702a030-5f67-11f0-9cb3-e3f0bda36034");
     }
 
     [Fact]
