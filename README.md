@@ -35,7 +35,7 @@ tests/                      # xUnit + EF InMemory tests
 - **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry (StackJack Compact or Composio) and PSA/RMM sync. Secrets live in Key Vault names only.
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
 - **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
-- **Document** — KB articles with full-text search and **versioning**. Optional `FolderId`.
+- **Document** — KB articles with **versioning** and Azure AI Search scaffolding (`ISearchService`; title / body / companyId / tenantId). Optional `FolderId`.
 - **DocumentFolder** — nested KB folders (`ParentId`). Optional `CompanyId` (null = central KB; set = company KB). Tenant-scoped.
 - **Runbook / RunbookStep / RunbookRun** — ordered SOPs and checklists with start/complete/cancel run history. A completed run can be promoted into a Document (one-click, not AI). Tenant-wide books are templates; optional `CompanyId` is the per-client instance. Not a second process product. No local secrets.
 - **KeeperLink** — links to credentials in **Keeper**; no secrets are stored locally.
@@ -323,6 +323,12 @@ IT Glue is **not** a live company-sync system of record. There is no `Integratio
 
 Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (other-end type + name). `GET /api/companies/{id}/graph` returns the company-centered ResourceLink graph (`nodes`: id/type/name, `edges`: from/to/label). Other-tenant company is 404. Not Hudu tabs.
 
+### Search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/search?q=` | Tenant-scoped document search via `ISearchService` (title + body). In-memory stub until Azure AI Search is provisioned; config placeholders are `Azure:Search:IndexName`, `Endpoint`, `ApiKeySecretName` (Key Vault secret name, never the key). Empty `q` → empty. Other-tenant hits never leak. |
+
 ### Documents
 
 | Method | Path | Description |
@@ -417,7 +423,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 
 ### Later
 - [x] Company relationship graph (`GET /api/companies/{id}/graph` nodes+edges from ResourceLink; Companies page Relationships section)
-- [ ] Azure AI Search + Azure OpenAI RAG
+- [x] Azure AI Search scaffolding (`ISearchService`, in-memory stub, `GET /api/search?q=`; live Azure Search + OpenAI RAG later)
 - [ ] UniFi / Blackpoint as MCP connectors
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
 - [x] Flags (`GET/POST /api/flags`, assign, `/flags` review queue)
