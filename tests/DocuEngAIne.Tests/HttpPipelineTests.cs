@@ -37,6 +37,16 @@ public class HttpPipelineTests : IClassFixture<TestHost>
     }
 
     [Fact]
+    public async Task Other_Tenant_Company_Graph_Returns_404()
+    {
+        using var client = _host.CreateOwnerClient();
+
+        var response = await client.GetAsync($"/api/companies/{_host.OtherTenantCompanyId}/graph");
+
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Other_Tenant_Folder_Attach_On_Document_Create_Returns_400()
     {
         using var client = _host.CreateContributorClient();

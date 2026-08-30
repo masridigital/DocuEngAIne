@@ -46,6 +46,13 @@ public static class CompanyEndpoints
             return Results.Ok(MapRelated(related));
         });
 
+        group.MapGet("/{id:guid}/graph", async (
+            Guid id,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            CancellationToken cancellationToken) =>
+            await GetGraphAsync(id, db, user, cancellationToken));
+
         group.MapPost("", async (
             [FromBody] CreateCompanyRequest request,
             DocuEngAIneDbContext db,
@@ -113,6 +120,93 @@ public static class CompanyEndpoints
 
         var related = await LoadRelatedAsync(db, user, id, RelatedTake, cancellationToken);
         return Results.Ok(Map(company, related));
+    }
+
+    public static async Task<IResult> GetGraphAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var company = await db.Companies.ForTenant(user).AsNoTracking()
+            .FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+        if (company is null)
+            return Results.NotFound();
+
+        return Results.Ok(await LoadGraphAsync(db, user, company, cancellationToken));
+    }
+
+    public static async Task<CompanyGraph> LoadGraphAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        Company company,
+        CancellationToken cancellationToken = default)
+    {
+        var companyId = company.Id;
+        var assetIds = await db.Assets.ForTenant(user).AsNoTracking()
+            .Where(a => a.CompanyId == companyId)
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken);
+        var documentIds = await db.Documents.ForTenant(user).AsNoTracking()
+            .Where(d => d.CompanyId == companyId)
+            .Select(d => d.Id)
+            .ToListAsync(cancellationToken);
+        var runbookIds = await db.Runbooks.ForTenant(user).AsNoTracking()
+            .Where(r => r.CompanyId == companyId)
+            .Select(r => r.Id)
+            .ToListAsync(cancellationToken);
+        var keeperIds = await db.KeeperLinks.ForTenant(user).AsNoTracking()
+            .Where(k => k.CompanyId == companyId)
+            .Select(k => k.Id)
+            .ToListAsync(cancellationToken);
+
+        var links = await db.ResourceLinks.ForTenant(user).AsNoTracking()
+            .Where(l =>
+                (l.FromType == LinkEntityType.Company && l.FromId == companyId)
+                || (l.ToType == LinkEntityType.Company && l.ToId == companyId)
+                || (l.FromType == LinkEntityType.Asset && assetIds.Contains(l.FromId))
+                || (l.ToType == LinkEntityType.Asset && assetIds.Contains(l.ToId))
+                || (l.FromType == LinkEntityType.Document && documentIds.Contains(l.FromId))
+                || (l.ToType == LinkEntityType.Document && documentIds.Contains(l.ToId))
+                || (l.FromType == LinkEntityType.Runbook && runbookIds.Contains(l.FromId))
+                || (l.ToType == LinkEntityType.Runbook && runbookIds.Contains(l.ToId))
+                || (l.FromType == LinkEntityType.KeeperLink && keeperIds.Contains(l.FromId))
+                || (l.ToType == LinkEntityType.KeeperLink && keeperIds.Contains(l.ToId)))
+            .OrderByDescending(l => l.UpdatedAt)
+            .ToListAsync(cancellationToken);
+
+        var names = await LinkEndpoints.LoadEntityNamesAsync(db, user, links, cancellationToken);
+        names[(LinkEntityType.Company, companyId)] = company.Name;
+
+        var nodeKeys = new HashSet<(string Type, Guid Id)> { (LinkEntityType.Company, companyId) };
+        var edges = new List<CompanyGraphEdge>(links.Count);
+        foreach (var link in links)
+        {
+            if (!names.ContainsKey((link.FromType, link.FromId))
+                || !names.ContainsKey((link.ToType, link.ToId)))
+            {
+                continue;
+            }
+
+            edges.Add(new CompanyGraphEdge(
+                link.Id,
+                link.FromType,
+                link.FromId,
+                link.ToType,
+                link.ToId,
+                link.Label));
+            nodeKeys.Add((link.FromType, link.FromId));
+            nodeKeys.Add((link.ToType, link.ToId));
+        }
+
+        var nodes = nodeKeys
+            .Select(k => new CompanyGraphNode(k.Id, k.Type, names[k]))
+            .OrderBy(n => n.Type, StringComparer.Ordinal)
+            .ThenBy(n => n.Name, StringComparer.Ordinal)
+            .ThenBy(n => n.Id)
+            .ToList();
+
+        return new CompanyGraph(companyId, nodes, edges);
     }
 
     public static async Task<IResult> CreateAsync(
@@ -360,6 +454,21 @@ public static class CompanyEndpoints
     private static string? NullIfEmpty(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
+
+public sealed record CompanyGraphNode(Guid Id, string Type, string Name);
+
+public sealed record CompanyGraphEdge(
+    Guid Id,
+    string FromType,
+    Guid FromId,
+    string ToType,
+    Guid ToId,
+    string? Label);
+
+public sealed record CompanyGraph(
+    Guid CompanyId,
+    IReadOnlyList<CompanyGraphNode> Nodes,
+    IReadOnlyList<CompanyGraphEdge> Edges);
 
 public sealed record RelatedListItem(Guid Id, string Name, DateTimeOffset UpdatedAt, int? RunCount = null);
 

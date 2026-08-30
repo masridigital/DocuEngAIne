@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { createCompany, createResourceLink, updateCompany, useCompanies, useCompany, type Company, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
+import { createCompany, createResourceLink, updateCompany, useCompanies, useCompany, useCompanyGraph, type Company, type CompanyGraph, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
 
 function slugify(value: string) {
   return value
@@ -303,6 +303,55 @@ function hrefForLink(type: string, id: string) {
   }
 }
 
+function nodeName(graph: CompanyGraph, type: string, id: string) {
+  return graph.nodes.find((n) => n.type === type && n.id === id)?.name ?? id
+}
+
+function CompanyGraphSection({ companyId }: { companyId: string }) {
+  const { data: graph, error, isLoading } = useCompanyGraph(companyId)
+  const nodes = graph?.nodes ?? []
+  const edges = graph?.edges ?? []
+
+  return (
+    <section className="panel related-panel graph-panel">
+      <h2>
+        Relationships
+        <span className="muted"> {edges.length}</span>
+      </h2>
+      <p className="muted">ResourceLink graph for this company — documents, assets, runbooks, and Keeper links. Not a Hudu visualization.</p>
+      {isLoading && <p>Loading relationships…</p>}
+      {error && <p className="error">Failed to load relationship graph.</p>}
+      {graph && edges.length === 0 && (
+        <p>No ResourceLink edges for this company yet.</p>
+      )}
+      {graph && nodes.length > 0 && (
+        <ul className="graph-nodes">
+          {nodes.map((node) => (
+            <li key={`${node.type}:${node.id}`}>
+              <Link to={hrefForLink(node.type, node.id)}>{node.name}</Link>
+              <span className="muted"> {node.type}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      {graph && edges.length > 0 && (
+        <ul className="graph-edges">
+          {edges.map((edge) => (
+            <li key={edge.id}>
+              <Link to={hrefForLink(edge.fromType, edge.fromId)}>{nodeName(graph, edge.fromType, edge.fromId)}</Link>
+              <span className="muted"> {edge.fromType}</span>
+              <span className="graph-arrow"> → </span>
+              <Link to={hrefForLink(edge.toType, edge.toId)}>{nodeName(graph, edge.toType, edge.toId)}</Link>
+              <span className="muted"> {edge.toType}</span>
+              {edge.label ? <span className="muted"> · {edge.label}</span> : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
 function RelatedLinksSection({
   companyId,
   count,
@@ -395,6 +444,7 @@ function RelatedLinksSection({
 
 function CompanyDetail({ id }: { id: string }) {
   const { data: company, error, isLoading, mutate } = useCompany(id)
+  const { mutate: mutateGraph } = useCompanyGraph(id)
   const [haloPortalUrl, setHaloPortalUrl] = useState('')
   const [ninjaPortalUrl, setNinjaPortalUrl] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
@@ -519,8 +569,9 @@ function CompanyDetail({ id }: { id: string }) {
               companyId={company.id}
               count={company.counts?.relatedLinks}
               items={company.relatedLinks}
-              onCreated={() => mutate()}
+              onCreated={() => Promise.all([mutate(), mutateGraph()])}
             />
+            <CompanyGraphSection companyId={company.id} />
           </div>
         </>
       )}
