@@ -301,10 +301,9 @@ public class IntegrationSyncService : IIntegrationSyncService
 
     private static string DescribeCadence(IntegrationConnection connection)
     {
-        // Capability, not a promise: nothing runs syncs on a timer yet.
         var minutes = SyncCadencePolicy.IntervalMinutesFor(connection);
         return minutes is int interval
-            ? $", which supports a check every {interval} min (syncs are still manual)"
+            ? $", which schedules a check every {interval} min"
             : ", too little to suggest a cadence";
     }
 

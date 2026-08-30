@@ -5,6 +5,7 @@ using DocuEngAIne.Infrastructure.Integrations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace DocuEngAIne.Infrastructure;
 
@@ -15,12 +16,15 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         services.AddHttpContextAccessor();
+        services.AddScoped<IBackgroundTenantContext, BackgroundTenantContext>();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddScoped<IResourceAuthorizationService, ResourceAuthorizationService>();
         services.AddScoped<IAuditService, AuditService>();
         services.AddHttpClient(nameof(HttpMcpClient));
         services.AddScoped<IMcpClient, HttpMcpClient>();
         services.AddScoped<IIntegrationSyncService, IntegrationSyncService>();
+        services.AddSingleton<IntegrationSyncRunner>();
+        services.AddHostedService<IntegrationSyncHostedService>();
 
         var connectionString = configuration.GetConnectionString("DocuEngAIne");
         if (string.IsNullOrWhiteSpace(connectionString))

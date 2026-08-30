@@ -420,9 +420,8 @@ public static class IntegrationEndpoints
         i.MonthlyCallLimit,
         i.PlanDetectedAt,
         i.SyncIntervalMinutesOverride,
-        // Derived, never stored: the cadence the detected allowance supports, and when a check would
-        // next fall due at that cadence. Null means "manual only" — no allowance has been detected.
-        // Nothing runs these on a timer yet; there is no scheduler.
+        // Derived, never stored: override if set, otherwise the plan-derived interval. Null means
+        // manual only — no allowance has been detected and the scheduler will skip the connection.
         SyncIntervalMinutes = SyncCadencePolicy.IntervalMinutesFor(i),
         NextSyncDueAt = SyncCadencePolicy.NextDueAt(i),
         i.CreatedAt,
