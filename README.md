@@ -116,15 +116,41 @@ az deployment group create \
                entraAudience=...
 ```
 
+Optional Entra admin on the SQL server (so `CREATE USER FROM EXTERNAL PROVIDER` works without the grant script creating one):
+
+```bash
+               entraAdminLogin='James' \
+               entraAdminObjectId='{object-id}'
+```
+
 What gets provisioned:
 
 - App Service Plan (Linux, B2)
 - App Service with system-assigned managed identity
-- Azure SQL server + database
-- Azure Key Vault with RBAC and SQL connection string secret
+- Azure SQL server + database (SQL admin kept for the migrate job and break-glass)
+- Optional SQL Entra admin when `entraAdminLogin` / `entraAdminObjectId` are passed
+- Azure Key Vault with RBAC and the SQL-admin connection string (used by the migrate job, not the app)
 - Role assignment granting the app **Key Vault Secrets User**
 
-The app reads `ConnectionStrings:DocuEngAIne` from Key Vault via a Key Vault reference in App Service settings.
+Production App Service settings:
+
+- `ConnectionStrings:DocuEngAIne` = `Authentication=Active Directory Default` (DefaultAzureCredential / managed identity). No SQL password.
+- `Azure__Sql__UseManagedIdentity=true`, which strips any leftover `User ID` / `Password` from that string.
+
+Local development is unchanged: `appsettings.Development.json` uses LocalDB, and a user-secrets SQL connection string still wins because `Azure:Sql:UseManagedIdentity` defaults to `false`.
+
+After the first deploy, grant the App Service identity a contained database user (Bicep cannot run `CREATE USER ... FROM EXTERNAL PROVIDER`):
+
+```bash
+az login
+AZURE_RESOURCE_GROUP=rg-docuengaine-prod \
+SQL_SERVER=docuengaine-prod-sql \
+SQL_DATABASE=DocuEngAIne \
+APP_NAME=docuengaine-prod-app \
+./infra/grant-sql-contained-user.sh
+```
+
+The script makes the signed-in identity the SQL Entra admin if none exists, then grants `db_datareader` + `db_datawriter`. Set `SQL_GRANT_DDLADMIN=true` only if the app itself will apply EF migrations (the CI migrate job uses SQL admin and does not need this).
 
 ## CI/CD
 
@@ -137,7 +163,7 @@ The app reads `ConnectionStrings:DocuEngAIne` from Key Vault via a Key Vault ref
 
 `infra`, `migrate`, and `deploy-api` run only when the repository variable `DEPLOY_AZURE` is `true`.
 
-The `migrate` job runs between `infra` and `deploy-api`, and `deploy-api` depends on it — a failed migration blocks the deploy rather than shipping code against a schema that does not exist. `sql.bicep` only allows Azure services, which does not cover GitHub-hosted runners, so the job opens a run-scoped SQL firewall rule for the runner IP and removes it afterwards.
+The `migrate` job runs between `infra` and `deploy-api`, and `deploy-api` depends on it — a failed migration blocks the deploy rather than shipping code against a schema that does not exist. `sql.bicep` only allows Azure services, which does not cover GitHub-hosted runners, so the job opens a run-scoped SQL firewall rule for the runner IP and removes it afterwards. The migrate job still uses the SQL-admin connection string (Key Vault or `SQL_ADMIN_*` secrets). The App Service does not: it connects with managed identity after `infra/grant-sql-contained-user.sh` has been run once.
 
 Required GitHub secrets:
 
@@ -314,7 +340,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 - Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers` and `/api/integrations` require Admin/Owner.
 - `ResourceRoleAssignment` is enforced on asset, document, runbook and Keeper write routes (`POST`/`PUT`/`DELETE`) via `IResourceAuthorizationService`. A Contributor grant on one resource lets a Reader write that resource; without a grant they get 403. Tenant-wide Admin/Owner write without a grant. Creates still require a tenant-wide Contributor-or-above role.
 - **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every reveal is audit-logged.
-- SQL auth is used in the skeleton for portability. Plan to switch to **Active Directory Managed Identity** for production and create the contained database user for the App Service identity.
+- Production Azure SQL uses **Active Directory Default** (DefaultAzureCredential / App Service managed identity). SQL auth remains the local-dev fallback via connection string / user-secrets. After deploy, run `infra/grant-sql-contained-user.sh` to create the contained database user for the App Service identity.
 - HTTPS only, TLS 1.2+, FTPS disabled, health checks exposed.
 
 ## Phase 1 Status ✅
@@ -359,5 +385,5 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Related items (`ResourceLink`, `GET/POST/DELETE /api/links`, company `relatedLinks`). Graph visualization later.
 - [x] Document folders (`CRUD /api/folders`, `folderId` on documents, `/documents` folder list). Other-tenant folder attach → 400.
 - [ ] Client portal
-- [ ] Switch SQL auth to managed identity
+- [x] Switch SQL auth to managed identity (production AD Default; local SQL auth / user-secrets unchanged; contained user via `infra/grant-sql-contained-user.sh`)
 - [ ] One-time Hudu export migration (passwords → Keeper only)
