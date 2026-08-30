@@ -53,6 +53,7 @@ public class StackJackPlanTests
         Assert.Equal("NinjaRMM", StackJackPlanDetector.ConnectorName(IntegrationProvider.NinjaOne));
         Assert.Equal("Action1", StackJackPlanDetector.ConnectorName(IntegrationProvider.Action1));
         Assert.Equal("Autotask", StackJackPlanDetector.ConnectorName(IntegrationProvider.Autotask));
+        Assert.Equal("CompassOne", StackJackPlanDetector.ConnectorName(IntegrationProvider.Blackpoint));
 
         var ninja = StackJackPlanDetector.FindConnector(LiveSessionInfoFixture, IntegrationProvider.NinjaOne);
         Assert.NotNull(ninja);
