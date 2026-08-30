@@ -365,7 +365,9 @@ public class BuiltInCompactTests
             var run = await sync.SyncAsync(connection.Id);
 
             Assert.Equal(SyncRunStatus.Succeeded, run.Status);
-            Assert.Equal(HaloClientMapper.ToolName, Assert.Single(mcp.Calls));
+            Assert.Equal(HaloClientMapper.ToolName, mcp.Calls[0]);
+            Assert.Contains(HaloSiteMapper.ToolName, mcp.Calls);
+            Assert.Contains(HaloUserMapper.ToolName, mcp.Calls);
             Assert.Equal(server.Id, (await db.IntegrationConnections.ForTenant(user).FirstAsync(c => c.Id == connection.Id)).McpServerId);
         }
     }
