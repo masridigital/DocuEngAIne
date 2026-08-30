@@ -109,13 +109,13 @@ public sealed class HuduMigrationService : IHuduMigrationService
         _ = _mcpClient;
         const string source = PayloadSource;
 
-        articles = ApplyFolderNames(articles, folders);
+        var namedArticles = ApplyFolderNames(articles, folders);
 
         var (companiesCreated, companiesUpdated, companiesSkipped, companyByHuduId) =
             await ImportCompaniesAsync(companies, cancellationToken);
 
         var (articlesCreated, articlesUpdated, articlesSkipped) =
-            await ImportArticlesAsync(articles, companyByHuduId, cancellationToken);
+            await ImportArticlesAsync(namedArticles, companyByHuduId, cancellationToken);
 
         await _db.SaveChangesAsync(cancellationToken);
         await _audit.LogAsync(
