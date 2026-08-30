@@ -202,7 +202,7 @@ Next:
 2. CompanyId on document/runbook/Keeper create-edit (assets already accept it)
 3. Phase 2B: UniFi + Blackpoint MCP; sync schedules + SyncRun UI. Halo/Ninja company deep links shipped (`HaloPortalUrl` / `NinjaPortalUrl`).
 4. Phase 2C: relationship graph, Azure AI Search, client portal, Hudu export import (passwords → Keeper only). Expirations + flags + runbook runs + process completion rollup shipped.
-5. `dotnet ef migrations add Phase2IntegrationsReconcile` if the model snapshot still needs regen after the hand-written Phase 2 migrations
+5. Model snapshot reconciled (`Phase2IntegrationsReconcile`, empty `Up()`).
 
 ## 9. Hudu ↔ DocuEngAIne verification matrix
 

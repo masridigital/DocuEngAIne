@@ -4,6 +4,7 @@ using DocuEngAIne.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 
 #nullable disable
@@ -11,9 +12,11 @@ using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 namespace DocuEngAIne.Api.Data.Migrations
 {
     [DbContext(typeof(DocuEngAIneDbContext))]
-    partial class DocuEngAIneDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260830181353_Phase2IntegrationsReconcile")]
+    partial class Phase2IntegrationsReconcile
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
