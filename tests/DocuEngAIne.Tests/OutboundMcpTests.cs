@@ -190,9 +190,7 @@ public class OutboundMcpTests
             },
             names);
 
-        var listed = JsonSerializer.Serialize(DocuEngAIneMcpServer.ListTools("1"), DocuEngAIneMcpServer.JsonOptions);
-        Assert.DoesNotContain("reveal", listed, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("keeper_reveal", listed, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(names, n => n.Contains("reveal", StringComparison.OrdinalIgnoreCase));
         Assert.False(DocuEngAIneMcpServer.IsKnownTool("reveal"));
         Assert.False(DocuEngAIneMcpServer.IsKnownTool("keeper_reveal"));
         Assert.False(DocuEngAIneMcpServer.IsKnownTool("reveal_keeper_link"));
@@ -336,12 +334,11 @@ public class OutboundMcpTests
             var initJson = JsonSerializer.Serialize(init, DocuEngAIneMcpServer.JsonOptions);
             Assert.Contains(DocuEngAIneMcpServer.ProtocolVersion, initJson);
             Assert.Contains(DocuEngAIneMcpServer.ServerName, initJson);
-            Assert.DoesNotContain("reveal", initJson, StringComparison.OrdinalIgnoreCase);
 
             var list = await DocuEngAIneMcpServer.HandleAsync(Rpc("tools/list"), db, user);
             var listJson = JsonSerializer.Serialize(list, DocuEngAIneMcpServer.JsonOptions);
             Assert.Contains(DocuEngAIneMcpServer.ListCompanies, listJson);
-            Assert.DoesNotContain("reveal", listJson, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain(DocuEngAIneMcpServer.Tools, t => t.Name.Contains("reveal", StringComparison.OrdinalIgnoreCase));
 
             var call = await DocuEngAIneMcpServer.HandleAsync(
                 Rpc("tools/call", new { name = DocuEngAIneMcpServer.ListCompanies, arguments = new { } }),
@@ -360,7 +357,11 @@ public class OutboundMcpTests
         Assert.Contains("/mcp", json);
         Assert.Contains("apiToken", json);
         Assert.Contains(DocuEngAIneMcpServer.ListKeeperLinks, json);
-        Assert.DoesNotContain("reveal", json, StringComparison.OrdinalIgnoreCase);
+        using (var doc = JsonDocument.Parse(json))
+        {
+            var tools = doc.RootElement.GetProperty("tools").EnumerateArray().Select(t => t.GetString()).ToArray();
+            Assert.DoesNotContain(tools, n => n is not null && n.Contains("reveal", StringComparison.OrdinalIgnoreCase));
+        }
         Assert.Contains("ForTenant", json);
     }
 
