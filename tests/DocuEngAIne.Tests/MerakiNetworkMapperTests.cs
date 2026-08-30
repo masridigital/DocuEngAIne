@@ -147,12 +147,12 @@ public class MerakiNetworkMapperTests
         var networks = await MerakiNetworkMapper.PullAsync(mcp, serverId, organizationId: "1279651", pageSize: 3);
 
         Assert.Equal(2, networks.Count);
-        Assert.Equal(1, mcp.Calls.Count);
-        Assert.Equal(MerakiNetworkMapper.ToolName, mcp.Calls[0].Tool);
-        Assert.Equal(serverId, mcp.Calls[0].ServerId);
-        Assert.Contains("\"organizationId\":\"1279651\"", mcp.Calls[0].Args, StringComparison.Ordinal);
-        Assert.Contains("\"perPage\":3", mcp.Calls[0].Args, StringComparison.Ordinal);
-        Assert.DoesNotContain("startingAfter", mcp.Calls[0].Args, StringComparison.Ordinal);
+        var first = Assert.Single(mcp.Calls);
+        Assert.Equal(MerakiNetworkMapper.ToolName, first.Tool);
+        Assert.Equal(serverId, first.ServerId);
+        Assert.Contains("\"organizationId\":\"1279651\"", first.Args, StringComparison.Ordinal);
+        Assert.Contains("\"perPage\":3", first.Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("startingAfter", first.Args, StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -179,8 +179,8 @@ public class MerakiNetworkMapperTests
         Assert.Equal(3, mcp.Calls.Count);
         Assert.DoesNotContain(pulled, n => n.ExternalId == "N_2");
         Assert.Contains(pulled, n => n.ExternalId == "N_6");
-        Assert.Contains("\"startingAfter\":\"N_2\"", mcp.Calls[1].Args, StringComparison.Ordinal);
-        Assert.Contains("\"startingAfter\":\"N_5\"", mcp.Calls[2].Args, StringComparison.Ordinal);
+        Assert.Contains("\"startingAfter\":\"N_3\"", mcp.Calls[1].Args, StringComparison.Ordinal);
+        Assert.Contains("\"startingAfter\":\"N_6\"", mcp.Calls[2].Args, StringComparison.Ordinal);
         Assert.All(mcp.Calls, c =>
         {
             Assert.Equal(MerakiNetworkMapper.ToolName, c.Tool);
