@@ -104,10 +104,13 @@ public class HttpMcpClient : IMcpClient
 
         if (IsEventStream(response))
         {
-            return ParseSseMessage(body, requestId)
+            body = ParseSseMessage(body, requestId)
                 ?? throw new InvalidOperationException("MCP server returned an SSE response with no message event.");
         }
 
+        // HTTP 200 still carries JSON-RPC errors and MCP tool isError payloads. Surface those here
+        // so callers (and the mappers) do not treat a failed tool as an empty success.
+        EnsureNoRpcFailure(body, "MCP call failed");
         return body;
     }
 
@@ -301,28 +304,13 @@ public class HttpMcpClient : IMcpClient
     /// </summary>
     private static string? ReadInitializeResult(string body)
     {
-        JsonElement root;
-        try
-        {
-            using var doc = JsonDocument.Parse(body);
-            root = doc.RootElement.Clone();
-        }
-        catch (JsonException)
+        EnsureNoRpcFailure(body, "MCP initialize failed");
+
+        if (!TryParseObject(body, out var root))
         {
             // A server that answers initialize with something unparsable is still worth trying for
             // tool calls; the tool call itself will surface a clearer failure.
             return null;
-        }
-
-        if (root.ValueKind != JsonValueKind.Object)
-            return null;
-
-        if (root.TryGetProperty("error", out var error))
-        {
-            var message = error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var m)
-                ? m.GetString()
-                : error.GetRawText();
-            throw new InvalidOperationException($"MCP initialize failed: {message}");
         }
 
         if (root.TryGetProperty("result", out var result)
@@ -331,6 +319,68 @@ public class HttpMcpClient : IMcpClient
             && version.ValueKind == JsonValueKind.String)
         {
             return version.GetString();
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Throws when the body is a JSON-RPC error object or an MCP tool result with <c>isError: true</c>.
+    /// Unparsable bodies are left to the caller — Compact sometimes wraps the real payload as text,
+    /// and the mappers already know how to unwrap that.
+    /// </summary>
+    private static void EnsureNoRpcFailure(string body, string prefix)
+    {
+        if (!TryParseObject(body, out var root))
+            return;
+
+        if (root.TryGetProperty("error", out var error))
+        {
+            var message = error.ValueKind == JsonValueKind.Object && error.TryGetProperty("message", out var m)
+                ? m.GetString()
+                : error.GetRawText();
+            throw new InvalidOperationException($"{prefix}: {message}");
+        }
+
+        var payload = root;
+        if (root.TryGetProperty("result", out var result) && result.ValueKind == JsonValueKind.Object)
+            payload = result;
+
+        if (payload.TryGetProperty("isError", out var isError) && isError.ValueKind == JsonValueKind.True)
+        {
+            var errText = ReadContentText(payload) ?? payload.GetRawText();
+            throw new InvalidOperationException($"{prefix}: {errText}");
+        }
+    }
+
+    private static bool TryParseObject(string body, out JsonElement root)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(body);
+            root = doc.RootElement.Clone();
+            return root.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            root = default;
+            return false;
+        }
+    }
+
+    private static string? ReadContentText(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+            return null;
+
+        foreach (var item in content.EnumerateArray())
+        {
+            if (item.ValueKind == JsonValueKind.Object
+                && item.TryGetProperty("text", out var text)
+                && text.ValueKind == JsonValueKind.String)
+            {
+                return text.GetString();
+            }
         }
 
         return null;
