@@ -160,9 +160,9 @@ public class AuthorizationPolicyTests
     [Fact]
     public async Task Admin_Policy_Is_Registered_With_The_Hybrid_Requirement_And_Handler()
     {
-        // Route-level enforcement cannot be exercised here (the test project has no
-        // Microsoft.AspNetCore.Mvc.Testing host), so at least assert the policy the endpoint groups
-        // name actually exists and is backed by the hybrid requirement plus a registered handler.
+        // Route-level enforcement is covered by HttpPipelineTests (WebApplicationFactory).
+        // Here we assert the policy the endpoint groups name actually exists and is backed by
+        // the hybrid requirement plus a registered handler.
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
