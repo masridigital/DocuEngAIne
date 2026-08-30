@@ -31,7 +31,7 @@ tests/                      # xUnit + EF InMemory tests
 ## Domain Model
 
 - **Tenant** — isolation boundary; seeded from the Entra `tid` claim on first login.
-- **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets. Every provider's external id is also recorded in `ExternalIdsJson`, which is how sync converges Halo/Ninja/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint onto one company instead of one per connection.
+- **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets. Every provider's external id is also recorded in `ExternalIdsJson`, which is how sync converges Halo/Ninja/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint onto one company instead of one per connection. One-shot IT Glue import stamps `ExternalIdsJson` key `itglue` the same way; IT Glue is **not** a live `IntegrationProvider`.
 - **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry (StackJack Compact or Composio) and PSA/RMM sync. Secrets live in Key Vault names only.
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
 - **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
@@ -237,13 +237,21 @@ Production migrations are applied by the `migrate` job in `.github/workflows/azu
 
 The MCP client speaks Streamable HTTP: it runs the `initialize` handshake, echoes `Mcp-Session-Id` and `MCP-Protocol-Version`, sends `Accept: application/json, text/event-stream`, and unwraps `text/event-stream` replies. A configured `AuthSecretName` that cannot be resolved throws rather than sending an unauthenticated request.
 
-**Admin only.** `/api/mcp/servers` and `/api/integrations` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
+**Admin only.** `/api/mcp/servers`, `/api/integrations`, and `/api/migrations/itglue` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
 
 MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint). **Composio** (`https://connect.composio.dev/mcp`) is the 1000+ app Connect MCP. Auth is `McpServer.AuthSecretName` (Key Vault name only).
 
 Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipContacts` false, `SkipLocations` false, `SkipAssets` false (Ninja skip-devices), `AutoUpdateAssetNames` false, `UpdateCompanyDetails` false (refuse overwrite).
 
 Company matching (`CompanyIdentity` / `CompanyMatchIndex`): before creating a company, sync matches an existing one by provider id (typed Halo/Ninja columns plus `ExternalIdsJson`), then normalized primary domain, then exact normalized name. A key that resolves to two different companies is ambiguous and is **not** matched — a duplicate is recoverable, a wrong merge is not. Legal suffixes are not stripped for the same reason. The mapping records `{"matchedBy":"provider-id|primary-domain|name"}`.
+
+### One-time migrations
+
+IT Glue is **not** a live company-sync system of record. There is no `IntegrationProvider.ITGlue` and no recurring Compact pull. The endpoint exists only to migrate into DocuEngAIne. Passwords are never stored (Keeper remains the vault). Files live under `Integrations/Migration/` and are named `ItGlue*` so a later Hudu importer can sit beside them.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/migrations/itglue` | Admin one-shot import. Body: `{ mcpServerId }` (Compact `itg_list_organizations`) **or** a JSON:API `payload` / raw `{ data: [{ id, type: organizations, attributes: { name } }] }` fixture. Organizations → `Company` via `CompanyIdentity` (`ExternalIdsJson` key `itglue`). Documents / flexible assets → `Document` / `Asset` with secret traits stripped. Idempotent on IT Glue ids. Other-tenant `mcpServerId` → 404. |
 
 ### Assets
 
@@ -339,7 +347,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 ## Security Notes
 
 - Tenant isolation is enforced at the API/query layer.
-- Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers` and `/api/integrations` require Admin/Owner.
+- Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers`, `/api/integrations`, and `/api/migrations/itglue` require Admin/Owner.
 - `ResourceRoleAssignment` is enforced on asset, document, runbook and Keeper write routes (`POST`/`PUT`/`DELETE`) via `IResourceAuthorizationService`. A Contributor grant on one resource lets a Reader write that resource; without a grant they get 403. Tenant-wide Admin/Owner write without a grant. Creates still require a tenant-wide Contributor-or-above role.
 - **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every reveal is audit-logged.
 - Production Azure SQL uses **Active Directory Default** (DefaultAzureCredential / App Service managed identity). SQL auth remains the local-dev fallback via connection string / user-secrets. After deploy, run `infra/grant-sql-contained-user.sh` to create the contained database user for the App Service identity.
@@ -388,4 +396,5 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Document folders (`CRUD /api/folders`, `folderId` on documents, `/documents` folder list). Other-tenant folder attach → 400.
 - [ ] Client portal
 - [x] Switch SQL auth to managed identity (production AD Default; local SQL auth / user-secrets unchanged; contained user via `infra/grant-sql-contained-user.sh`)
+- [x] One-time IT Glue migrate-only import (`POST /api/migrations/itglue`; Compact or JSON:API fixture; passwords never stored)
 - [ ] One-time Hudu export migration (passwords → Keeper only)

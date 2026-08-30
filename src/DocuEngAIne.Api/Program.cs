@@ -67,6 +67,7 @@ app.MapHealthChecks("/api/health/ready", new Microsoft.AspNetCore.Diagnostics.He
 app.MapTenantEndpoints();
 app.MapCompanyEndpoints();
 app.MapIntegrationEndpoints();
+app.MapItGlueMigrationEndpoints();
 app.MapAssetEndpoints();
 app.MapExpirationEndpoints();
 app.MapFlagEndpoints();

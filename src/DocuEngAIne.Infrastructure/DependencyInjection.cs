@@ -2,6 +2,7 @@ using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
 using DocuEngAIne.Infrastructure.Integrations;
+using DocuEngAIne.Infrastructure.Integrations.Migration;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,6 +24,7 @@ public static class DependencyInjection
         services.AddHttpClient(nameof(HttpMcpClient));
         services.AddScoped<IMcpClient, HttpMcpClient>();
         services.AddScoped<IIntegrationSyncService, IntegrationSyncService>();
+        services.AddScoped<IItGlueMigrationService, ItGlueMigrationService>();
         services.AddSingleton<IntegrationSyncRunner>();
         services.AddHostedService<IntegrationSyncHostedService>();
 
