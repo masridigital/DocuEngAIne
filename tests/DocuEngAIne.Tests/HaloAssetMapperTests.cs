@@ -118,8 +118,7 @@ public class HaloAssetMapperTests
     [Fact]
     public void MapAssets_PrefersInventoryNumberOverName()
     {
-        var laptop = Assert.Single(
-            HaloAssetMapper.MapAssets(CompactListFixture).Where(d => d.ExternalId == "101"));
+        var laptop = Assert.Single(HaloAssetMapper.MapAssets(CompactListFixture), d => d.ExternalId == "101");
         Assert.Equal("LAP-001", laptop.Name);
         Assert.NotEqual("Hippo Laptop", laptop.Name);
     }
