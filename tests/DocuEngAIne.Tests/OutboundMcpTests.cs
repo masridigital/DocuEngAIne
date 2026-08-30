@@ -59,6 +59,8 @@ public class OutboundMcpTests
                 AssetTypeId = typeA.Id,
                 CompanyId = companyA.Id,
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(14),
+                HaloAssetUrl = "https://halo.example/asset/own",
+                NinjaDeviceUrl = "https://ninja.example/devices/own",
             });
             dbA.Documents.Add(new Document
             {
@@ -104,6 +106,8 @@ public class OutboundMcpTests
                 AssetTypeId = typeB.Id,
                 CompanyId = companyB.Id,
                 ExpiresAt = DateTimeOffset.UtcNow.AddDays(3),
+                HaloAssetUrl = "https://halo.example/asset/secret",
+                NinjaDeviceUrl = "https://ninja.example/devices/secret",
             });
             dbB.Documents.Add(new Document
             {
@@ -239,7 +243,11 @@ public class OutboundMcpTests
             var assets = JsonSerializer.Serialize(
                 await DocuEngAIneMcpServer.InvokeToolAsync(DocuEngAIneMcpServer.ListAssets, null, db, user));
             Assert.Contains("A-Server", assets);
+            Assert.Contains("https://halo.example/asset/own", assets);
+            Assert.Contains("https://ninja.example/devices/own", assets);
             Assert.DoesNotContain("Poison-Server", assets);
+            Assert.DoesNotContain("halo.example/asset/secret", assets);
+            Assert.DoesNotContain("ninja.example/devices/secret", assets);
 
             var docs = JsonSerializer.Serialize(
                 await DocuEngAIneMcpServer.InvokeToolAsync(DocuEngAIneMcpServer.ListDocuments, null, db, user));
@@ -422,7 +430,11 @@ public class OutboundMcpTests
             Assert.Contains("A-Server", own);
             Assert.Contains("Warranty", own);
             Assert.Contains("2027-03-01", own);
+            Assert.Contains("https://halo.example/asset/own", own);
+            Assert.Contains("https://ninja.example/devices/own", own);
             Assert.DoesNotContain("Poison-Server", own);
+            Assert.DoesNotContain("halo.example/asset/secret", own);
+            Assert.DoesNotContain("ninja.example/devices/secret", own);
 
             var missing = await Assert.ThrowsAsync<McpToolException>(() =>
                 DocuEngAIneMcpServer.InvokeToolAsync(DocuEngAIneMcpServer.GetAsset, foreignArgs, db, user));

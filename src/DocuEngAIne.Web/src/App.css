@@ -371,6 +371,10 @@ details.advanced > summary {
   display: inline-block;
 }
 
+.data-table .portal-links {
+  margin: 0;
+}
+
 .related-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));

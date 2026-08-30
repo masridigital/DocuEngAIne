@@ -345,8 +345,21 @@ export function createFlag(input: { name: string; color: string; isActive?: bool
   return postJson<FlagDefinition>('/api/flags', input)
 }
 
+export type Asset = {
+  id: string
+  name: string
+  location?: string | null
+  status?: string | null
+  companyId?: string | null
+  expiresAt?: string | null
+  haloAssetUrl?: string | null
+  ninjaDeviceUrl?: string | null
+  externalIdsJson?: string | null
+  assetType?: string | null
+}
+
 export function useAssets() {
-  return useSWR('/api/assets', fetcher)
+  return useSWR<Asset[]>('/api/assets', fetcher)
 }
 
 export type DocumentFolder = {

@@ -142,7 +142,7 @@ Keep README direction: Azure AI Search + OpenAI RAG over documents, assets, runb
 2. UniFi + Blackpoint as MCP connectors
 3. Composio MCP as second harness — Kind + default Connect URL shipped; allowlist github/cloudflare/outlook/notion; ads/social skipped; no live mutations
 4. Sync schedules + SyncRun UI
-5. Asset external IDs + "open in Halo/Ninja" deep links (company portal URLs shipped)
+5. Asset external IDs + "open in Halo/Ninja" deep links (company portal URLs shipped; `Asset.ExternalIdsJson` + `HaloAssetUrl` / `NinjaDeviceUrl` shipped — sync not wired)
 
 ### Phase 2C — Doc quality & ops
 1. Relationships graph
@@ -200,7 +200,7 @@ Phase 2A is on `feature/integrations-mcp` (PR #1): Company, MCP registry, Integr
 Next:
 1. Halo company pull via Compact `halo_list_clients` shipped this slice. Still: Key Vault credentials for live Compact/Composio, then Ninja/CIPP/Meraki/UniFi pulls.
 2. CompanyId on document/runbook/Keeper create-edit (assets already accept it)
-3. Phase 2B: UniFi + Blackpoint MCP; sync schedules + SyncRun UI. Halo/Ninja company deep links shipped (`HaloPortalUrl` / `NinjaPortalUrl`).
+3. Phase 2B: UniFi + Blackpoint MCP; sync schedules + SyncRun UI. Halo/Ninja company deep links shipped (`HaloPortalUrl` / `NinjaPortalUrl`). Asset deep links shipped (`HaloAssetUrl` / `NinjaDeviceUrl` + `ExternalIdsJson`; sync not wired).
 4. Phase 2C: relationship graph, Azure AI Search, client portal, Hudu export import (passwords → Keeper only). Expirations + flags + runbook runs + process completion rollup shipped.
 5. Model snapshot reconciled (`Phase2IntegrationsReconcile`, empty `Up()`).
 
