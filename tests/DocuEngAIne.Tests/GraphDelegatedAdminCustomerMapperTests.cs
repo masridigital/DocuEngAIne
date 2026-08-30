@@ -155,9 +155,10 @@ public class GraphDelegatedAdminCustomerMapperTests
     {
         var args = GraphDelegatedAdminCustomerMapper.BuildArgumentsJson(
             nextLink: null, maxItems: 20000, filter: "startsWith(displayName,'Contoso')");
-        Assert.Contains("\"maxItems\":1000", args, StringComparison.Ordinal);
-        Assert.Contains("\"filter\":\"startsWith(displayName,'Contoso')\"", args, StringComparison.Ordinal);
-        Assert.DoesNotContain("nextLink", args, StringComparison.Ordinal);
+        using var doc = JsonDocument.Parse(args);
+        Assert.Equal(1000, doc.RootElement.GetProperty("maxItems").GetInt32());
+        Assert.Equal("startsWith(displayName,'Contoso')", doc.RootElement.GetProperty("filter").GetString());
+        Assert.False(doc.RootElement.TryGetProperty("nextLink", out _));
     }
 
     [Fact]
