@@ -417,8 +417,8 @@ public class RunbookTests
             var doc = await db.Documents.ForTenant(user).AsNoTracking().SingleAsync();
             Assert.Equal(created.Id, doc.Id);
             Assert.Equal(companyA, doc.CompanyId);
-            Assert.Equal(RunbookEndpoints.PromotedDocumentTitle("Onboard ExampleCo", done.FinishedAt!.Value), doc.Title);
-            Assert.Equal(RunbookEndpoints.PromotedDocumentSlug(runId), doc.Slug);
+            Assert.Equal($"Onboard ExampleCo — {done.FinishedAt!.Value.UtcDateTime:yyyy-MM-dd}", doc.Title);
+            Assert.Equal($"run-{runId:N}", doc.Slug);
             Assert.Contains("Status: Completed", doc.Content, StringComparison.Ordinal);
             Assert.Contains("1. Create tenant", doc.Content, StringComparison.Ordinal);
             Assert.Contains("Open the portal.", doc.Content, StringComparison.Ordinal);
