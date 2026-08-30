@@ -11,6 +11,7 @@ import { IntegrationsPage } from './pages/IntegrationsPage'
 import { KeeperPage } from './pages/KeeperPage'
 import { RunbooksPage } from './pages/RunbooksPage'
 import { RunsPage } from './pages/RunsPage'
+import { UsersPage } from './pages/UsersPage'
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
           <Route path="flags" element={<FlagsPage />} />
           <Route path="keeper" element={<KeeperPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
+          <Route path="users" element={<UsersPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

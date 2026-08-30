@@ -1,11 +1,12 @@
 import { useMsal } from '@azure/msal-react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import { useProfile } from '../hooks/useApi'
+import { canManageUsers, useProfile } from '../hooks/useApi'
 
 export function Layout() {
   const { data: profile, isLoading } = useProfile()
   const { instance } = useMsal()
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0]
+  const showUsers = canManageUsers(profile?.role)
 
   return (
     <div className="app-shell">
@@ -22,6 +23,7 @@ export function Layout() {
           <NavLink to="/flags">Flags</NavLink>
           <NavLink to="/keeper">Keeper</NavLink>
           <NavLink to="/integrations">Integrations</NavLink>
+          {showUsers ? <NavLink to="/users">Users</NavLink> : null}
         </nav>
         <div className="profile">
           <span>{isLoading ? '…' : profile?.displayName ?? profile?.email ?? account?.name ?? account?.username ?? 'Guest'}</span>
