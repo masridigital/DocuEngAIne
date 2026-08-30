@@ -176,20 +176,16 @@ GUID sentinel on those update records. Other-tenant company is still 400.
 
 Three things Joe called for. None started; recorded here so the shape is agreed before code.
 
-### 1. Expose DocuEngAIne's own MCP server to other harnesses
+### 1. Expose DocuEngAIne's own MCP server to other harnesses — **done in this pass**
 
-Today we are an MCP *client* (we call StackJack Compact). The ask is the other direction: publish our
-documentation as MCP tools so Claude, Cursor and other harnesses can read a client's assets, docs,
-runbooks, expirations and Keeper links directly.
+`POST /mcp` is a Streamable HTTP MCP server (GET `/mcp` documents it). Auth is a per-tenant API
+token (`POST/GET/DELETE /api/tokens`, hash stored, plaintext once), mapped onto `TokenCurrentUser`
+via `CurrentUserScope` so `ForTenant` works without a browser JWT. The sync scheduler keeps its
+own `BackgroundCurrentUser` / `IBackgroundTenantContext`; `CurrentUser` reads ambient token first,
+then Entra JWT, then the bound scheduler tenant.
 
-The hard part is not the protocol, it is the trust boundary. Every existing query is scoped by
-`ForTenant(currentUser)`, and `ICurrentUser` is derived from an Entra JWT on an HTTP request. An MCP
-client is not a browser session, so this needs its own auth path — most likely per-tenant API tokens
-or Entra client credentials — mapped onto a `ICurrentUser` a background/non-HTTP scope can supply.
-That same gap blocks the sync scheduler (below), so the two should be solved together, once.
-
-Read-only first. Keeper reveal must stay out of the tool surface, or be audit-logged exactly as the
-HTTP path is.
+Read-only tools: `list_companies`, `get_company`, `list_assets`, `list_documents`, `list_runbooks`,
+`list_expirations`, `list_keeper_links` (titles + URLs only). Keeper reveal is not a tool.
 
 ### 2. Promote content into documentation
 
@@ -218,6 +214,7 @@ something is:
   `POST /api/tenant/claim-owner`: if the tenant has zero active Owner/Admin users, the first
   authenticated caller becomes Owner; a second caller (or a tenant that already has an Owner) gets
   409. SQL `UPDATE` / Entra app roles remain available but are no longer the only path.
+  `/api/tokens` is on the same admin gate as `/api/integrations` and `/api/mcp/servers`.
 - **`ENTRA_CLIENT_ID`, `ENTRA_AUTHORITY` and `ENTRA_API_SCOPE` are baked into the SPA bundle at build
   time.** Missing secrets give a green build that ships a front end telling every visitor sign-in is not
   configured, while the API still requires a bearer token. CI now emits a warning annotation when any is

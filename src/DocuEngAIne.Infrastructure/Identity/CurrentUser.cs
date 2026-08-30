@@ -19,8 +19,14 @@ public class CurrentUser : ICurrentUser
     private ClaimsPrincipal? Principal => _httpContextAccessor.HttpContext?.User;
 
     /// <summary>
-    /// HTTP Entra identity wins when a request is authenticated. A bound background tenant is used
-    /// only when there is no browser session, so a scheduler scope never inherits another tenant's JWT.
+    /// Explicit ambient identity (an API token on <c>/mcp</c>) wins when set. MCP is not a browser
+    /// JWT, so <see cref="CurrentUserScope"/> is how that caller becomes <see cref="ICurrentUser"/>.
+    /// </summary>
+    private ICurrentUser? Ambient => CurrentUserScope.Current;
+
+    /// <summary>
+    /// Scheduler identity. Used only when there is no ambient token and no authenticated browser
+    /// session, so a background scope never inherits another tenant's JWT.
     /// </summary>
     private ICurrentUser? Background =>
         Principal?.Identity?.IsAuthenticated == true
@@ -29,17 +35,23 @@ public class CurrentUser : ICurrentUser
                 ? BackgroundCurrentUser.ForTenant(tenantId)
                 : null;
 
-    public bool IsAuthenticated => Principal?.Identity?.IsAuthenticated == true || Background is not null;
-    public string? ObjectId => Principal?.GetObjectId() ?? Background?.ObjectId;
-    public string? Email => Principal?.GetEmail() ?? Background?.Email;
-    public string? DisplayName => Principal?.GetDisplayName() ?? Background?.DisplayName;
+    public bool IsAuthenticated =>
+        Ambient?.IsAuthenticated == true
+        || Principal?.Identity?.IsAuthenticated == true
+        || Background is not null;
 
-    // TenantId is sourced from the signed-in user's claims (tid) on HTTP, or from the
-    // scheduler-bound BackgroundCurrentUser when there is no request.
+    public string? ObjectId => Ambient?.ObjectId ?? Principal?.GetObjectId() ?? Background?.ObjectId;
+    public string? Email => Ambient?.Email ?? Principal?.GetEmail() ?? Background?.Email;
+    public string? DisplayName => Ambient?.DisplayName ?? Principal?.GetDisplayName() ?? Background?.DisplayName;
+
+    // TenantId: ambient token, then Entra tid on HTTP, then the scheduler-bound tenant.
     public Guid? TenantId
     {
         get
         {
+            if (Ambient is not null)
+                return Ambient.TenantId;
+
             var tid = Principal?.FindFirst("tid")?.Value;
             if (Guid.TryParse(tid, out var id))
                 return id;
@@ -49,6 +61,9 @@ public class CurrentUser : ICurrentUser
 
     public bool HasRole(UserRole role)
     {
+        if (Ambient is not null)
+            return Ambient.HasRole(role);
+
         if (Principal?.Identity?.IsAuthenticated == true)
         {
             return role switch

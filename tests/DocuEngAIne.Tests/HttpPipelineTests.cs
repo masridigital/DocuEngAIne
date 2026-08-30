@@ -78,4 +78,73 @@ public class HttpPipelineTests : IClassFixture<TestHost>
 
         Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
     }
+
+    [Fact]
+    public async Task Tokens_Returns_403_For_Reader()
+    {
+        using var client = _host.CreateReaderClient();
+
+        var response = await client.GetAsync("/api/tokens");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Mcp_Get_Is_Anonymous_200()
+    {
+        using var client = _host.CreateAnonymousClient();
+
+        var response = await client.GetAsync("/mcp");
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var body = await response.Content.ReadAsStringAsync();
+        Assert.Contains("list_companies", body);
+        Assert.DoesNotContain("\"reveal\"", body, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Mcp_Post_Without_Token_Returns_401()
+    {
+        using var client = _host.CreateAnonymousClient();
+
+        var response = await client.PostAsJsonAsync("/mcp", new { jsonrpc = "2.0", id = "1", method = "initialize" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Mcp_Post_With_Browser_Jwt_And_No_Api_Token_Returns_401()
+    {
+        using var client = _host.CreateOwnerClient();
+
+        var response = await client.PostAsJsonAsync("/mcp", new { jsonrpc = "2.0", id = "1", method = "initialize" });
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Mcp_Post_With_Tenant_Token_Lists_Only_That_Tenant()
+    {
+        string plaintext;
+        using (var admin = _host.CreateOwnerClient())
+        {
+            var created = await admin.PostAsJsonAsync("/api/tokens", new CreateApiTokenRequest("pipeline"));
+            Assert.Equal(HttpStatusCode.Created, created.StatusCode);
+            var body = await created.Content.ReadFromJsonAsync<CreatedApiTokenResponse>();
+            Assert.NotNull(body);
+            plaintext = body.Token;
+        }
+
+        using var mcp = _host.CreateAnonymousClient();
+        mcp.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", plaintext);
+
+        var response = await mcp.PostAsJsonAsync(
+            "/mcp",
+            new { jsonrpc = "2.0", id = "1", method = "tools/call", @params = new { name = "list_companies", arguments = new { } } });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        var json = await response.Content.ReadAsStringAsync();
+        Assert.DoesNotContain("PoisonCo", json);
+        Assert.DoesNotContain("reveal", json, StringComparison.OrdinalIgnoreCase);
+    }
 }
