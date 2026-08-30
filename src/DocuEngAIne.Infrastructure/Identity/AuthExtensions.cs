@@ -15,8 +15,8 @@ public static class AuthExtensions
 {
     /// <summary>
     /// Name of the policy that gates tenant-administration surfaces (MCP server registry,
-    /// integration connections). Exposed as a constant so endpoint files bind to it by symbol
-    /// rather than by a string literal that can silently drift out of sync with this file.
+    /// integration connections, outbound API tokens). Exposed as a constant so endpoint files bind
+    /// to it by symbol rather than by a string literal that can silently drift out of sync with this file.
     /// </summary>
     public const string AdminPolicy = "RequireAdmin";
 

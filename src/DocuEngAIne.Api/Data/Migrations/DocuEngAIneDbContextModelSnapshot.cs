@@ -22,6 +22,56 @@ namespace DocuEngAIne.Api.Data.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.ApiToken", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedByObjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTimeOffset?>("LastUsedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset?>("RevokedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TokenHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("TokenPrefix")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TokenHash")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "Name");
+
+                    b.ToTable("ApiTokens");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Asset", b =>
                 {
                     b.Property<Guid>("Id")
@@ -1156,6 +1206,17 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.ToTable("Users");
                 });
 
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.ApiToken", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany("ApiTokens")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Asset", b =>
                 {
                     b.HasOne("DocuEngAIne.Core.Entities.AssetType", "AssetType")
@@ -1601,6 +1662,8 @@ namespace DocuEngAIne.Api.Data.Migrations
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Tenant", b =>
                 {
+                    b.Navigation("ApiTokens");
+
                     b.Navigation("AssetTypes");
 
                     b.Navigation("Assets");

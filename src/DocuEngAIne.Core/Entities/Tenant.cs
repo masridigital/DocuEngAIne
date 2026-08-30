@@ -21,4 +21,5 @@ public class Tenant : EntityBase
     public ICollection<McpServer> McpServers { get; set; } = [];
     public ICollection<IntegrationConnection> IntegrationConnections { get; set; } = [];
     public ICollection<FlagDefinition> FlagDefinitions { get; set; } = [];
+    public ICollection<ApiToken> ApiTokens { get; set; } = [];
 }

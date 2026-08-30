@@ -26,6 +26,8 @@ public static class ModelBuilderExtensions
             t.HasMany(x => x.McpServers).WithOne(m => m.Tenant).HasForeignKey(m => m.TenantId).OnDelete(DeleteBehavior.Cascade);
             t.HasMany(x => x.IntegrationConnections).WithOne(i => i.Tenant).HasForeignKey(i => i.TenantId).OnDelete(DeleteBehavior.Restrict);
             t.HasMany(x => x.FlagDefinitions).WithOne(f => f.Tenant).HasForeignKey(f => f.TenantId).OnDelete(DeleteBehavior.Cascade);
+            // Restrict: Tenant already cascades to Users / Companies / … — SQL Server forbids another cascade path.
+            t.HasMany(x => x.ApiTokens).WithOne(a => a.Tenant).HasForeignKey(a => a.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<Company>(c =>
@@ -208,6 +210,16 @@ public static class ModelBuilderExtensions
             a.HasIndex(x => x.TenantId);
             a.HasIndex(x => x.Action);
             a.HasIndex(x => x.CreatedAt);
+        });
+
+        modelBuilder.Entity<ApiToken>(a =>
+        {
+            a.Property(x => x.Name).HasMaxLength(200);
+            a.Property(x => x.TokenHash).HasMaxLength(64);
+            a.Property(x => x.TokenPrefix).HasMaxLength(16);
+            a.Property(x => x.CreatedByObjectId).HasMaxLength(128);
+            a.HasIndex(x => x.TokenHash).IsUnique();
+            a.HasIndex(x => new { x.TenantId, x.Name });
         });
     }
 }

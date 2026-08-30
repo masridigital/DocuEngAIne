@@ -41,6 +41,7 @@ tests/                      # xUnit + EF InMemory tests
 - **KeeperLink** — links to credentials in **Keeper**; no secrets are stored locally.
 - **ResourceRoleAssignment** — object-level RBAC overriding tenant-wide roles.
 - **AuditLog** — action trail (tenant-scoped where applicable).
+- **ApiToken** — per-tenant outbound MCP credential. SHA-256 hash stored; plaintext shown once at create. Restrict tenant FK.
 - **FlagDefinition / FlagAssignment** — named color labels on companies, assets, documents, runbooks, and Keeper links. Drive the review queue. No local secrets.
 - **ResourceLink** — directed related-item links between Company, Asset, Document, Runbook, and KeeperLink. Optional label. Not a graph visualization. `AssetDocumentLink` remains the asset↔document convenience. No local secrets.
 
@@ -186,7 +187,7 @@ dotnet ef migrations add MigrationName --project src/DocuEngAIne.Api --startup-p
 
 Production migrations are applied by the `migrate` job in `.github/workflows/azure-deploy.yml`, using an EF migrations bundle built during CI.
 
-> The EF model snapshot is caught up (`Phase2IntegrationsReconcile`, empty `Up()`). `PendingModelChangesWarning` is no longer suppressed.
+> The EF model snapshot is caught up (`Phase2IntegrationsReconcile`, empty `Up()`). `PendingModelChangesWarning` is no longer suppressed. `Phase2ApiTokens` (`20260830190000`) is additive on top of that snapshot.
 
 ## Health Checks
 
@@ -204,6 +205,18 @@ Production migrations are applied by the `migrate` job in `.github/workflows/azu
 | GET | `/api/tenant/settings` | Tenant settings |
 | POST | `/api/tenant/onboard` | Onboard tenant from Entra `tid` (grants the caller Owner; existing tenant → 409) |
 | POST | `/api/tenant/claim-owner` | Recover Owner when the tenant has zero active Owner/Admin users. First authenticated caller wins; a second caller (or any tenant that already has an Owner) → 409. |
+
+### API tokens (admin)
+
+Per-tenant credentials for the outbound MCP server. Not a browser JWT. Hash stored; plaintext returned once on create.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/tokens` | List tokens (`id`, `name`, `prefix`, timestamps). Never hash or plaintext. `ForTenant`. |
+| POST | `/api/tokens` | Create `{ name }`. Returns `{ token }` once. Tenant is the caller's, never a body field. |
+| DELETE | `/api/tokens/{id}` | Revoke. Other-tenant id → 404. Idempotent if already revoked. |
+
+**Admin only** (`RequireAdmin`).
 
 ### Companies
 
@@ -237,7 +250,22 @@ Production migrations are applied by the `migrate` job in `.github/workflows/azu
 
 The MCP client speaks Streamable HTTP: it runs the `initialize` handshake, echoes `Mcp-Session-Id` and `MCP-Protocol-Version`, sends `Accept: application/json, text/event-stream`, and unwraps `text/event-stream` replies. A configured `AuthSecretName` that cannot be resolved throws rather than sending an unauthenticated request.
 
-**Admin only.** `/api/mcp/servers`, `/api/integrations`, and `/api/migrations/itglue` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
+**Admin only.** `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, and `/api/tokens` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
+
+### Outbound MCP (`/mcp`)
+
+DocuEngAIne also *publishes* a read-only Streamable HTTP MCP server so other harnesses can read a tenant's companies, assets, documents, runbooks, expirations, and Keeper links.
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/mcp` | Protocol card (tools, auth). Anonymous documentation. |
+| POST | `/mcp` | JSON-RPC 2.0 (`initialize`, `tools/list`, `tools/call`, `ping`, `notifications/initialized`). |
+
+Auth is `Authorization: Bearer <api-token>` (or `X-Api-Token`). MCP is **not** a browser JWT. The token hashes to an `ApiToken` row and is mapped onto `ICurrentUser` (`TokenCurrentUser` / `CurrentUserScope`) so every query is `ForTenant`. A missing, revoked, or unknown token is 401.
+
+Read-only tools: `list_companies`, `get_company`, `list_assets`, `list_documents`, `list_runbooks`, `list_expirations`, `list_keeper_links` (titles and record URLs only). **Keeper reveal is not a tool.** `POST /api/keeper/{id}/reveal` remains the only reveal path and still audit-logs `KeeperLink.Reveal`.
+
+`Accept: application/json, text/event-stream` returns JSON. An event-stream-only Accept wraps the same JSON-RPC result as one `message` SSE event.
 
 MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint). **Composio** (`https://connect.composio.dev/mcp`) is the 1000+ app Connect MCP. Auth is `McpServer.AuthSecretName` (Key Vault name only).
 
@@ -347,9 +375,10 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 ## Security Notes
 
 - Tenant isolation is enforced at the API/query layer.
-- Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers`, `/api/integrations`, and `/api/migrations/itglue` require Admin/Owner.
+- Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, and `/api/tokens` require Admin/Owner.
 - `ResourceRoleAssignment` is enforced on asset, document, runbook and Keeper write routes (`POST`/`PUT`/`DELETE`) via `IResourceAuthorizationService`. A Contributor grant on one resource lets a Reader write that resource; without a grant they get 403. Tenant-wide Admin/Owner write without a grant. Creates still require a tenant-wide Contributor-or-above role.
-- **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every reveal is audit-logged.
+- **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every HTTP reveal is audit-logged. The outbound MCP surface does not expose reveal.
+- Outbound MCP tokens are stored as SHA-256 hashes. The plaintext is shown once at create.
 - Production Azure SQL uses **Active Directory Default** (DefaultAzureCredential / App Service managed identity). SQL auth remains the local-dev fallback via connection string / user-secrets. After deploy, run `infra/grant-sql-contained-user.sh` to create the contained database user for the App Service identity.
 - HTTPS only, TLS 1.2+, FTPS disabled, health checks exposed.
 
@@ -380,8 +409,9 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 - [x] Optional `Company.HaloPortalUrl` / `Company.NinjaPortalUrl` (Open in Halo / Open in Ninja)
 - [x] Cross-provider company convergence (`ExternalIdsJson` for every provider; match on provider id → domain → exact name; ambiguous keys refuse to merge)
+- [x] Outbound read-only MCP server (`/mcp`) + per-tenant API tokens (`/api/tokens`). Reveal is not a tool.
 
-> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`), `20260828044000_Phase2ParentCompany` (`Companies.ParentCompanyId`, `CompanyType`, `Nickname`, `Fax`, `Country`, `PostalCode`), `20260828045000_Phase2DocumentFolders` (`DocumentFolders`; `Documents.FolderId` Restrict; Parent Restrict; Company Restrict), `20260828050000_Phase2McpServerKind` (`McpServers.Kind`: StackJackCompact=0, Composio=1), and `20260828060000_Phase2StackJackPlan` (`IntegrationConnections.StackJackPlan`, `MonthlyCallLimit`, `PlanDetectedAt`, `SyncIntervalMinutesOverride`). Snapshot reconciled by empty `Phase2IntegrationsReconcile`.
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`), `20260828044000_Phase2ParentCompany` (`Companies.ParentCompanyId`, `CompanyType`, `Nickname`, `Fax`, `Country`, `PostalCode`), `20260828045000_Phase2DocumentFolders` (`DocumentFolders`; `Documents.FolderId` Restrict; Parent Restrict; Company Restrict), `20260828050000_Phase2McpServerKind` (`McpServers.Kind`: StackJackCompact=0, Composio=1), `20260828060000_Phase2StackJackPlan` (`IntegrationConnections.StackJackPlan`, `MonthlyCallLimit`, `PlanDetectedAt`, `SyncIntervalMinutesOverride`), empty `20260830181353_Phase2IntegrationsReconcile` (snapshot catch-up), and `20260830190000_Phase2ApiTokens` (`ApiTokens`; unique `TokenHash`; Tenant FK Restrict).
 
 
 ### Later
