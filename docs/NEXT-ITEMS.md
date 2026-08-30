@@ -59,7 +59,9 @@ schema change.
 hand-written migration on top of an already-stale model snapshot (item 2). Revisit once the
 snapshot is reconciled — if matching turns out to need an off switch.
 
-### 2. Reconcile the EF model snapshot
+### 2. Reconcile the EF model snapshot — **done** (`Phase2IntegrationsReconcile`, empty `Up()`)
+
+Snapshot now includes Companies / MCP / integration / sync tables and Phase 2 columns; `PendingModelChangesWarning` suppression is removed.
 
 `DocuEngAIneDbContextModelSnapshot.cs` has no `Companies`, `McpServers`, `IntegrationConnections`,
 `IntegrationMappings` or `SyncRuns` tables and no `Entities.Company` references at all;
