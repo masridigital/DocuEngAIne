@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.Json;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
@@ -325,5 +326,105 @@ public class HttpMcpClientTests
         Assert.Single(handler.Requests, r => r.Body.Contains("\"method\":\"notifications/initialized\""));
         Assert.Contains("\"method\":\"tools/list\"", handler.Requests[3].Body);
         Assert.Equal("session-abc", Header(handler.Requests[3].Headers, "Mcp-Session-Id"));
+    }
+
+    [Fact]
+    public async Task Initialize_Json_Rpc_Error_Throws_Without_Sending_Later_Requests()
+    {
+        var (db, user) = CreateDb();
+        var server = await SeedServerAsync(db, user);
+        var handler = new StubHandler()
+            .Enqueue(Json("""{"jsonrpc":"2.0","id":"0","error":{"code":-32602,"message":"Unsupported protocol version"}}"""));
+        var client = CreateClient(db, user, handler);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await client.CallToolAsync(server.Id, "halo_list_clients", null));
+
+        Assert.Contains("Unsupported protocol version", ex.Message);
+        Assert.Single(handler.Requests);
+        Assert.Contains("\"method\":\"initialize\"", handler.Requests[0].Body);
+    }
+
+    [Fact]
+    public async Task Tool_Call_Json_Rpc_Error_Surfaces_As_InvalidOperationException()
+    {
+        var (db, user) = CreateDb();
+        var server = await SeedServerAsync(db, user);
+        var handler = new StubHandler()
+            .Enqueue(InitializeOk())
+            .Enqueue(Accepted())
+            .Enqueue(Json("""{"jsonrpc":"2.0","id":"1","error":{"code":-32603,"message":"halo_list_clients is not available"}}"""));
+        var client = CreateClient(db, user, handler);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await client.CallToolAsync(server.Id, "halo_list_clients", null));
+
+        Assert.Contains("halo_list_clients is not available", ex.Message);
+    }
+
+    [Fact]
+    public async Task Tool_Call_IsError_Surfaces_As_InvalidOperationException()
+    {
+        var (db, user) = CreateDb();
+        var server = await SeedServerAsync(db, user);
+        var handler = new StubHandler()
+            .Enqueue(InitializeOk())
+            .Enqueue(Accepted())
+            .Enqueue(Json("""{"jsonrpc":"2.0","id":"1","result":{"isError":true,"content":[{"type":"text","text":"connector not subscribed"}]}}"""));
+        var client = CreateClient(db, user, handler);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await client.CallToolAsync(server.Id, "halo_list_clients", null));
+
+        Assert.Contains("connector not subscribed", ex.Message);
+    }
+
+    [Fact]
+    public async Task Sse_Wrapped_Json_Rpc_Error_Surfaces_As_InvalidOperationException()
+    {
+        var (db, user) = CreateDb();
+        var server = await SeedServerAsync(db, user);
+        var sse = "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":\"1\",\"error\":{\"code\":-32000,\"message\":\"sse boom\"}}\n\n";
+        var handler = new StubHandler()
+            .Enqueue(InitializeOk())
+            .Enqueue(Accepted())
+            .Enqueue(Sse(sse));
+        var client = CreateClient(db, user, handler);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await client.CallToolAsync(server.Id, "halo_list_clients", null));
+
+        Assert.Contains("sse boom", ex.Message);
+    }
+
+    [Fact]
+    public async Task Sse_Unwrapped_Body_Is_Json_Mappers_Can_Read()
+    {
+        var (db, user) = CreateDb();
+        var server = await SeedServerAsync(db, user);
+        var inner = """{"clients":[{"id":12,"name":"Masri","inactive":false}]}""";
+        var rpc = JsonSerializer.Serialize(new
+        {
+            jsonrpc = "2.0",
+            id = "1",
+            result = new
+            {
+                content = new[] { new { type = "text", text = inner } },
+            },
+        });
+        var sse = ": keep-alive\nevent: message\ndata: " + rpc + "\n\n";
+        var handler = new StubHandler()
+            .Enqueue(InitializeOk())
+            .Enqueue(Accepted())
+            .Enqueue(Sse(sse));
+        var client = CreateClient(db, user, handler);
+
+        var result = await client.CallToolAsync(server.Id, "halo_list_clients", null);
+
+        using var doc = JsonDocument.Parse(result);
+        Assert.Equal(JsonValueKind.Object, doc.RootElement.ValueKind);
+        var company = Assert.Single(HaloClientMapper.MapClients(result));
+        Assert.Equal("12", company.ExternalId);
+        Assert.Equal("Masri", company.Name);
     }
 }
