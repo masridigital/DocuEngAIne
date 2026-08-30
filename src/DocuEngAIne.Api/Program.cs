@@ -68,6 +68,7 @@ app.MapTenantEndpoints();
 app.MapCompanyEndpoints();
 app.MapIntegrationEndpoints();
 app.MapItGlueMigrationEndpoints();
+app.MapHuduMigrationEndpoints();
 app.MapAssetEndpoints();
 app.MapExpirationEndpoints();
 app.MapFlagEndpoints();

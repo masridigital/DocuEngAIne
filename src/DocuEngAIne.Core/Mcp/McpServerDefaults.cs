@@ -32,6 +32,11 @@ public static class McpServerDefaults
     /// Providers whose live pulls run through StackJack Compact rather than a vendor REST API. Compact
     /// is built in for these: an admin supplies a Key Vault secret name and the tenant's Compact
     /// registration is resolved — or created once — on their behalf.
+    ///
+    /// Hudu is not an <see cref="IntegrationProvider"/> at all. Compact exposes a <c>hudu_</c>
+    /// connector (list companies / list articles / list folders / get article, plus password tools
+    /// we must never call). Those endpoints exist only for the one-shot admin import at
+    /// <c>POST /api/migrations/hudu</c> — not for the recurring SyncAsync company-pull switch.
     /// </summary>
     public static bool IsCompactBacked(IntegrationProvider provider) => provider switch
     {
@@ -48,6 +53,21 @@ public static class McpServerDefaults
             or IntegrationProvider.Slide => true,
         _ => false,
     };
+
+    /// <summary>Compact catalog prefix for the Hudu connector. Migrate-only; not a live provider.</summary>
+    public const string HuduToolPrefix = "hudu_";
+
+    /// <summary>Compact <c>hudu_list_companies</c> — page / pageSize, vendor JSON passthrough.</summary>
+    public const string HuduListCompaniesTool = "hudu_list_companies";
+
+    /// <summary>Compact <c>hudu_list_articles</c> — page / pageSize. List is summaries; content may need get.</summary>
+    public const string HuduListArticlesTool = "hudu_list_articles";
+
+    /// <summary>Compact <c>hudu_get_article</c> — full HTML content for one article id.</summary>
+    public const string HuduGetArticleTool = "hudu_get_article";
+
+    /// <summary>Compact <c>hudu_list_folders</c> — KB folder names used as company DocumentFolder names.</summary>
+    public const string HuduListFoldersTool = "hudu_list_folders";
 
     public static string EndpointFor(McpServerKind kind) => kind switch
     {

@@ -31,7 +31,7 @@ tests/                      # xUnit + EF InMemory tests
 ## Domain Model
 
 - **Tenant** — isolation boundary; seeded from the Entra `tid` claim on first login.
-- **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets. Every provider's external id is also recorded in `ExternalIdsJson`, which is how sync converges Halo/Ninja/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint/DefensX/Pax8/Slide onto one company instead of one per connection. One-shot IT Glue import stamps `ExternalIdsJson` key `itglue` the same way; IT Glue is **not** a live `IntegrationProvider`.
+- **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets. Every provider's external id is also recorded in `ExternalIdsJson`, which is how sync converges Halo/Ninja/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint/DefensX/Pax8/Slide onto one company instead of one per connection. One-shot IT Glue / Hudu imports stamp `ExternalIdsJson` keys `itglue` and `hudu` the same way; neither is a live `IntegrationProvider`.
 - **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry (StackJack Compact or Composio) and PSA/RMM sync. Secrets live in Key Vault names only.
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
 - **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
@@ -246,7 +246,7 @@ Per-tenant credentials for the outbound MCP server. Not a browser JWT. Hash stor
 | PUT | `/api/integrations/{id}` | Update connection and sync-policy bools |
 | DELETE | `/api/integrations/{id}` | Delete connection |
 | POST | `/api/integrations/{id}/test` | Test MCP/config |
-| POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8, or Slide live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` / `action1_list_organizations` / `at_list_companies` / `compassone_list_tenants` / `dfx_list_customers` / `pax8_list_companies` / `slide_list_clients`), or payload upsert. NinjaOne additionally pulls `ninja_list_devices` into Computer Assets unless `SkipAssets`. Other-tenant → 404 |
+| POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8, or Slide live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` / `action1_list_organizations` / `at_list_companies` / `compassone_list_tenants` / `dfx_list_customers` / `pax8_list_companies` / `slide_list_clients`), or payload upsert. NinjaOne additionally pulls `ninja_list_devices` into Computer Assets unless `SkipAssets`. Other-tenant → 404. IT Glue and Hudu are **not** live providers — use `POST /api/migrations/itglue` and `POST /api/migrations/hudu`. |
 | GET | `/api/integrations/{id}/runs` | Recent sync runs |
 | GET | `/api/integrations/{id}/mappings` | External→local mappings |
 
@@ -261,7 +261,7 @@ The MCP client speaks Streamable HTTP: it runs the `initialize` handshake, echoe
 
 See [`docs/LLM.md`](docs/LLM.md) for `LLM__Provider`, `LLM__Ollama__BaseUrl`, `TogetherApiKey`, and `AnthropicApiKey`.
 
-**Admin only.** `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, and `/api/tokens` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
+**Admin only.** `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, `/api/migrations/hudu`, and `/api/tokens` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
 
 ### Outbound MCP (`/mcp`)
 
@@ -286,11 +286,12 @@ Company matching (`CompanyIdentity` / `CompanyMatchIndex`): before creating a co
 
 ### One-time migrations
 
-IT Glue is **not** a live company-sync system of record. There is no `IntegrationProvider.ITGlue` and no recurring Compact pull. The endpoint exists only to migrate into DocuEngAIne. Passwords are never stored (Keeper remains the vault). Files live under `Integrations/Migration/` and are named `ItGlue*` so a later Hudu importer can sit beside them.
+IT Glue and Hudu are **not** live company-sync systems of record. There is no `IntegrationProvider` for either and no recurring Compact pull. The endpoints exist only to migrate into DocuEngAIne. Passwords are never stored (Keeper remains the vault). Files live under `Integrations/Migration/` and are named `ItGlue*` and `Hudu*` so the two importers sit beside each other.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/migrations/itglue` | Admin one-shot import. Body: `{ mcpServerId }` (Compact `itg_list_organizations`) **or** a JSON:API `payload` / raw `{ data: [{ id, type: organizations, attributes: { name } }] }` fixture. Organizations → `Company` via `CompanyIdentity` (`ExternalIdsJson` key `itglue`). Documents / flexible assets → `Document` / `Asset` with secret traits stripped. Idempotent on IT Glue ids. Other-tenant `mcpServerId` → 404. |
+| POST | `/api/migrations/hudu` | **One-shot admin mapper.** Body: tenant Compact `mcpServerId` plus Compact-shaped `companies` / `articles` JSON (`hudu_list_companies` / `hudu_list_articles` catalog schema, sanitized fixtures). Companies converge on `ExternalIdsJson` key `hudu`. Articles become Documents in a company folder named from Hudu. Password entities are skipped (Keeper is the vault). Other-tenant or non-Compact server → 404. Not an `IntegrationProvider` and not on SyncAsync. Tests never call Compact Hudu tools. |
 
 ### Assets
 
@@ -409,7 +410,7 @@ SPA stub: `/portal` and `/portal/:companyId`. Enable a company with `portalEnabl
 ## Security Notes
 
 - Tenant isolation is enforced at the API/query layer.
-- Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, and `/api/tokens` require Admin/Owner.
+- Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, `/api/migrations/hudu`, and `/api/tokens` require Admin/Owner.
 - `ResourceRoleAssignment` is enforced on asset, document, runbook and Keeper write routes (`POST`/`PUT`/`DELETE`) via `IResourceAuthorizationService`. A Contributor grant on one resource lets a Reader write that resource; without a grant they get 403. Tenant-wide Admin/Owner write without a grant. Creates still require a tenant-wide Contributor-or-above role.
 - **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every HTTP reveal is audit-logged. The outbound MCP surface and the client portal do not expose reveal. The portal returns Keeper titles only.
 - Outbound MCP tokens are stored as SHA-256 hashes. The plaintext is shown once at create.
@@ -463,4 +464,4 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Client portal skeleton (`GET /api/portal`, `/portal`) — documents, expirations, Keeper metadata; no reveal; `ForTenant`; `PortalEnabled`
 - [x] Switch SQL auth to managed identity (production AD Default; local SQL auth / user-secrets unchanged; contained user via `infra/grant-sql-contained-user.sh`)
 - [x] One-time IT Glue migrate-only import (`POST /api/migrations/itglue`; Compact or JSON:API fixture; passwords never stored)
-- [ ] One-time Hudu export migration (passwords → Keeper only)
+- [x] One-time Hudu mapper (`POST /api/migrations/hudu`, Compact-shaped `hudu_list_companies` / `hudu_list_articles` JSON from catalog schema and sanitized fixtures; passwords skipped — Keeper only; tests never call Compact)
