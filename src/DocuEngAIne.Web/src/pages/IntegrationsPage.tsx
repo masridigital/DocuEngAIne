@@ -138,6 +138,7 @@ function IntegrationHistory({ integrationId }: { integrationId: string }) {
           <thead>
             <tr>
               <th>Status</th>
+              <th>Provider</th>
               <th>Started</th>
               <th>Finished</th>
               <th>Created</th>
@@ -152,6 +153,7 @@ function IntegrationHistory({ integrationId }: { integrationId: string }) {
                 <td>
                   <span className={`tag ${syncStatusClass(r.status)}`}>{r.status}</span>
                 </td>
+                <td>{r.provider || '—'}</td>
                 <td>{formatTimestamp(r.startedAt)}</td>
                 <td>{formatTimestamp(r.finishedAt)}</td>
                 <td>{r.itemsCreated ?? 0}</td>

@@ -466,6 +466,7 @@ export type SyncRunStatus = 'Running' | 'Succeeded' | 'Failed' | 'Partial'
 export type SyncRun = {
   id: string
   integrationConnectionId: string
+  provider?: string | null
   startedAt: string
   finishedAt?: string | null
   status: SyncRunStatus | string
