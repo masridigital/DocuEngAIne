@@ -12,6 +12,7 @@ import {
   updateIntegration,
   useIntegrationMappings,
   useIntegrations,
+  useLlmConfig,
   useMcpServers,
   useSyncRuns,
   type IntegrationConnection,
@@ -208,6 +209,28 @@ function IntegrationHistory({ integrationId }: { integrationId: string }) {
         </>
       )}
     </div>
+  )
+}
+
+function LlmSettingsReadout() {
+  const { data, error, isLoading } = useLlmConfig()
+
+  return (
+    <section className="panel">
+      <h2>LLM</h2>
+      <p className="muted">
+        Provider and model come from app settings and Key Vault. They cannot be changed here.
+      </p>
+      {isLoading && <p>Loading…</p>}
+      {error && <p className="error">Failed to load LLM config.</p>}
+      {data && (
+        <p>
+          Provider: <strong>{data.provider}</strong>
+          {' · '}
+          Model: <strong>{data.model}</strong>
+        </p>
+      )}
+    </section>
   )
 }
 
@@ -435,6 +458,8 @@ export function IntegrationsPage() {
       </p>
       {message && <p className="banner">{message}</p>}
       {errorMessage && <p className="error">{errorMessage}</p>}
+
+      <LlmSettingsReadout />
 
       <section className="panel">
         <h2>Integrations</h2>

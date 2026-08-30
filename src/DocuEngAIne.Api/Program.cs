@@ -81,6 +81,7 @@ app.MapUserEndpoints();
 app.MapResourceAccessEndpoints();
 app.MapApiTokenEndpoints();
 app.MapOutboundMcpEndpoints();
+app.MapLlmEndpoints();
 
 app.UseDefaultFiles();
 app.UseStaticFiles();

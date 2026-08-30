@@ -3,6 +3,7 @@ using System.Security.Claims;
 using System.Text.Encodings.Web;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
+using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
@@ -58,6 +59,9 @@ public sealed class TestHost : WebApplicationFactory<Program>
                 ["EntraId:Authority"] = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000001/v2.0",
                 ["EntraId:Audience"] = "api://docuengaine-pipeline-tests",
                 ["Azure:KeyVault:VaultUri"] = "",
+                ["Llm:Provider"] = "Ollama",
+                ["Llm:Model"] = "llama3.1",
+                ["Llm:Ollama:BaseUrl"] = "http://127.0.0.1:11434",
             });
         });
 
@@ -71,6 +75,11 @@ public sealed class TestHost : WebApplicationFactory<Program>
                 .AddScheme<AuthenticationSchemeOptions, TestAuthHandler>(
                     TestAuthHandler.SchemeName,
                     _ => { });
+
+            // Never let pipeline tests reach a live LLM. The stub is a singleton so endpoint
+            // tests can inspect the last call after the request scope is disposed.
+            services.AddSingleton<StubLlmClient>();
+            services.AddSingleton<ILlmClient>(sp => sp.GetRequiredService<StubLlmClient>());
 
             services.PostConfigure<AuthenticationOptions>(options =>
             {
@@ -99,6 +108,8 @@ public sealed class TestHost : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("EntraId__Authority", "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000001/v2.0");
         Environment.SetEnvironmentVariable("EntraId__Audience", "api://docuengaine-pipeline-tests");
         Environment.SetEnvironmentVariable("Azure__KeyVault__VaultUri", "");
+        Environment.SetEnvironmentVariable("TogetherApiKey", "");
+        Environment.SetEnvironmentVariable("AnthropicApiKey", "");
     }
 
     public HttpClient CreateAnonymousClient() => CreateClient();

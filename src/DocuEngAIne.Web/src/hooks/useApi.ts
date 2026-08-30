@@ -486,6 +486,16 @@ export function useIntegrations() {
   return useSWR<IntegrationConnection[]>('/api/integrations', fetcher)
 }
 
+export type LlmConfig = {
+  provider: string
+  model: string
+}
+
+/** Current LLM provider and model from appsettings / Key Vault. Never includes API keys. */
+export function useLlmConfig() {
+  return useSWR<LlmConfig>('/api/llm/config', fetcher)
+}
+
 export type SyncRunStatus = 'Running' | 'Succeeded' | 'Failed' | 'Partial'
 
 export type SyncRun = {
