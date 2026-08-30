@@ -220,6 +220,36 @@ public static class CompanyEndpoints
         return exists ? null : Results.BadRequest("Company not found.");
     }
 
+    /// <summary>
+    /// Applies a company attachment on update. <paramref name="companyId"/> <c>null</c> with
+    /// <paramref name="companyIdClear"/> false leaves the stored value unchanged. Detach with
+    /// <paramref name="companyIdClear"/> true or the empty GUID sentinel. A real id is validated
+    /// through <see cref="EnsureCompanyInTenantAsync"/> (other-tenant → 400).
+    /// </summary>
+    public static async Task<IResult?> ApplyCompanyIdOnUpdateAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        Guid? companyId,
+        bool companyIdClear,
+        Action<Guid?> assign,
+        CancellationToken cancellationToken = default)
+    {
+        if (companyIdClear || companyId == Guid.Empty)
+        {
+            assign(null);
+            return null;
+        }
+
+        if (companyId is not Guid id)
+            return null;
+
+        if (await EnsureCompanyInTenantAsync(db, user, id, cancellationToken) is { } badCompany)
+            return badCompany;
+
+        assign(id);
+        return null;
+    }
+
     public static async Task<IResult?> EnsureParentCompanyInTenantAsync(
         DocuEngAIneDbContext db,
         ICurrentUser user,

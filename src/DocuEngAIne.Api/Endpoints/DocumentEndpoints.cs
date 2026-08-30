@@ -284,10 +284,10 @@ public static class DocumentEndpoints
         if (doc is null)
             return Results.NotFound();
 
-        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+        if (await CompanyEndpoints.ApplyCompanyIdOnUpdateAsync(
+                db, user, request.CompanyId, request.CompanyIdClear, value => doc.CompanyId = value, cancellationToken)
+            is { } badCompany)
             return badCompany;
-        if (request.CompanyId is Guid companyId)
-            doc.CompanyId = companyId;
 
         if (await FolderEndpoints.EnsureFolderInTenantAsync(db, user, request.FolderId, cancellationToken) is { } badFolder)
             return badFolder;
@@ -349,6 +349,7 @@ public record UpdateDocumentRequest(
     bool? IsPublished,
     string? ChangeNote,
     Guid? CompanyId = null,
-    Guid? FolderId = null);
+    Guid? FolderId = null,
+    bool CompanyIdClear = false);
 
 public record RestoreVersionRequest(Guid VersionId);

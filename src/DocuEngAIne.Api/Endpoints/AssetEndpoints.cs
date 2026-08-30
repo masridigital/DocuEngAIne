@@ -183,28 +183,7 @@ public static class AssetEndpoints
         if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
             return denied;
 
-        var asset = await db.Assets
-            .ForTenant(user)
-            .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
-
-        if (asset is null)
-            return Results.NotFound();
-
-        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
-            return badCompany;
-        if (request.CompanyId is Guid companyId)
-            asset.CompanyId = companyId;
-
-        asset.Name = request.Name ?? asset.Name;
-        asset.Location = request.Location ?? asset.Location;
-        asset.Notes = request.Notes ?? asset.Notes;
-        asset.Status = request.Status ?? asset.Status;
-        asset.AssetTypeId = request.AssetTypeId ?? asset.AssetTypeId;
-        if (request.ExpiresAt.HasValue)
-            asset.ExpiresAt = request.ExpiresAt;
-
-        await db.SaveChangesAsync(cancellationToken);
-        return Results.NoContent();
+        return await UpdateAsync(id, request, db, user, cancellationToken);
     }
 
     public static async Task<IResult> DeleteAsync(
@@ -225,6 +204,37 @@ public static class AssetEndpoints
             return Results.NotFound();
 
         db.Assets.Remove(asset);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
+    }
+
+    public static async Task<IResult> UpdateAsync(
+        Guid id,
+        UpdateAssetRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var asset = await db.Assets
+            .ForTenant(user)
+            .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+
+        if (asset is null)
+            return Results.NotFound();
+
+        if (await CompanyEndpoints.ApplyCompanyIdOnUpdateAsync(
+                db, user, request.CompanyId, request.CompanyIdClear, value => asset.CompanyId = value, cancellationToken)
+            is { } badCompany)
+            return badCompany;
+
+        asset.Name = request.Name ?? asset.Name;
+        asset.Location = request.Location ?? asset.Location;
+        asset.Notes = request.Notes ?? asset.Notes;
+        asset.Status = request.Status ?? asset.Status;
+        asset.AssetTypeId = request.AssetTypeId ?? asset.AssetTypeId;
+        if (request.ExpiresAt.HasValue)
+            asset.ExpiresAt = request.ExpiresAt;
+
         await db.SaveChangesAsync(cancellationToken);
         return Results.NoContent();
     }
@@ -325,4 +335,4 @@ public record CreateAssetTypeRequest(string Name, string? Description, string? I
 public record AssetTypeFieldRequest(string Name, string Type, bool IsRequired, bool IsExpiration = false);
 public record UpdateFieldDefinitionRequest(string? Name = null, string? FieldType = null, bool? IsRequired = null, bool? IsExpiration = null, int? SortOrder = null);
 public record CreateAssetRequest(string Name, Guid AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null, DateTimeOffset? ExpiresAt = null);
-public record UpdateAssetRequest(string? Name, Guid? AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null, DateTimeOffset? ExpiresAt = null);
+public record UpdateAssetRequest(string? Name, Guid? AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null, DateTimeOffset? ExpiresAt = null, bool CompanyIdClear = false);

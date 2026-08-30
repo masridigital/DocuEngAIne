@@ -159,10 +159,10 @@ public static class KeeperLinkEndpoints
         if (link is null)
             return Results.NotFound();
 
-        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+        if (await CompanyEndpoints.ApplyCompanyIdOnUpdateAsync(
+                db, user, request.CompanyId, request.CompanyIdClear, value => link.CompanyId = value, cancellationToken)
+            is { } badCompany)
             return badCompany;
-        if (request.CompanyId is Guid companyId)
-            link.CompanyId = companyId;
 
         link.Name = request.Name ?? link.Name;
         link.UsernameHint = request.UsernameHint ?? link.UsernameHint;
@@ -209,4 +209,5 @@ public record UpdateKeeperLinkRequest(
     string? Notes,
     string? AssociatedResourceType,
     Guid? AssociatedResourceId,
-    Guid? CompanyId = null);
+    Guid? CompanyId = null,
+    bool CompanyIdClear = false);
