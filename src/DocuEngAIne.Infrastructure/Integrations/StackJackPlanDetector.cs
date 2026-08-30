@@ -33,6 +33,7 @@ public static class StackJackPlanDetector
         IntegrationProvider.Meraki => "Meraki",
         IntegrationProvider.UniFi => "UniFi",
         IntegrationProvider.Action1 => "Action1",
+        IntegrationProvider.Autotask => "Autotask",
         IntegrationProvider.Blackpoint => "CompassOne",
         _ => null,
     };

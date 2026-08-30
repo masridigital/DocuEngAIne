@@ -52,6 +52,7 @@ public class StackJackPlanTests
         // Our enum says NinjaOne; StackJack calls it NinjaRMM. A naive name match finds nothing.
         Assert.Equal("NinjaRMM", StackJackPlanDetector.ConnectorName(IntegrationProvider.NinjaOne));
         Assert.Equal("Action1", StackJackPlanDetector.ConnectorName(IntegrationProvider.Action1));
+        Assert.Equal("Autotask", StackJackPlanDetector.ConnectorName(IntegrationProvider.Autotask));
 
         var ninja = StackJackPlanDetector.FindConnector(LiveSessionInfoFixture, IntegrationProvider.NinjaOne);
         Assert.NotNull(ninja);

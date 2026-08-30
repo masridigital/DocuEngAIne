@@ -196,6 +196,22 @@ public class IntegrationSyncService : IIntegrationSyncService
             }
         }
 
+        if (connection.Provider == IntegrationProvider.Autotask)
+        {
+            if (await ResolveMcpServerIdAsync(connection, cancellationToken) is not Guid mcpId)
+                return await FailRunAsync(connection, CompactServerMissing("Autotask"), cancellationToken);
+
+            try
+            {
+                var companies = await PullAutotaskCompaniesAsync(mcpId, cancellationToken);
+                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                return await FailRunAsync(connection, ex.Message, cancellationToken);
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(connection.AuthSecretName) && connection.McpServerId is null)
         {
             return await FailRunAsync(connection,
@@ -737,6 +753,20 @@ public class IntegrationSyncService : IIntegrationSyncService
             throw new InvalidOperationException("Action1 organization pull requires a StackJack Compact MCP server. Composio is not an Action1 connector.");
 
         return await Action1OrganizationMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<ExternalCompanyDto>> PullAutotaskCompaniesAsync(
+        Guid mcpServerId,
+        CancellationToken cancellationToken)
+    {
+        var server = await _db.McpServers.ForTenant(_user)
+            .FirstOrDefaultAsync(s => s.Id == mcpServerId, cancellationToken)
+            ?? throw new InvalidOperationException("MCP server not found.");
+
+        if (server.Kind != McpServerKind.StackJackCompact)
+            throw new InvalidOperationException("Autotask company pull requires a StackJack Compact MCP server. Composio is not an Autotask connector.");
+
+        return await AutotaskCompanyMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
     }
 
     /// <summary>Overwrites local company detail only when the connection opts in. Default is refuse-to-clobber.</summary>

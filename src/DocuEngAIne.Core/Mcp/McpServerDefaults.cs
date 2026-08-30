@@ -28,7 +28,8 @@ public static class McpServerDefaults
             or IntegrationProvider.Cipp
             or IntegrationProvider.Meraki
             or IntegrationProvider.UniFi
-            or IntegrationProvider.Action1 => true,
+            or IntegrationProvider.Action1
+            or IntegrationProvider.Autotask => true,
         _ => false,
     };
 

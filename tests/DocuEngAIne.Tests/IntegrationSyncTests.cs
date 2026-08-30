@@ -1563,4 +1563,186 @@ public class IntegrationSyncTests
             Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
         }
     }
+
+    private sealed class RecordingAutotaskMcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public string CompaniesJson { get; init; } = AutotaskCompanyMapperTests.LastPageFixture;
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            var inner = CompaniesJson;
+            if (!string.IsNullOrWhiteSpace(argumentsJson)
+                && argumentsJson.Contains("nextPageUrl", StringComparison.Ordinal))
+            {
+                inner = AutotaskCompanyMapperTests.EmptyItemsFixture;
+            }
+
+            var body = JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                id = "1",
+                result = new { content = new[] { new { type = "text", text = inner } } },
+            });
+            return Task.FromResult(body);
+        }
+    }
+
+    private static async Task<(McpServer Server, IntegrationConnection Connection)> SeedAutotaskCompactAsync(
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool skipInactive = true, bool updateCompanyDetails = false)
+    {
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            Transport = McpTransport.Http,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.Autotask,
+            DisplayName = "Autotask",
+            McpServerId = server.Id,
+            SkipInactive = skipInactive,
+            UpdateCompanyDetails = updateCompanyDetails,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+        return (server, connection);
+    }
+
+    [Fact]
+    public async Task Autotask_SyncAsync_Creates_Company_And_Mapping_From_Id_Zero()
+    {
+        var mcp = new RecordingAutotaskMcp { CompaniesJson = AutotaskCompanyMapperTests.LastPageFixture };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedAutotaskCompactAsync(db, user, skipInactive: false);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(2, run.ItemsCreated);
+        Assert.Equal(0, run.ItemsSkipped);
+        Assert.Equal("at_list_companies", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(server.Id, mcp.Calls[0].ServerId);
+        Assert.Contains("\"maxRecords\":50", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("nextPageUrl", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("at_list_active_companies", mcp.Calls.Select(c => c.Tool));
+        Assert.DoesNotContain("at_list_customer_companies", mcp.Calls.Select(c => c.Tool));
+
+        var companies = await db.Companies.OrderBy(c => c.Name).ToListAsync();
+        Assert.Equal(2, companies.Count);
+
+        var pcc = Assert.Single(companies, c => c.Name == "Pacific Cloud Cyber");
+        Assert.Equal("PCC", pcc.Slug);
+        Assert.Equal("Salem", pcc.City);
+        Assert.Equal("Oregon", pcc.State);
+        Assert.Equal("222 Comercial St", pcc.Address);
+        Assert.Null(pcc.Website);
+        Assert.Null(pcc.HaloClientId);
+        Assert.Null(pcc.NinjaOrganizationId);
+        Assert.Equal("0", CompanyIdentity.ReadExternalIds(pcc.ExternalIdsJson)["autotask"]);
+
+        var mapping = Assert.Single(await db.IntegrationMappings.Where(m => m.ExternalId == "0").ToListAsync());
+        Assert.Equal("company", mapping.ExternalType);
+        Assert.Equal(pcc.Id, mapping.LocalEntityId);
+    }
+
+    [Fact]
+    public async Task Autotask_SkipInactive_Drops_IsActive_False()
+    {
+        var mcp = new RecordingAutotaskMcp { CompaniesJson = AutotaskCompanyMapperTests.LastPageFixture };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedAutotaskCompactAsync(db, user, skipInactive: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsCreated);
+        Assert.Equal(1, run.ItemsSkipped);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("Pacific Cloud Cyber", company.Name);
+        Assert.Equal("0", CompanyIdentity.ReadExternalIds(company.ExternalIdsJson)["autotask"]);
+        Assert.DoesNotContain(await db.Companies.ToListAsync(), c => c.Name == "Autotask Corporation");
+        Assert.DoesNotContain(await db.IntegrationMappings.ToListAsync(), m => m.ExternalId == "174");
+    }
+
+    [Fact]
+    public async Task Autotask_SyncAsync_Missing_McpServerId_Fails_Without_Calling_Mcp()
+    {
+        var mcp = new RecordingAutotaskMcp { CompaniesJson = AutotaskCompanyMapperTests.LastPageFixture };
+        var (db, user, sync) = Create(mcp);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.Autotask,
+            DisplayName = "Autotask",
+            AuthSecretName = "kv-name-only",
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        Assert.Contains("McpServerId", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Key Vault", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
+        Assert.Empty(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Autotask_Other_Tenant_Connection_Sync_Returns_404_And_Does_Not_Call_Mcp()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var mcp = new RecordingAutotaskMcp { CompaniesJson = AutotaskCompanyMapperTests.LastPageFixture };
+
+        Guid connectionBId;
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var server = new McpServer
+            {
+                TenantId = tenantB,
+                Name = "Compact B",
+                Kind = McpServerKind.StackJackCompact,
+                EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            };
+            dbB.McpServers.Add(server);
+            var connection = new IntegrationConnection
+            {
+                TenantId = tenantB,
+                Provider = IntegrationProvider.Autotask,
+                DisplayName = "Autotask B",
+                McpServerId = server.Id,
+            };
+            dbB.IntegrationConnections.Add(connection);
+            await dbB.SaveChangesAsync();
+            connectionBId = connection.Id;
+        }
+
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var sync = new IntegrationSyncService(dbA, userA, mcp, new NoopAudit());
+            var result = await IntegrationEndpoints.SyncAsync(connectionBId, null, sync, dbA, userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+            Assert.Empty(mcp.Calls);
+            Assert.Empty(await dbA.IntegrationConnections.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.SyncRuns.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
+        }
+    }
 }
