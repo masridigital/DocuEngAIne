@@ -11,4 +11,5 @@ public enum IntegrationProvider
     Meraki = 6,
     Composio = 7,
     Action1 = 8,
+    Autotask = 9,
 }

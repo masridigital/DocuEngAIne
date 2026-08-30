@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DocuEngAIne.Tests;
 
 /// <summary>
-/// Halo, NinjaOne, CIPP, Meraki, UniFi and Action1 each own their own mapping rows. Without a match step
+/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1 and Autotask each own their own mapping rows. Without a match step
 /// the same client is created once per connection. These cover the convergence path.
 /// </summary>
 public class CompanyConvergenceTests
@@ -222,6 +222,39 @@ public class CompanyConvergenceTests
         Assert.Equal(2, mappings.Count);
         Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
         Assert.Contains(mappings, m => m.ExternalId == "4702a030-5f67-11f0-9cb3-e3f0bda36034");
+    }
+
+    [Fact]
+    public async Task Autotask_Adopts_The_Company_Already_Created_And_Records_ExternalId()
+    {
+        var (db, user, sync) = Create();
+        var halo = await AddConnectionAsync(db, user, IntegrationProvider.Halo);
+        await sync.SyncFromPayloadAsync(halo.Id, [
+            new ExternalCompanyDto("halo-100", "Pacific Cloud Cyber")
+        ]);
+
+        var autotask = await AddConnectionAsync(db, user, IntegrationProvider.Autotask);
+        var autotaskRun = await sync.SyncFromPayloadAsync(autotask.Id, [
+            new ExternalCompanyDto("0", "Pacific Cloud Cyber", Slug: "PCC", City: "Salem", State: "Oregon", Address: "222 Comercial St")
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, autotaskRun.Status);
+        Assert.Equal(0, autotaskRun.ItemsCreated);
+        Assert.Equal(1, autotaskRun.ItemsUpdated);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("halo-100", company.HaloClientId);
+        Assert.Null(company.NinjaOrganizationId);
+
+        var ids = CompanyIdentity.ReadExternalIds(company.ExternalIdsJson);
+        Assert.Equal("halo-100", ids["halo"]);
+        Assert.Equal("0", ids["autotask"]);
+
+        var mappings = await db.IntegrationMappings.ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
+        var autotaskMapping = Assert.Single(mappings, m => m.ExternalId == "0");
+        Assert.Contains(CompanyMatchIndex.MatchedByName, autotaskMapping.MetadataJson!, StringComparison.Ordinal);
     }
 
     [Fact]

@@ -42,7 +42,7 @@ function formatTimestamp(value?: string | null) {
  * Providers the API resolves — or registers once — StackJack Compact for, so creating one needs
  * nothing but a Key Vault secret name. Mirrors McpServerDefaults.IsCompactBacked on the server.
  */
-const builtInCompactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Action1']
+const builtInCompactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Action1', 'Autotask']
 
 /** "44m", "12h", "30d" — short enough for a table cell. */
 function formatInterval(minutes: number) {
@@ -409,7 +409,7 @@ export function IntegrationsPage() {
     <div className="page">
       <h1>Integrations</h1>
       <p>
-        StackJack Compact is built in. Pick a provider — Halo, NinjaOne, CIPP, Meraki, UniFi or Action1 — and give the
+        StackJack Compact is built in. Pick a provider — Halo, NinjaOne, CIPP, Meraki, UniFi, Action1 or Autotask — and give the
         Key Vault secret name holding this tenant&rsquo;s Compact API key; the Compact MCP server is registered
         the first time and reused after that. A secret name is never a secret value: nothing but the name is stored.
         Composio, CustomMcp and Blackpoint still need a server registered under Advanced.
@@ -484,7 +484,7 @@ export function IntegrationsPage() {
           </table>
         )}
 
-        <p>Halo company pull uses Compact <code>halo_list_clients</code>. NinjaOne company pull uses Compact <code>ninja_list_organizations</code>. CIPP tenant pull uses Compact <code>cipp_list_tenants</code>. Meraki organization pull uses Compact <code>meraki_get_organizations</code> (orgs → companies; networks later). UniFi console pull uses Compact <code>unifi_sm_list_hosts</code> (hosts → companies; not sites). Action1 organization pull uses Compact <code>action1_list_organizations</code> (skips the MSP default organization). Sync policy defaults skip inactive accounts and refuse overwriting company details.</p>
+        <p>Halo company pull uses Compact <code>halo_list_clients</code>. NinjaOne company pull uses Compact <code>ninja_list_organizations</code>. CIPP tenant pull uses Compact <code>cipp_list_tenants</code>. Meraki organization pull uses Compact <code>meraki_get_organizations</code> (orgs → companies; networks later). UniFi console pull uses Compact <code>unifi_sm_list_hosts</code> (hosts → companies; not sites). Action1 organization pull uses Compact <code>action1_list_organizations</code> (skips the MSP default organization). Autotask company pull uses Compact <code>at_list_companies</code> (not the active/customer pre-filters; <code>SkipInactive</code> drops <code>isActive</code> false). Sync policy defaults skip inactive accounts and refuse overwriting company details.</p>
         <form onSubmit={onCreateIntegration}>
           <div className="form-grid">
             <label>
@@ -503,6 +503,7 @@ export function IntegrationsPage() {
                 <option value="Cipp">CIPP</option>
                 <option value="Meraki">Meraki</option>
                 <option value="Action1">Action1</option>
+                <option value="Autotask">Autotask</option>
                 <option value="UniFi">UniFi</option>
                 <option value="Blackpoint">Blackpoint</option>
                 <option value="Composio">Composio</option>
