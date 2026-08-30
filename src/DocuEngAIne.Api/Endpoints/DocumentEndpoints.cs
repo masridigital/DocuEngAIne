@@ -96,6 +96,7 @@ public static class DocumentEndpoints
         });
 
         group.MapPost("/{id:guid}/restore", RestoreAsync);
+        group.MapPost("/{id:guid}/assist", AssistAsync);
 
         return app;
     }
@@ -318,6 +319,112 @@ public static class DocumentEndpoints
         await db.SaveChangesAsync(cancellationToken);
         return Results.NoContent();
     }
+
+    /// <summary>
+    /// Technician-only LLM preview (and optional apply) for one tenant document.
+    /// Default is preview: the model output is not written as a <see cref="DocumentVersion"/>.
+    /// </summary>
+    public static async Task<IResult> AssistAsync(
+        Guid id,
+        [FromBody] DocumentAssistRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        ILlmClient llm,
+        IAuditService audit,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
+            return denied;
+
+        if (request.Action is not DocumentAssistAction.Summarize and not DocumentAssistAction.Rewrite)
+            return Results.BadRequest("action must be summarize or rewrite.");
+
+        var query = db.Documents.ForTenant(user);
+        if (request.Apply)
+            query = query.Include(d => d.Versions.OrderByDescending(v => v.VersionNumber).Take(1));
+
+        var doc = await query.FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
+        if (doc is null)
+            return Results.NotFound();
+
+        var messages = BuildAssistMessages(doc, request);
+
+        try
+        {
+            var result = await llm.ChatAsync(messages, options: null, cancellationToken);
+
+            await audit.LogAsync(
+                "Document.Assist",
+                nameof(Document),
+                doc.Id,
+                $"action={request.Action} provider={result.Provider} model={result.Model} apply={request.Apply}",
+                cancellationToken);
+
+            if (request.Apply)
+            {
+                ApplyAssistResult(db, doc, request.Action.Value, result.Content);
+                await db.SaveChangesAsync(cancellationToken);
+            }
+
+            return Results.Ok(new DocumentAssistResponse(result.Content, result.Model, result.Provider.ToString()));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(ex.Message);
+        }
+    }
+
+    internal const string AssistSystemPrompt =
+        "You are assisting a technician with MSP documentation. Use only the document they provide. "
+        + "Do not invent credentials, secrets, passwords, API keys, or other sensitive values. "
+        + "Do not include secrets in your reply.";
+
+    internal static IReadOnlyList<LlmMessage> BuildAssistMessages(Document doc, DocumentAssistRequest request)
+    {
+        var actionLine = request.Action == DocumentAssistAction.Rewrite
+            ? "Rewrite the document. Follow any additional instruction from the technician."
+            : "Summarize the document clearly and concisely.";
+
+        var messages = new List<LlmMessage>
+        {
+            new("system", $"{AssistSystemPrompt} {actionLine}"),
+            new("user", doc.Content ?? string.Empty),
+        };
+
+        if (request.Action == DocumentAssistAction.Rewrite
+            && !string.IsNullOrWhiteSpace(request.Instruction))
+        {
+            messages.Add(new LlmMessage("user", request.Instruction.Trim()));
+        }
+
+        return messages;
+    }
+
+    private static void ApplyAssistResult(
+        DocuEngAIneDbContext db,
+        Document doc,
+        DocumentAssistAction action,
+        string content)
+    {
+        var nextVersionNumber = (doc.Versions.Max(v => (int?)v.VersionNumber) ?? 0) + 1;
+        db.DocumentVersions.Add(new DocumentVersion
+        {
+            DocumentId = doc.Id,
+            VersionNumber = nextVersionNumber,
+            Title = doc.Title,
+            Slug = doc.Slug,
+            Summary = doc.Summary,
+            Content = doc.Content,
+            Tags = doc.Tags,
+            ChangeNote = $"LLM {action.ToString().ToLowerInvariant()}",
+        });
+
+        if (action == DocumentAssistAction.Summarize)
+            doc.Summary = content;
+        else
+            doc.Content = content;
+    }
 }
 
 public sealed record DocumentListItem(
@@ -353,3 +460,16 @@ public record UpdateDocumentRequest(
     bool CompanyIdClear = false);
 
 public record RestoreVersionRequest(Guid VersionId);
+
+public enum DocumentAssistAction
+{
+    Summarize,
+    Rewrite,
+}
+
+public sealed record DocumentAssistRequest(
+    DocumentAssistAction? Action,
+    string? Instruction = null,
+    bool Apply = false);
+
+public sealed record DocumentAssistResponse(string Content, string Model, string Provider);

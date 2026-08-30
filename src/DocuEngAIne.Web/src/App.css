@@ -570,6 +570,25 @@ details.advanced > summary {
   color: var(--text);
 }
 
+.assist-preview {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+
+.assist-preview p {
+  margin: 0;
+}
+
+.assist-preview pre {
+  white-space: pre-wrap;
+  margin: 8px 0 0;
+  font: inherit;
+  font-size: 0.9rem;
+}
+
 @media (max-width: 720px) {
   .kb-layout {
     grid-template-columns: 1fr;

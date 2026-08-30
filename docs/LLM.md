@@ -1,6 +1,6 @@
 # LLM providers
 
-Tenant-scoped chat completion used later for document assist. Chat bodies are **not** stored in SQL. Provider selection is app configuration / Key Vault only — there is no settings write API.
+Tenant-scoped chat completion and document assist. Chat bodies are **not** stored in SQL. Document assist defaults to preview; `apply: true` snapshots the current article as a `DocumentVersion` and writes the model output onto the document. Provider selection is app configuration / Key Vault only — there is no settings write API.
 
 ## Providers
 
@@ -48,8 +48,11 @@ Authenticated technician routes (same `RequireAuthorization` gate as documents):
 |---|---|---|
 | GET | `/api/llm/config` | `{ provider, model }` — no secrets |
 | POST | `/api/llm/chat` | `{ messages, model? }` → `{ content, model, provider }` |
+| POST | `/api/documents/{id}/assist` | `{ action: "summarize" \| "rewrite", instruction?, apply? }` → `{ content, model, provider }` |
 
 `messages` is `{ role, content }[]`. A successful chat is audit-logged as `Llm.Chat` with provider and model only — not the prompt or completion.
+
+Document assist loads the article with `ForTenant` (404 if missing) and uses the same technician write gate as other document writes (403). The model receives an MSP-documentation system prompt (no secrets, no invented credentials) and the document body as the user turn. Rewrite may send an extra user turn with `instruction`. `apply` defaults to `false` (preview only). `apply: true` creates a version snapshot of the current article, then writes the model output to `Summary` (summarize) or `Content` (rewrite). Assist is audit-logged as `Document.Assist` with action, provider, model, and apply — not the prompt or completion.
 
 ## Local Ollama
 

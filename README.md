@@ -44,7 +44,7 @@ tests/                      # xUnit + EF InMemory tests
 - **ApiToken** — per-tenant outbound MCP credential. SHA-256 hash stored; plaintext shown once at create. Restrict tenant FK.
 - **FlagDefinition / FlagAssignment** — named color labels on companies, assets, documents, runbooks, and Keeper links. Drive the review queue. No local secrets.
 - **ResourceLink** — directed related-item links between Company, Asset, Document, Runbook, and KeeperLink. Optional label. `GET /api/companies/{id}/graph` returns nodes + edges for that company (`ForTenant`). Not a Hudu visualization. `AssetDocumentLink` remains the asset↔document convenience. No local secrets.
-- **LLM** — tenant-scoped chat completion (`ILlmClient`) for later doc assist. Providers: Ollama (self-hosted default), Together AI, Anthropic. Config / Key Vault only; chat bodies are not persisted. See [`docs/LLM.md`](docs/LLM.md).
+- **LLM** — tenant-scoped chat completion (`ILlmClient`) and document assist (`POST /api/documents/{id}/assist`). Providers: Ollama (self-hosted default), Together AI, Anthropic. Config / Key Vault only; chat bodies are not persisted. Assist defaults to preview. See [`docs/LLM.md`](docs/LLM.md).
 
 All tenant-scoped queries use `ForTenant(currentUser)`; `SaveChangesAsync` stamps `TenantId` and audit timestamps automatically.
 
@@ -428,6 +428,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 ### Later
 - [x] Company relationship graph (`GET /api/companies/{id}/graph` nodes+edges from ResourceLink; Companies page Relationships section)
 - [x] LLM providers (Ollama default, Together, Anthropic) — `ILlmClient`, `/api/llm/chat`, `/api/llm/config`
+- [x] Document assist (`POST /api/documents/{id}/assist` summarize/rewrite via `ILlmClient`; preview by default)
 - [ ] Azure AI Search + Azure OpenAI RAG
 - [ ] UniFi / Blackpoint as MCP connectors
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
