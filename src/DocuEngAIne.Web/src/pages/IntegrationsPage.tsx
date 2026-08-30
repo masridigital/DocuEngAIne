@@ -484,7 +484,7 @@ export function IntegrationsPage() {
           </table>
         )}
 
-        <p>Halo company pull uses Compact <code>halo_list_clients</code>. NinjaOne company pull uses Compact <code>ninja_list_organizations</code>. CIPP tenant pull uses Compact <code>cipp_list_tenants</code>. Meraki organization pull uses Compact <code>meraki_get_organizations</code> (orgs → companies; networks later). UniFi sync implementations come later. Sync policy defaults skip inactive accounts and refuse overwriting company details.</p>
+        <p>Halo company pull uses Compact <code>halo_list_clients</code>. NinjaOne company pull uses Compact <code>ninja_list_organizations</code>. CIPP tenant pull uses Compact <code>cipp_list_tenants</code>. Meraki organization pull uses Compact <code>meraki_get_organizations</code> (orgs → companies; networks later). UniFi console pull uses Compact <code>unifi_sm_list_hosts</code> (hosts → companies; not sites). Sync policy defaults skip inactive accounts and refuse overwriting company details.</p>
         <form onSubmit={onCreateIntegration}>
           <div className="form-grid">
             <label>

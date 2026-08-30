@@ -202,7 +202,7 @@ Production migrations are applied by the `migrate` job in `.github/workflows/azu
 | PUT | `/api/integrations/{id}` | Update connection and sync-policy bools |
 | DELETE | `/api/integrations/{id}` | Delete connection |
 | POST | `/api/integrations/{id}/test` | Test MCP/config |
-| POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, CIPP, or Meraki live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations`), or payload upsert. NinjaOne additionally pulls `ninja_list_devices` into Computer Assets unless `SkipAssets`. Other-tenant → 404 |
+| POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, CIPP, Meraki, or UniFi live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts`), or payload upsert. NinjaOne additionally pulls `ninja_list_devices` into Computer Assets unless `SkipAssets`. Other-tenant → 404 |
 | GET | `/api/integrations/{id}/runs` | Recent sync runs |
 | GET | `/api/integrations/{id}/mappings` | External→local mappings |
 
@@ -335,7 +335,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Company (client space) distinct from Entra tenant
 - [x] MCP server registry + IntegrationConnection (Key Vault secrets)
 - [x] First-class MCP kinds: StackJack Compact (`https://compact.stackjack.io/mcp`) and Composio (`https://connect.composio.dev/mcp`)
-- [x] HaloPSA + NinjaOne + CIPP + Meraki company pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` → `SyncFromPayload`); UniFi registry only
+- [x] HaloPSA + NinjaOne + CIPP + Meraki + UniFi company pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` → `SyncFromPayload`)
 - [x] SPA: Companies + Integrations (Compact vs Composio; Halo/Ninja/CIPP/Meraki/UniFi point at Compact)
 - [x] Company overview related lists (assets/docs/runbooks/Keeper)
 - [x] GET MCP server and integration by id; SQL cascade fix
