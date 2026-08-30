@@ -184,8 +184,9 @@ via `CurrentUserScope` so `ForTenant` works without a browser JWT. The sync sche
 own `BackgroundCurrentUser` / `IBackgroundTenantContext`; `CurrentUser` reads ambient token first,
 then Entra JWT, then the bound scheduler tenant.
 
-Read-only tools: `list_companies`, `get_company`, `list_assets`, `list_documents`, `list_runbooks`,
-`list_expirations`, `list_keeper_links` (titles + URLs only). Keeper reveal is not a tool.
+Read-only tools: `list_companies`, `get_company`, `list_assets`, `get_asset`, `list_documents`,
+`list_runbooks`, `list_expirations`, `list_keeper_links` (titles + URLs only). Keeper reveal is not a
+tool.
 
 ### 2. Promote content into documentation
 

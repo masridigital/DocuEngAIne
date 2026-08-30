@@ -264,7 +264,7 @@ DocuEngAIne also *publishes* a read-only Streamable HTTP MCP server so other har
 
 Auth is `Authorization: Bearer <api-token>` (or `X-Api-Token`). MCP is **not** a browser JWT. The token hashes to an `ApiToken` row and is mapped onto `ICurrentUser` (`TokenCurrentUser` / `CurrentUserScope`) so every query is `ForTenant`. A missing, revoked, or unknown token is 401.
 
-Read-only tools: `list_companies`, `get_company`, `list_assets`, `list_documents`, `list_runbooks`, `list_expirations`, `list_keeper_links` (titles and record URLs only). **Keeper reveal is not a tool.** `POST /api/keeper/{id}/reveal` remains the only reveal path and still audit-logs `KeeperLink.Reveal`.
+Read-only tools: `list_companies`, `get_company`, `list_assets`, `get_asset`, `list_documents`, `list_runbooks`, `list_expirations`, `list_keeper_links` (titles and record URLs only). **Keeper reveal is not a tool.** `POST /api/keeper/{id}/reveal` remains the only reveal path and still audit-logs `KeeperLink.Reveal`.
 
 `Accept: application/json, text/event-stream` returns JSON. An event-stream-only Accept wraps the same JSON-RPC result as one `message` SSE event.
 

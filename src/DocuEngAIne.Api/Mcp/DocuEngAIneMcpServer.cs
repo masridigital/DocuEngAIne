@@ -21,6 +21,7 @@ public static class DocuEngAIneMcpServer
     public const string ListCompanies = "list_companies";
     public const string GetCompany = "get_company";
     public const string ListAssets = "list_assets";
+    public const string GetAsset = "get_asset";
     public const string ListDocuments = "list_documents";
     public const string ListRunbooks = "list_runbooks";
     public const string ListExpirations = "list_expirations";
@@ -59,6 +60,15 @@ public static class DocuEngAIneMcpServer
             {
                 companyId = new { type = "string", description = "Optional company filter. Other-tenant ids yield an empty list." },
                 q = new { type = "string", description = "Optional name search." },
+            },
+        }),
+        new(GetAsset, "Get one asset by id, including custom fields. Other-tenant or unknown ids are not found.", new
+        {
+            type = "object",
+            required = new[] { "assetId" },
+            properties = new
+            {
+                assetId = new { type = "string", description = "Asset id (GUID)." },
             },
         }),
         new(ListDocuments, "List published documents in the authenticated tenant.", new
@@ -183,6 +193,7 @@ public static class DocuEngAIneMcpServer
             ListCompanies => await ListCompaniesAsync(arguments, db, user, cancellationToken),
             GetCompany => await GetCompanyAsync(arguments, db, user, cancellationToken),
             ListAssets => await ListAssetsAsync(arguments, db, user, cancellationToken),
+            GetAsset => await GetAssetAsync(arguments, db, user, cancellationToken),
             ListDocuments => await ListDocumentsAsync(arguments, db, user, cancellationToken),
             ListRunbooks => await ListRunbooksAsync(arguments, db, user, cancellationToken),
             ListExpirations => await ListExpirationsAsync(arguments, db, user, cancellationToken),
@@ -322,6 +333,44 @@ public static class DocuEngAIneMcpServer
             })
             .ToListAsync(cancellationToken);
         return items;
+    }
+
+    private static async Task<object> GetAssetAsync(
+        JsonElement? arguments,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken)
+    {
+        var assetId = ReadGuid(arguments, "assetId")
+            ?? throw new McpToolException("assetId is required.");
+
+        var asset = await db.Assets.ForTenant(user).AsNoTracking()
+            .Include(a => a.AssetType)
+                .ThenInclude(t => t!.Fields)
+            .Include(a => a.CustomFieldValues)
+                .ThenInclude(v => v.FieldDefinition)
+            .FirstOrDefaultAsync(a => a.Id == assetId, cancellationToken);
+        if (asset is null)
+            throw new McpToolException("Asset not found.");
+
+        return new
+        {
+            asset.Id,
+            asset.Name,
+            asset.Location,
+            asset.Status,
+            asset.Notes,
+            asset.CompanyId,
+            asset.ExpiresAt,
+            AssetType = new { asset.AssetType?.Id, asset.AssetType?.Name },
+            Fields = asset.CustomFieldValues.Select(v => new
+            {
+                v.FieldDefinition?.Name,
+                v.FieldDefinition?.FieldType,
+                v.Value,
+            }),
+            asset.UpdatedAt,
+        };
     }
 
     private static async Task<object> ListDocumentsAsync(
