@@ -29,7 +29,8 @@ public static class McpServerDefaults
             or IntegrationProvider.Autotask
             or IntegrationProvider.Blackpoint
             or IntegrationProvider.DefensX
-            or IntegrationProvider.Pax8 => true,
+            or IntegrationProvider.Pax8
+            or IntegrationProvider.Slide => true,
         _ => false,
     };
 
