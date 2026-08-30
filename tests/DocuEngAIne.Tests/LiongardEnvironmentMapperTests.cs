@@ -9,7 +9,7 @@ public class LiongardEnvironmentMapperTests
     // Catalog/docs fixture for liongard_list_environments (v2 GET). Field names match Liongard's
     // EnvironmentResponse: Data[] + Pagination. No live Compact; no PII.
     public const string CatalogListFixture = """
-        {"Success":true,"Data":[{"ID":8888,"ServiceProviderID":1,"Name":"Contoso Nation","ShortName":"CN","Description":"Example Description","Status":1,"Visible":true,"Website":"contoso.com","Tier":{"Type":"Core","CanDowngrade":false,"AssociatedInspectors":14}},{"ID":12,"ServiceProviderID":1,"Name":"Inactive Co","ShortName":"INC","Description":"","Status":0,"Visible":true,"Website":""}],"Pagination":{"TotalRows":126,"HasMoreRows":true,"CurrentPage":1,"TotalPages":3,"PageSize":50}}
+        {"Success":true,"Data":[{"ID":8888,"ServiceProviderID":1,"Name":"Contoso Nation","ShortName":"CN","Description":"Example Description","Status":1,"Visible":true,"Website":"contoso.com","Tier":{"Type":"Core","CanDowngrade":false,"AssociatedInspectors":14}},{"ID":12,"ServiceProviderID":1,"Name":"Inactive Co","ShortName":"INC","Description":"","Status":0,"Visible":true,"Website":""},{"ID":13,"ServiceProviderID":1,"Name":"Archive Co","ShortName":"ARC","Description":"","Status":"Archive","Visible":true,"Website":""}],"Pagination":{"TotalRows":126,"HasMoreRows":true,"CurrentPage":1,"TotalPages":3,"PageSize":50}}
         """;
 
     // Same two documented rows, last page — HasMoreRows false so a Recording MCP that always returns this body stops.
@@ -41,13 +41,11 @@ public class LiongardEnvironmentMapperTests
         var companies = LiongardEnvironmentMapper.MapEnvironments(
             CatalogListFixture, out var hasMore, out var currentPage, out var totalPages, out var rowCount);
 
-        Assert.Equal(2, rowCount);
+        Assert.Equal(3, rowCount);
         Assert.True(hasMore);
         Assert.Equal(1, currentPage);
         Assert.Equal(3, totalPages);
-        Assert.Equal(2, companies.Count);
-
-        var contoso = companies[0];
+        var contoso = Assert.Single(companies);
         Assert.Equal("8888", contoso.ExternalId);
         Assert.Equal("Contoso Nation", contoso.Name);
         Assert.Equal("CN", contoso.Slug);
@@ -57,28 +55,29 @@ public class LiongardEnvironmentMapperTests
         Assert.Null(contoso.City);
         Assert.Null(contoso.State);
         Assert.Null(contoso.Address);
-
-        var inactive = companies[1];
-        Assert.Equal("12", inactive.ExternalId);
-        Assert.Equal("Inactive Co", inactive.Name);
-        Assert.Equal("INC", inactive.Slug);
-        Assert.Null(inactive.Website);
-        Assert.True(inactive.IsInactive);
+        Assert.DoesNotContain(companies, c => c.Name == "Inactive Co");
+        Assert.DoesNotContain(companies, c => c.Name == "Archive Co");
         Assert.DoesNotContain(companies, c => string.Equals(c.Name, "Core", StringComparison.Ordinal));
         Assert.DoesNotContain("Example Description", companies.Select(c => c.Name));
     }
 
     [Fact]
-    public void MapEnvironments_StatusStringActiveInactive_MapsIsInactive()
+    public void MapEnvironments_SkipsArchiveAndInactive_KeepsActive()
     {
         const string json = """
-            {"Success":true,"Data":[{"ID":1,"Name":"Active Co","Status":"Active"},{"ID":2,"Name":"Inactive Co","Status":"Inactive"}]}
+            {"Success":true,"Data":[{"ID":1,"Name":"Active Co","Status":"Active"},{"ID":2,"Name":"Inactive Co","Status":"Inactive"},{"ID":3,"Name":"Archive Co","Status":"Archive"},{"ID":4,"Name":"Archived Co","Status":"Archived"},{"ID":5,"Name":"Zero Status","Status":0}]}
             """;
 
-        var companies = LiongardEnvironmentMapper.MapEnvironments(json);
-        Assert.Equal(2, companies.Count);
-        Assert.False(Assert.Single(companies, c => c.Name == "Active Co").IsInactive);
-        Assert.True(Assert.Single(companies, c => c.Name == "Inactive Co").IsInactive);
+        var companies = LiongardEnvironmentMapper.MapEnvironments(json, out _, out _, out _, out var rowCount);
+        Assert.Equal(5, rowCount);
+        var active = Assert.Single(companies);
+        Assert.Equal("1", active.ExternalId);
+        Assert.Equal("Active Co", active.Name);
+        Assert.False(active.IsInactive);
+        Assert.DoesNotContain(companies, c => c.Name == "Inactive Co");
+        Assert.DoesNotContain(companies, c => c.Name == "Archive Co");
+        Assert.DoesNotContain(companies, c => c.Name == "Archived Co");
+        Assert.DoesNotContain(companies, c => c.Name == "Zero Status");
     }
 
     [Fact]
@@ -112,12 +111,14 @@ public class LiongardEnvironmentMapperTests
         });
 
         var companies = LiongardEnvironmentMapper.MapEnvironments(wrapped);
-        Assert.Equal(2, companies.Count);
-        Assert.Equal("8888", companies[0].ExternalId);
-        Assert.Equal("Contoso Nation", companies[0].Name);
-        Assert.Equal("CN", companies[0].Slug);
-        Assert.Equal("contoso.com", companies[0].Website);
-        Assert.False(companies[0].IsInactive);
+        var contoso = Assert.Single(companies);
+        Assert.Equal("8888", contoso.ExternalId);
+        Assert.Equal("Contoso Nation", contoso.Name);
+        Assert.Equal("CN", contoso.Slug);
+        Assert.Equal("contoso.com", contoso.Website);
+        Assert.False(contoso.IsInactive);
+        Assert.DoesNotContain(companies, c => c.Name == "Inactive Co");
+        Assert.DoesNotContain(companies, c => c.Name == "Archive Co");
     }
 
     [Fact]
@@ -191,10 +192,10 @@ public class LiongardEnvironmentMapperTests
         var mcp = new ScriptedMcp([LastPageFixture]);
         var companies = await LiongardEnvironmentMapper.PullAsync(mcp, Guid.NewGuid(), pageSize: 25);
 
-        Assert.Equal(2, companies.Count);
-        Assert.Equal("Contoso Nation", companies[0].Name);
-        Assert.Equal("8888", companies[0].ExternalId);
-        Assert.Equal("Inactive Co", companies[1].Name);
+        var contoso = Assert.Single(companies);
+        Assert.Equal("Contoso Nation", contoso.Name);
+        Assert.Equal("8888", contoso.ExternalId);
+        Assert.DoesNotContain(companies, c => c.Name == "Inactive Co");
         Assert.Single(mcp.Calls);
         Assert.Equal(LiongardEnvironmentMapper.ToolName, mcp.Calls[0].Tool);
         Assert.Contains("\"page\":1", mcp.Calls[0].Args, StringComparison.Ordinal);

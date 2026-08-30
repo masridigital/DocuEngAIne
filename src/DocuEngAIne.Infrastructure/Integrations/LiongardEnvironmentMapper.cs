@@ -10,14 +10,15 @@ namespace DocuEngAIne.Infrastructure.Integrations;
 /// definitions, not customers) and do not call <c>liongard_get_environment</c>.
 /// Vendor envelope is <c>{ "Success": true, "Data": [ environment, ... ], "Pagination": { ... } }</c>.
 /// Each environment uses <c>ID</c> (integer), <c>Name</c>, optional <c>ShortName</c> (slug),
-/// optional <c>Website</c>, and <c>Status</c> (1 / <c>Active</c> → active; 0 / <c>Inactive</c> →
-/// inactive). Skip rows missing <c>ID</c> or <c>Name</c>. Ignore <c>Description</c>, <c>Parent</c>,
+/// and optional <c>Website</c>. Skip rows missing <c>ID</c> or <c>Name</c>, and skip
+/// Archive / inactive (<c>Status</c> 0, <c>Inactive</c>, <c>Archive</c>, <c>Archived</c>).
+/// <c>Status</c> 1 / <c>Active</c> maps as active. Ignore <c>Description</c>, <c>Parent</c>,
 /// <c>Tier</c>, <c>Visible</c>, <c>ServiceProviderID</c>, and inspector counts.
 /// Compact schema takes FLAT <c>page</c> / <c>pageSize</c> / <c>columns</c> / <c>orderBy</c> only
 /// (GET, not POST-for-search). Nested <c>Pagination</c> / <c>Filters</c> is rejected. <c>page</c>
 /// is 1-based (default 1); <c>pageSize</c> defaults to 25 (max 2000). Page on raw <c>Data</c>
 /// length and <c>Pagination.HasMoreRows</c> / <c>CurrentPage</c> / <c>TotalPages</c>, never mapped
-/// count. <c>SkipInactive</c> is honoured in sync, not here.
+/// count. Connector is not subscribed — fixtures only; do not call live Compact.
 /// </summary>
 public static class LiongardEnvironmentMapper
 {
@@ -133,12 +134,15 @@ public static class LiongardEnvironmentMapper
         if (id is null || string.IsNullOrWhiteSpace(name))
             return null;
 
+        if (IsArchiveOrInactive(environment))
+            return null;
+
         return new ExternalCompanyDto(
             ExternalId: id,
             Name: name.Trim(),
             Slug: ReadString(environment, "ShortName"),
             Website: ReadString(environment, "Website"),
-            IsInactive: ReadIsInactive(environment));
+            IsInactive: false);
     }
 
     /// <summary>
@@ -163,36 +167,32 @@ public static class LiongardEnvironmentMapper
 
     /// <summary>
     /// Official schema uses integer <c>Status</c> (example 1 = Active). Compact/docs also describe
-    /// <c>Active</c> / <c>Inactive</c> strings. Unknown values are left unmapped.
+    /// <c>Active</c> / <c>Inactive</c> strings. Archive / inactive rows are dropped, not mapped.
     /// </summary>
-    private static bool? ReadIsInactive(JsonElement environment)
+    private static bool IsArchiveOrInactive(JsonElement environment)
     {
         if (!TryGetProperty(environment, out var status, "Status"))
-            return null;
+            return false;
 
         if (status.ValueKind == JsonValueKind.Number && status.TryGetInt32(out var n))
-        {
-            if (n == 1)
-                return false;
-            if (n == 0)
-                return true;
-            return null;
-        }
+            return n == 0;
 
         if (status.ValueKind == JsonValueKind.String)
         {
             var s = status.GetString();
-            if (string.Equals(s, "Active", StringComparison.OrdinalIgnoreCase))
-                return false;
-            if (string.Equals(s, "Inactive", StringComparison.OrdinalIgnoreCase))
-                return true;
-            if (s == "1")
+            if (string.IsNullOrWhiteSpace(s))
                 return false;
             if (s == "0")
                 return true;
+            if (string.Equals(s, "Inactive", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (string.Equals(s, "Archive", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (string.Equals(s, "Archived", StringComparison.OrdinalIgnoreCase))
+                return true;
         }
 
-        return null;
+        return false;
     }
 
     private static void ReadPagination(
