@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DocuEngAIne.Tests;
 
 /// <summary>
-/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask and Blackpoint each own their own mapping rows. Without a match step
+/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint and DefensX each own their own mapping rows. Without a match step
 /// the same client is created once per connection. These cover the convergence path.
 /// </summary>
 public class CompanyConvergenceTests
@@ -288,6 +288,39 @@ public class CompanyConvergenceTests
         Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
         var blackpointMapping = Assert.Single(mappings, m => m.ExternalId == "ce212a59-dab3-49ec-b6d7-546a2159b8ad");
         Assert.Contains(CompanyMatchIndex.MatchedByName, blackpointMapping.MetadataJson!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task DefensX_Adopts_The_Company_Already_Created_And_Records_ExternalId()
+    {
+        var (db, user, sync) = Create();
+        var halo = await AddConnectionAsync(db, user, IntegrationProvider.Halo);
+        await sync.SyncFromPayloadAsync(halo.Id, [
+            new ExternalCompanyDto("halo-100", "Adroc Capital")
+        ]);
+
+        var defensx = await AddConnectionAsync(db, user, IntegrationProvider.DefensX);
+        var defensxRun = await sync.SyncFromPayloadAsync(defensx.Id, [
+            new ExternalCompanyDto("2db9e3bd-020b-4374-8c1d-c6b83d4cb7f4", "Adroc Capital", PrimaryDomain: "adroccap.com")
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, defensxRun.Status);
+        Assert.Equal(0, defensxRun.ItemsCreated);
+        Assert.Equal(1, defensxRun.ItemsUpdated);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("halo-100", company.HaloClientId);
+        Assert.Null(company.NinjaOrganizationId);
+
+        var ids = CompanyIdentity.ReadExternalIds(company.ExternalIdsJson);
+        Assert.Equal("halo-100", ids["halo"]);
+        Assert.Equal("2db9e3bd-020b-4374-8c1d-c6b83d4cb7f4", ids["defensx"]);
+
+        var mappings = await db.IntegrationMappings.ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
+        var defensxMapping = Assert.Single(mappings, m => m.ExternalId == "2db9e3bd-020b-4374-8c1d-c6b83d4cb7f4");
+        Assert.Contains(CompanyMatchIndex.MatchedByName, defensxMapping.MetadataJson!, StringComparison.Ordinal);
     }
 
     [Fact]

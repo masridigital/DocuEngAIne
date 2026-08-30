@@ -1903,4 +1903,182 @@ public class IntegrationSyncTests
             Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
         }
     }
+
+    private sealed class RecordingDefensXMcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public string CustomersJson { get; init; } = DefensXCustomerMapperTests.LiveCompactListFixture;
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            var body = JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                id = "1",
+                result = new { content = new[] { new { type = "text", text = CustomersJson } } },
+            });
+            return Task.FromResult(body);
+        }
+    }
+
+    private static async Task<(McpServer Server, IntegrationConnection Connection)> SeedDefensXCompactAsync(
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool skipInactive = true, bool updateCompanyDetails = false)
+    {
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            Transport = McpTransport.Http,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.DefensX,
+            DisplayName = "DefensX",
+            McpServerId = server.Id,
+            SkipInactive = skipInactive,
+            UpdateCompanyDetails = updateCompanyDetails,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+        return (server, connection);
+    }
+
+    [Fact]
+    public async Task DefensX_SyncAsync_Creates_Company_And_Mapping_From_Customer_Id_Stores_PrimaryDomain()
+    {
+        var mcp = new RecordingDefensXMcp { CustomersJson = DefensXCustomerMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedDefensXCompactAsync(db, user);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(2, run.ItemsCreated);
+        Assert.Equal(0, run.ItemsSkipped);
+        var call = Assert.Single(mcp.Calls);
+        Assert.Equal("dfx_list_customers", call.Tool);
+        Assert.Equal(server.Id, call.ServerId);
+        Assert.True(string.IsNullOrWhiteSpace(call.Args));
+
+        var companies = await db.Companies.OrderBy(c => c.Name).ToListAsync();
+        Assert.Equal(2, companies.Count);
+
+        var adroc = Assert.Single(companies, c => c.Name == "Adroc Capital");
+        Assert.Equal("adroccap.com", adroc.PrimaryDomain);
+        Assert.Null(adroc.HaloClientId);
+        Assert.Null(adroc.NinjaOrganizationId);
+        Assert.Equal("2db9e3bd-020b-4374-8c1d-c6b83d4cb7f4",
+            CompanyIdentity.ReadExternalIds(adroc.ExternalIdsJson)["defensx"]);
+
+        var masri = Assert.Single(companies, c => c.Name == "Masri Digital (Customer)");
+        Assert.Null(masri.PrimaryDomain);
+        Assert.Equal("f1f4ad1e-6709-4f88-bf93-0d2c60abd5ec",
+            CompanyIdentity.ReadExternalIds(masri.ExternalIdsJson)["defensx"]);
+
+        var mapping = Assert.Single(await db.IntegrationMappings.Where(m => m.ExternalId == "2db9e3bd-020b-4374-8c1d-c6b83d4cb7f4").ToListAsync());
+        Assert.Equal("company", mapping.ExternalType);
+        Assert.Equal(adroc.Id, mapping.LocalEntityId);
+    }
+
+    [Fact]
+    public async Task DefensX_SkipInactive_Drops_Enabled_False()
+    {
+        var mcp = new RecordingDefensXMcp { CustomersJson = DefensXCustomerMapperTests.SkipInactiveFixture };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedDefensXCompactAsync(db, user, skipInactive: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsCreated);
+        Assert.Equal(1, run.ItemsSkipped);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("Adroc Capital", company.Name);
+        Assert.Equal("adroccap.com", company.PrimaryDomain);
+        Assert.Equal("2db9e3bd-020b-4374-8c1d-c6b83d4cb7f4",
+            CompanyIdentity.ReadExternalIds(company.ExternalIdsJson)["defensx"]);
+        Assert.DoesNotContain(await db.Companies.ToListAsync(), c => c.Name == "Disabled Co");
+        Assert.DoesNotContain(await db.IntegrationMappings.ToListAsync(),
+            m => m.ExternalId == "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+    }
+
+    [Fact]
+    public async Task DefensX_SyncAsync_Missing_McpServerId_Fails_Without_Calling_Mcp()
+    {
+        var mcp = new RecordingDefensXMcp { CustomersJson = DefensXCustomerMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.DefensX,
+            DisplayName = "DefensX",
+            AuthSecretName = "kv-name-only",
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        Assert.Contains("McpServerId", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Key Vault", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
+        Assert.Empty(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task DefensX_Other_Tenant_Connection_Sync_Returns_404_And_Does_Not_Call_Mcp()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var mcp = new RecordingDefensXMcp { CustomersJson = DefensXCustomerMapperTests.LiveCompactListFixture };
+
+        Guid connectionBId;
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var server = new McpServer
+            {
+                TenantId = tenantB,
+                Name = "Compact B",
+                Kind = McpServerKind.StackJackCompact,
+                EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            };
+            dbB.McpServers.Add(server);
+            var connection = new IntegrationConnection
+            {
+                TenantId = tenantB,
+                Provider = IntegrationProvider.DefensX,
+                DisplayName = "DefensX B",
+                McpServerId = server.Id,
+            };
+            dbB.IntegrationConnections.Add(connection);
+            await dbB.SaveChangesAsync();
+            connectionBId = connection.Id;
+        }
+
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var sync = new IntegrationSyncService(dbA, userA, mcp, new NoopAudit());
+            var result = await IntegrationEndpoints.SyncAsync(connectionBId, null, sync, dbA, userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+            Assert.Empty(mcp.Calls);
+            Assert.Empty(await dbA.IntegrationConnections.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.SyncRuns.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
+        }
+    }
 }
