@@ -12,12 +12,13 @@ namespace DocuEngAIne.Infrastructure.Integrations;
 /// (<c>dnsfilter_list_networks</c> / <c>dnsfilter_list_msp_networks</c> / <c>dnsfilter_list_all_networks</c>)
 /// are out of scope — orgs map to companies. Do not call <c>dnsfilter_list_all_organizations</c>
 /// (the wider "all" counterpart). Do not pass <c>type</c>, <c>name</c>, <c>basicInfo</c>, or MSP
-/// filters — <c>SkipInactive</c> is honoured in sync. <c>canceled</c> true → <c>IsInactive</c> true;
-/// false → false. Missing <c>canceled</c> is left null. Ignore billing/stripe/feature_flags,
-/// vendor <c>external_id</c>, <c>uuid</c>, and <c>relationships.networks</c>.
-/// Compact <c>pageNumber</c> is 1-based (omit on the first page); <c>pageSize</c> defaults to 50
-/// (StackJack caps at 1000; the vendor publishes no maximum). Page on raw <c>data</c> length,
-/// never mapped count. Stop when <c>data</c> is empty or shorter than the requested size.
+/// filters. Skip <c>canceled</c> true — those rows still count toward paging. Do not invent
+/// <c>IsInactive</c> on the remaining orgs. Ignore billing/stripe/feature_flags, vendor
+/// <c>external_id</c>, <c>uuid</c>, and <c>relationships.networks</c>.
+/// Compact pagination is <c>pageNumber</c> / <c>pageSize</c> (not <c>page</c>). <c>pageNumber</c>
+/// is 1-based (omit on the first page); <c>pageSize</c> defaults to 50 (StackJack caps at 1000;
+/// the vendor publishes no maximum). Page on raw <c>data</c> length, never mapped count.
+/// Stop when <c>data</c> is empty or shorter than the requested size.
 /// </summary>
 public static class DnsFilterOrganizationMapper
 {
@@ -94,6 +95,9 @@ public static class DnsFilterOrganizationMapper
             return null;
 
         var attributes = GetAttributes(org);
+        if (IsCanceled(attributes))
+            return null;
+
         var id = ReadString(org, "id") ?? ReadString(attributes, "id");
         var name = ReadString(attributes, "name") ?? ReadString(org, "name");
         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name))
@@ -103,8 +107,7 @@ public static class DnsFilterOrganizationMapper
             ExternalId: id,
             Name: name.Trim(),
             Slug: ReadString(attributes, "unique_id", "uniqueId"),
-            Address: ReadString(attributes, "address"),
-            IsInactive: ReadIsInactive(attributes));
+            Address: ReadString(attributes, "address"));
     }
 
     /// <summary>
@@ -121,11 +124,11 @@ public static class DnsFilterOrganizationMapper
         return normalized is "organizations" or "organization";
     }
 
-    /// <summary><c>canceled</c> true → <c>IsInactive</c> true; false → false. Missing is null.</summary>
-    private static bool? ReadIsInactive(JsonElement attributes)
+    /// <summary><c>canceled</c> true is not a customer — skip the row, still count it for paging.</summary>
+    private static bool IsCanceled(JsonElement attributes)
     {
         if (!TryGetProperty(attributes, out var canceled, "canceled", "cancelled"))
-            return null;
+            return false;
 
         if (canceled.ValueKind is JsonValueKind.True or JsonValueKind.False)
             return canceled.GetBoolean();
@@ -138,7 +141,7 @@ public static class DnsFilterOrganizationMapper
                 return b;
         }
 
-        return null;
+        return false;
     }
 
     private static JsonElement GetAttributes(JsonElement resource)

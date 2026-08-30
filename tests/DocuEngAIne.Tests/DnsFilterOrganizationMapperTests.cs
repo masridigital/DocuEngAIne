@@ -12,9 +12,9 @@ public class DnsFilterOrganizationMapperTests
         {"data":[{"id":"1001","type":"organizations","uuid":"550e8400-e29b-41d4-a716-446655440001","attributes":{"id":1001,"name":"Adroc Capital","address":"1425 RXR Plaza","billing_address":"1425 Billing Ave","billing_contact_email":"billing@adroccap.example","canceled":false,"canceled_at":null,"external_id":"ext-adroc-1","feature_flags":["reporting"],"managed_by_msp_id":42,"owned_msp_id":null,"stripe_customer_id":"cus_EXAMPLE","unique_id":"adroc-capital"},"relationships":{"networks":{"data":[{"id":"501","type":"networks"}]}}},{"id":"1002","type":"organizations","attributes":{"id":1002,"name":"Canceled Co","address":null,"canceled":true,"external_id":"ext-canceled","unique_id":"canceled-co","managed_by_msp_id":42}}],"links":{"self":"https://api.dnsfilter.com/v1/organizations?page%5Bnumber%5D=1&page%5Bsize%5D=50"}}
         """;
 
-    // Two raw rows (one empty name), full page so paging continues. Mapped count is 1; raw count is 2.
+    // Two raw rows (one canceled), full page so paging continues. Mapped count is 1; raw count is 2.
     public const string NextPageContinuesFixture = """
-        {"data":[{"id":"1001","type":"organizations","attributes":{"id":1001,"name":"Adroc Capital","address":"1425 RXR Plaza","canceled":false,"unique_id":"adroc-capital"}},{"id":"9999","type":"organizations","attributes":{"id":9999,"name":"","canceled":false}}],"links":{"self":"https://api.dnsfilter.com/v1/organizations?page%5Bnumber%5D=1&page%5Bsize%5D=2"}}
+        {"data":[{"id":"1001","type":"organizations","attributes":{"id":1001,"name":"Adroc Capital","address":"1425 RXR Plaza","canceled":false,"unique_id":"adroc-capital"}},{"id":"1002","type":"organizations","attributes":{"id":1002,"name":"Canceled Co","canceled":true,"unique_id":"canceled-co"}}],"links":{"self":"https://api.dnsfilter.com/v1/organizations?page%5Bnumber%5D=1&page%5Bsize%5D=2"}}
         """;
 
     public const string EmptyDataFixture = """
@@ -22,19 +22,17 @@ public class DnsFilterOrganizationMapperTests
         """;
 
     [Fact]
-    public void MapOrganizations_CatalogJsonApi_MapsIdNameAddressUniqueIdCanceled_IgnoresNetworksAndBilling()
+    public void MapOrganizations_CatalogJsonApi_MapsIdNameAddressUniqueId_SkipsCanceled_IgnoresNetworksAndBilling()
     {
         var companies = DnsFilterOrganizationMapper.MapOrganizations(CatalogListFixture, out var rowCount);
 
         Assert.Equal(2, rowCount);
-        Assert.Equal(2, companies.Count);
-
-        var adroc = companies[0];
+        var adroc = Assert.Single(companies);
         Assert.Equal("1001", adroc.ExternalId);
         Assert.Equal("Adroc Capital", adroc.Name);
         Assert.Equal("1425 RXR Plaza", adroc.Address);
         Assert.Equal("adroc-capital", adroc.Slug);
-        Assert.False(adroc.IsInactive);
+        Assert.Null(adroc.IsInactive);
         Assert.Null(adroc.PrimaryDomain);
         Assert.Null(adroc.Website);
         Assert.Null(adroc.City);
@@ -43,13 +41,8 @@ public class DnsFilterOrganizationMapperTests
         Assert.DoesNotContain("cus_EXAMPLE", adroc.ExternalId, StringComparison.Ordinal);
         Assert.DoesNotContain("ext-adroc-1", adroc.ExternalId, StringComparison.Ordinal);
         Assert.DoesNotContain("501", adroc.ExternalId, StringComparison.Ordinal);
-
-        var canceled = companies[1];
-        Assert.Equal("1002", canceled.ExternalId);
-        Assert.Equal("Canceled Co", canceled.Name);
-        Assert.True(canceled.IsInactive);
-        Assert.Equal("canceled-co", canceled.Slug);
-        Assert.Null(canceled.Address);
+        Assert.DoesNotContain(companies, c => c.Name == "Canceled Co");
+        Assert.DoesNotContain(companies, c => c.ExternalId == "1002");
     }
 
     [Fact]
@@ -80,13 +73,13 @@ public class DnsFilterOrganizationMapperTests
         });
 
         var companies = DnsFilterOrganizationMapper.MapOrganizations(wrapped);
-        Assert.Equal(2, companies.Count);
-        Assert.Equal("1001", companies[0].ExternalId);
-        Assert.Equal("Adroc Capital", companies[0].Name);
-        Assert.Equal("1425 RXR Plaza", companies[0].Address);
-        Assert.Equal("adroc-capital", companies[0].Slug);
-        Assert.False(companies[0].IsInactive);
-        Assert.True(companies[1].IsInactive);
+        var adroc = Assert.Single(companies);
+        Assert.Equal("1001", adroc.ExternalId);
+        Assert.Equal("Adroc Capital", adroc.Name);
+        Assert.Equal("1425 RXR Plaza", adroc.Address);
+        Assert.Equal("adroc-capital", adroc.Slug);
+        Assert.Null(adroc.IsInactive);
+        Assert.DoesNotContain(companies, c => c.Name == "Canceled Co");
     }
 
     [Fact]
@@ -95,6 +88,7 @@ public class DnsFilterOrganizationMapperTests
         var args = DnsFilterOrganizationMapper.BuildArgumentsJson(pageNumber: null);
         Assert.Contains("\"pageSize\":50", args, StringComparison.Ordinal);
         Assert.DoesNotContain("pageNumber", args, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"page\":", args, StringComparison.Ordinal);
         Assert.DoesNotContain("basicInfo", args, StringComparison.Ordinal);
         Assert.DoesNotContain("type", args, StringComparison.Ordinal);
         Assert.DoesNotContain("managedByMspId", args, StringComparison.Ordinal);
@@ -108,6 +102,7 @@ public class DnsFilterOrganizationMapperTests
         var args = DnsFilterOrganizationMapper.BuildArgumentsJson(pageNumber: 2, pageSize: 20000);
         Assert.Contains("\"pageSize\":1000", args, StringComparison.Ordinal);
         Assert.Contains("\"pageNumber\":2", args, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"page\":", args, StringComparison.Ordinal);
         Assert.DoesNotContain("basicInfo", args, StringComparison.Ordinal);
         Assert.DoesNotContain("type", args, StringComparison.Ordinal);
 
@@ -130,17 +125,18 @@ public class DnsFilterOrganizationMapperTests
         var mcp = new ScriptedMcp([CatalogListFixture]);
         var companies = await DnsFilterOrganizationMapper.PullAsync(mcp, Guid.NewGuid(), pageSize: 50);
 
-        Assert.Equal(2, companies.Count);
-        Assert.Equal("1001", companies[0].ExternalId);
-        Assert.Equal("Adroc Capital", companies[0].Name);
-        Assert.Equal("1425 RXR Plaza", companies[0].Address);
-        Assert.False(companies[0].IsInactive);
-        Assert.True(companies[1].IsInactive);
+        var adroc = Assert.Single(companies);
+        Assert.Equal("1001", adroc.ExternalId);
+        Assert.Equal("Adroc Capital", adroc.Name);
+        Assert.Equal("1425 RXR Plaza", adroc.Address);
+        Assert.Null(adroc.IsInactive);
+        Assert.DoesNotContain(companies, c => c.Name == "Canceled Co");
         Assert.Single(mcp.Calls);
         Assert.Equal(DnsFilterOrganizationMapper.ToolName, mcp.Calls[0].Tool);
         Assert.Equal("dnsfilter_list_organizations", mcp.Calls[0].Tool);
         Assert.Contains("\"pageSize\":50", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.DoesNotContain("pageNumber", mcp.Calls[0].Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"page\":", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.DoesNotContain("basicInfo", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.DoesNotContain("type", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.DoesNotContain("dnsfilter_list_networks", mcp.Calls[0].Tool, StringComparison.Ordinal);
@@ -163,7 +159,8 @@ public class DnsFilterOrganizationMapperTests
         Assert.Contains("\"pageSize\":2", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.Contains("\"pageNumber\":2", mcp.Calls[1].Args, StringComparison.Ordinal);
         Assert.Contains("\"pageSize\":2", mcp.Calls[1].Args, StringComparison.Ordinal);
-        Assert.DoesNotContain(companies, c => c.ExternalId == "9999");
+        Assert.DoesNotContain(companies, c => c.Name == "Canceled Co");
+        Assert.DoesNotContain(companies, c => c.ExternalId == "1002");
     }
 
     [Fact]
