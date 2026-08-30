@@ -1,5 +1,4 @@
 using System.Text.Json;
-using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Core.Mcp;
 
 namespace DocuEngAIne.Infrastructure.Integrations.Migration;
@@ -41,28 +40,6 @@ public static class HuduFolderMapper
             ["page"] = page < 1 ? 1 : page,
             ["pageSize"] = size,
         });
-    }
-
-    public static async Task<IReadOnlyList<HuduFolderRecord>> PullAsync(
-        IMcpClient mcpClient,
-        Guid mcpServerId,
-        int pageSize = DefaultPageSize,
-        CancellationToken cancellationToken = default)
-    {
-        var size = Math.Clamp(pageSize, 1, MaxPageSize);
-        var folders = new List<HuduFolderRecord>();
-        const int maxPages = 500;
-        for (var page = 1; page <= maxPages; page++)
-        {
-            var args = BuildArgumentsJson(page, size);
-            var body = await mcpClient.CallToolAsync(mcpServerId, ToolName, args, cancellationToken);
-            var mapped = MapFolders(body, out var rowCount);
-            folders.AddRange(mapped);
-            if (rowCount == 0 || rowCount < size)
-                break;
-        }
-
-        return folders;
     }
 
     private static HuduFolderRecord? MapFolder(JsonElement folder)

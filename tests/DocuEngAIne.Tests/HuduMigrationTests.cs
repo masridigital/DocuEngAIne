@@ -20,48 +20,24 @@ public class HuduMigrationTests
             => Task.CompletedTask;
     }
 
-    private sealed class RecordingHuduMcp : IMcpClient
+    /// <summary>
+    /// Tests must never invoke Compact. Any ListTools/CallTool is a failure — Hudu import is a
+    /// mapper over sanitized Compact-shaped JSON, not a live pull.
+    /// </summary>
+    private sealed class ThrowingHuduMcp : IMcpClient
     {
         public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
-        public IReadOnlyList<string> Tools { get; init; } =
-        [
-            McpServerDefaults.HuduListCompaniesTool,
-            McpServerDefaults.HuduListArticlesTool,
-            McpServerDefaults.HuduListFoldersTool,
-            McpServerDefaults.HuduGetArticleTool,
-            "hudu_list_passwords",
-            "hudu_get_password",
-        ];
-        public string CompaniesJson { get; init; } = HuduCompanyMapperTests.LiveCompactListFixture;
-        public string ArticlesJson { get; init; } = HuduArticleMapperTests.LiveCompactListFixture;
-        public string FoldersJson { get; init; } = """{"folders":[{"id":3,"name":"Networking","company_id":42}]}""";
-        public string GetArticleJson { get; init; } = HuduArticleMapperTests.LiveCompactGetFixture;
 
         public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
         {
             Calls.Add((mcpServerId, "tools/list", null));
-            var tools = Tools.Select(name => new { name }).ToArray();
-            return Task.FromResult(JsonSerializer.Serialize(new { result = new { tools } }));
+            throw new InvalidOperationException("Tests must not call Compact Hudu tools.");
         }
 
         public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
         {
             Calls.Add((mcpServerId, toolName, argumentsJson));
-            var inner = toolName switch
-            {
-                McpServerDefaults.HuduListCompaniesTool => CompaniesJson,
-                McpServerDefaults.HuduListArticlesTool => ArticlesJson,
-                McpServerDefaults.HuduListFoldersTool => FoldersJson,
-                McpServerDefaults.HuduGetArticleTool => GetArticleJson,
-                _ => throw new InvalidOperationException($"Unexpected Hudu tool call: {toolName}"),
-            };
-            var body = JsonSerializer.Serialize(new
-            {
-                jsonrpc = "2.0",
-                id = "1",
-                result = new { content = new[] { new { type = "text", text = inner } } },
-            });
-            return Task.FromResult(body);
+            throw new InvalidOperationException($"Tests must not call Compact Hudu tools ({toolName}).");
         }
     }
 
@@ -72,7 +48,7 @@ public class HuduMigrationTests
             .UseInMemoryDatabase(Guid.NewGuid().ToString())
             .Options;
         var db = new DocuEngAIneDbContext(options, user);
-        return (db, user, new HuduMigrationService(db, user, mcp ?? new RecordingHuduMcp(), new NoopAudit()));
+        return (db, user, new HuduMigrationService(db, user, mcp ?? new ThrowingHuduMcp(), new NoopAudit()));
     }
 
     private static (DocuEngAIneDbContext Db, FakeCurrentUser User) Open(string dbName, Guid tenantId)
@@ -121,6 +97,11 @@ public class HuduMigrationTests
         Assert.Equal("hudu_", McpServerDefaults.HuduToolPrefix);
         Assert.StartsWith(McpServerDefaults.HuduToolPrefix, McpServerDefaults.HuduListCompaniesTool, StringComparison.Ordinal);
         Assert.StartsWith(McpServerDefaults.HuduToolPrefix, McpServerDefaults.HuduListArticlesTool, StringComparison.Ordinal);
+        Assert.All(HuduMigrationService.PasswordToolNames, name =>
+            Assert.Contains("password", name, StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(HuduMigrationService.PasswordToolNames, name =>
+            name.Equals(McpServerDefaults.HuduListCompaniesTool, StringComparison.OrdinalIgnoreCase)
+            || name.Equals(McpServerDefaults.HuduListArticlesTool, StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -221,26 +202,26 @@ public class HuduMigrationTests
     }
 
     [Fact]
-    public async Task Compact_Import_Calls_List_Tools_Never_Password_Tools_And_Fills_Missing_Content()
+    public async Task Compact_Shaped_Fixtures_Map_Without_Calling_Mcp()
     {
-        var mcp = new RecordingHuduMcp();
+        var mcp = new ThrowingHuduMcp();
         var (db, user, import) = Create(mcp);
         var server = await SeedCompactAsync(db, user);
 
-        var result = await import.ImportAsync(server.Id);
+        var result = await import.ImportAsync(server.Id, new HuduImportPayload(
+            CompactCompaniesJson: HuduCompanyMapperTests.LiveCompactListFixture,
+            CompactArticlesJson: HuduArticleMapperTests.LiveCompactListFixture,
+            CompactFoldersJson: """{"folders":[{"id":3,"name":"Networking","company_id":42}]}"""));
+
         Assert.NotNull(result);
-        Assert.Equal(HuduMigrationService.CompactSource, result.Source);
+        Assert.Equal(HuduMigrationService.PayloadSource, result.Source);
         Assert.Equal(2, result.CompaniesCreated);
         Assert.Equal(2, result.ArticlesCreated);
         Assert.Contains(McpServerDefaults.HuduListCompaniesTool, result.ToolsUsed);
         Assert.Contains(McpServerDefaults.HuduListArticlesTool, result.ToolsUsed);
         Assert.Contains(McpServerDefaults.HuduListFoldersTool, result.ToolsUsed);
-        Assert.Contains(McpServerDefaults.HuduGetArticleTool, result.ToolsUsed);
-
-        Assert.DoesNotContain(mcp.Calls, c =>
-            HuduMigrationService.PasswordToolNames.Contains(c.Tool, StringComparer.OrdinalIgnoreCase));
-        Assert.DoesNotContain(mcp.Calls, c =>
-            c.Tool.Contains("password", StringComparison.OrdinalIgnoreCase));
+        Assert.DoesNotContain(result.ToolsUsed, t => t.Contains("password", StringComparison.OrdinalIgnoreCase));
+        Assert.Empty(mcp.Calls);
 
         var vpn = await db.Documents.SingleAsync(d => d.Title == "VPN Setup");
         Assert.Equal("<p>Use the company gateway.</p>", vpn.Content);
@@ -248,14 +229,15 @@ public class HuduMigrationTests
         Assert.Equal("Networking", folder.Name);
 
         var draft = await db.Documents.SingleAsync(d => d.Title == "Draft Note");
-        Assert.Equal("<p>Internal only.</p>", draft.Content);
+        Assert.True(string.IsNullOrWhiteSpace(draft.Content));
         Assert.False(draft.IsPublished);
+        Assert.Empty(await db.KeeperLinks.ToListAsync());
     }
 
     [Fact]
-    public async Task Compact_Without_Hudu_Tools_And_Without_Payload_Is_BadRequest()
+    public async Task Without_Compact_Shaped_Json_Is_BadRequest_And_Does_Not_Call_Mcp()
     {
-        var mcp = new RecordingHuduMcp { Tools = ["halo_list_clients", "hudu_list_passwords"] };
+        var mcp = new ThrowingHuduMcp();
         var (db, user, import) = Create(mcp);
         var server = await SeedCompactAsync(db, user);
 
@@ -264,7 +246,7 @@ public class HuduMigrationTests
 
         Assert.Equal(StatusCodes.Status400BadRequest, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
         Assert.Empty(await db.Companies.ToListAsync());
-        Assert.DoesNotContain(mcp.Calls, c => c.Tool != "tools/list");
+        Assert.Empty(mcp.Calls);
     }
 
     [Fact]
@@ -273,7 +255,7 @@ public class HuduMigrationTests
         var dbName = Guid.NewGuid().ToString();
         var tenantA = Guid.NewGuid();
         var tenantB = Guid.NewGuid();
-        var mcp = new RecordingHuduMcp();
+        var mcp = new ThrowingHuduMcp();
 
         Guid serverBId;
         var (dbB, userB) = Open(dbName, tenantB);
@@ -374,5 +356,28 @@ public class HuduMigrationTests
         Assert.Equal(1, body.PasswordsSkipped);
         Assert.Empty(await db.KeeperLinks.ToListAsync());
         Assert.Equal(HuduMigrationService.DefaultFolderName, (await db.DocumentFolders.SingleAsync()).Name);
+    }
+
+    [Fact]
+    public async Task Endpoint_Accepts_Compact_Shaped_Json_And_Does_Not_Call_Mcp()
+    {
+        var mcp = new ThrowingHuduMcp();
+        var (db, user, import) = Create(mcp);
+        var server = await SeedCompactAsync(db, user);
+        using var companies = JsonDocument.Parse(HuduCompanyMapperTests.LiveCompactListFixture);
+        using var articles = JsonDocument.Parse(HuduArticleMapperTests.LiveCompactListFixture);
+
+        var result = await HuduMigrationEndpoints.ImportHuduAsync(
+            new HuduImportRequest(
+                server.Id,
+                CompactCompanies: companies.RootElement.Clone(),
+                CompactArticles: articles.RootElement.Clone()),
+            import, db, user);
+
+        Assert.Equal(StatusCodes.Status200OK, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+        Assert.Empty(mcp.Calls);
+        Assert.Equal(2, await db.Companies.CountAsync());
+        Assert.Equal(2, await db.Documents.CountAsync());
+        Assert.Empty(await db.KeeperLinks.ToListAsync());
     }
 }

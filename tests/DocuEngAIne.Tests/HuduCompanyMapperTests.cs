@@ -100,42 +100,4 @@ public class HuduCompanyMapperTests
         Assert.Equal(McpServerDefaults.HuduListCompaniesTool, HuduCompanyMapper.ToolName);
     }
 
-    [Fact]
-    public async Task PullAsync_PagesUntilShortPage()
-    {
-        var mcp = new PagingMcp();
-        var companies = await HuduCompanyMapper.PullAsync(mcp, Guid.NewGuid(), pageSize: 1);
-
-        Assert.Equal(2, companies.Count);
-        Assert.Equal(3, mcp.Calls);
-        Assert.All(mcp.Tools, t => Assert.Equal(HuduCompanyMapper.ToolName, t));
-    }
-
-    private sealed class PagingMcp : DocuEngAIne.Core.Interfaces.IMcpClient
-    {
-        public int Calls { get; private set; }
-        public List<string> Tools { get; } = [];
-
-        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
-            => Task.FromResult("""{"result":{"tools":[]}}""");
-
-        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            Tools.Add(toolName);
-            var page = 1;
-            if (!string.IsNullOrWhiteSpace(argumentsJson))
-            {
-                using var doc = JsonDocument.Parse(argumentsJson);
-                if (doc.RootElement.TryGetProperty("page", out var p))
-                    page = p.GetInt32();
-            }
-
-            if (page > 2)
-                return Task.FromResult("""{"companies":[]}""");
-            var id = page == 1 ? 42 : 99;
-            var name = page == 1 ? "ExampleCo" : "Other Co";
-            return Task.FromResult($$"""{"companies":[{"id":{{id}},"name":"{{name}}"}]}""");
-        }
-    }
 }

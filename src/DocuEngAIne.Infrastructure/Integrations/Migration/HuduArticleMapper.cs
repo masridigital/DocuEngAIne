@@ -1,5 +1,4 @@
 using System.Text.Json;
-using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Core.Mcp;
 
 namespace DocuEngAIne.Infrastructure.Integrations.Migration;
@@ -7,9 +6,10 @@ namespace DocuEngAIne.Infrastructure.Integrations.Migration;
 /// <summary>
 /// Maps StackJack Compact <c>hudu_list_articles</c> / <c>hudu_get_article</c> JSON to article records.
 /// Live list objects use <c>id</c>, <c>name</c>, <c>slug</c>, <c>content</c>, <c>company_id</c>,
-/// <c>folder_id</c>, and <c>draft</c>. List summaries may omit HTML content — the import then calls
-/// <c>hudu_get_article</c> when that tool is present. Password entities are never mapped here.
+/// <c>folder_id</c>, and <c>draft</c>. List summaries may omit HTML — map <c>hudu_get_article</c>
+/// fixture JSON separately. Password entities are never mapped here.
 /// Compact schema: <c>page</c> / <c>pageSize</c> on list; <c>id</c> (integer) on get.
+/// The migrate endpoint does not call Compact; it maps sanitized fixture / catalog JSON.
 /// </summary>
 public static class HuduArticleMapper
 {
@@ -67,39 +67,6 @@ public static class HuduArticleMapper
         if (int.TryParse(externalId, out var id))
             return JsonSerializer.Serialize(new Dictionary<string, object?> { ["id"] = id });
         return JsonSerializer.Serialize(new Dictionary<string, object?> { ["id"] = externalId });
-    }
-
-    public static async Task<IReadOnlyList<HuduArticleRecord>> PullAsync(
-        IMcpClient mcpClient,
-        Guid mcpServerId,
-        int pageSize = DefaultPageSize,
-        CancellationToken cancellationToken = default)
-    {
-        var size = Math.Clamp(pageSize, 1, MaxPageSize);
-        var articles = new List<HuduArticleRecord>();
-        const int maxPages = 500;
-        for (var page = 1; page <= maxPages; page++)
-        {
-            var args = BuildListArgumentsJson(page, size);
-            var body = await mcpClient.CallToolAsync(mcpServerId, ListToolName, args, cancellationToken);
-            var mapped = MapArticles(body, out var rowCount);
-            articles.AddRange(mapped);
-            if (rowCount == 0 || rowCount < size)
-                break;
-        }
-
-        return articles;
-    }
-
-    public static async Task<HuduArticleRecord?> GetAsync(
-        IMcpClient mcpClient,
-        Guid mcpServerId,
-        string externalId,
-        CancellationToken cancellationToken = default)
-    {
-        var args = BuildGetArgumentsJson(externalId);
-        var body = await mcpClient.CallToolAsync(mcpServerId, GetToolName, args, cancellationToken);
-        return MapArticle(body);
     }
 
     private static bool TrySingleArticle(JsonElement payload, out HuduArticleRecord? article)

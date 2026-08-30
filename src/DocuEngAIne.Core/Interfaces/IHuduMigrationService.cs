@@ -8,10 +8,10 @@ namespace DocuEngAIne.Core.Interfaces;
 public interface IHuduMigrationService
 {
     /// <summary>
-    /// Imports companies and articles from a tenant-scoped StackJack Compact server and/or an
-    /// explicit payload. Returns <c>null</c> when <paramref name="mcpServerId"/> is missing,
-    /// belongs to another tenant, or is not Compact — the endpoint maps that to 404.
-    /// Password entities are counted and discarded; they are never stored locally.
+    /// Maps Compact-shaped Hudu JSON into DocuEngAIne. <paramref name="mcpServerId"/> is a
+    /// tenant Compact registration used only for the 404 gate — this service does not call
+    /// Compact Hudu tools. Returns <c>null</c> when the server is missing, belongs to another
+    /// tenant, or is not Compact. Password entities are counted and discarded.
     /// </summary>
     Task<HuduImportResult?> ImportAsync(
         Guid mcpServerId,
@@ -20,13 +20,17 @@ public interface IHuduMigrationService
 }
 
 /// <summary>
-/// Optional snapshot used when Compact Hudu tools are unavailable, or when an admin supplies
-/// a sanitized export. A non-null <see cref="Companies"/>, <see cref="Articles"/>, or
-/// <see cref="Passwords"/> list selects payload mode and skips MCP data pulls.
+/// Compact-shaped Hudu snapshot. Typed lists and/or raw <c>hudu_list_companies</c> /
+/// <c>hudu_list_articles</c> / <c>hudu_list_folders</c> JSON (catalog schema or sanitized
+/// fixtures). Password rows are counted only — never stored.
 /// </summary>
 public sealed record HuduImportPayload(
     IReadOnlyList<ExternalCompanyDto>? Companies = null,
     IReadOnlyList<HuduArticleRecord>? Articles = null,
+    IReadOnlyList<HuduFolderRecord>? Folders = null,
+    string? CompactCompaniesJson = null,
+    string? CompactArticlesJson = null,
+    string? CompactFoldersJson = null,
     int PasswordCount = 0);
 
 /// <summary>One Hudu knowledge-base article (never a password vault entry).</summary>

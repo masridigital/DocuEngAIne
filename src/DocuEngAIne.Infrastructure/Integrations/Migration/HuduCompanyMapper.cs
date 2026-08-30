@@ -2,6 +2,7 @@ using System.Text.Json;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Core.Mcp;
 
+
 namespace DocuEngAIne.Infrastructure.Integrations.Migration;
 
 /// <summary>
@@ -48,28 +49,6 @@ public static class HuduCompanyMapper
             ["page"] = page < 1 ? 1 : page,
             ["pageSize"] = size,
         });
-    }
-
-    public static async Task<IReadOnlyList<ExternalCompanyDto>> PullAsync(
-        IMcpClient mcpClient,
-        Guid mcpServerId,
-        int pageSize = DefaultPageSize,
-        CancellationToken cancellationToken = default)
-    {
-        var size = Math.Clamp(pageSize, 1, MaxPageSize);
-        var companies = new List<ExternalCompanyDto>();
-        const int maxPages = 500;
-        for (var page = 1; page <= maxPages; page++)
-        {
-            var args = BuildArgumentsJson(page, size);
-            var body = await mcpClient.CallToolAsync(mcpServerId, ToolName, args, cancellationToken);
-            var mapped = MapCompanies(body, out var rowCount);
-            companies.AddRange(mapped);
-            if (rowCount == 0 || rowCount < size)
-                break;
-        }
-
-        return companies;
     }
 
     private static ExternalCompanyDto? MapCompany(JsonElement company)

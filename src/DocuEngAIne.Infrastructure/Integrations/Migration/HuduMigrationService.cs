@@ -1,17 +1,17 @@
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
-using DocuEngAIne.Core.Mcp;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace DocuEngAIne.Infrastructure.Integrations.Migration;
 
 /// <summary>
-/// One-shot Hudu import. Companies converge through <see cref="CompanyIdentity"/> using
+/// One-shot Hudu mapper. Companies converge through <see cref="CompanyIdentity"/> using
 /// ExternalIdsJson key <see cref="CompanyIdentity.HuduKey"/> ("hudu"). Articles become
-/// <see cref="Document"/> rows in a company folder named from Hudu. Password tools and
-/// password payload rows are skipped — Keeper is the vault.
+/// <see cref="Document"/> rows in a company folder named from Hudu. Compact-shaped JSON
+/// is mapped from the catalog schema / sanitized fixtures — Compact Hudu tools are not
+/// invoked. Password payload rows are skipped — Keeper is the vault.
 /// </summary>
 public sealed class HuduMigrationService : IHuduMigrationService
 {
@@ -40,10 +40,13 @@ public sealed class HuduMigrationService : IHuduMigrationService
         "hudu_delete_password",
     ];
 
-    public const string MissingToolsMessage =
-        "This Compact server does not expose hudu_list_companies or hudu_list_articles. "
-        + "Supply a companies+articles JSON payload, or enable the Compact Hudu connector "
-        + "(prefix hudu_). Password tools (hudu_list_passwords / hudu_get_password) are never called.";
+    public const string MissingPayloadMessage =
+        "Supply Compact-shaped companies/articles JSON (hudu_list_companies / hudu_list_articles "
+        + "catalog schema, or a sanitized fixture). Compact Hudu tools are not called. "
+        + "Password tools (hudu_list_passwords / hudu_get_password) are never called.";
+
+    /// <summary>Previous name; kept so older tests and docs still compile against the mapper-only import.</summary>
+    public const string MissingToolsMessage = MissingPayloadMessage;
 
     private readonly DocuEngAIneDbContext _db;
     private readonly ICurrentUser _user;
@@ -75,56 +78,36 @@ public sealed class HuduMigrationService : IHuduMigrationService
             return null;
 
         var toolsUsed = new List<string>();
-        IReadOnlyList<ExternalCompanyDto> companies;
-        IReadOnlyList<HuduArticleRecord> articles;
-        IReadOnlyList<HuduFolderRecord> folders = [];
         var passwordsSkipped = payload?.PasswordCount ?? 0;
-        string source;
+        var companies = new List<ExternalCompanyDto>(payload?.Companies ?? []);
+        var articles = new List<HuduArticleRecord>(payload?.Articles ?? []);
+        var folders = new List<HuduFolderRecord>(payload?.Folders ?? []);
 
-        if (payload?.Companies is not null || payload?.Articles is not null || (payload?.PasswordCount ?? 0) > 0)
+        if (!string.IsNullOrWhiteSpace(payload?.CompactCompaniesJson))
         {
-            source = PayloadSource;
-            companies = payload?.Companies ?? [];
-            articles = payload?.Articles ?? [];
+            companies.AddRange(HuduCompanyMapper.MapCompanies(payload.CompactCompaniesJson));
+            toolsUsed.Add(HuduCompanyMapper.ToolName);
         }
-        else
+
+        if (!string.IsNullOrWhiteSpace(payload?.CompactArticlesJson))
         {
-            source = CompactSource;
-            var listBody = await _mcpClient.ListToolsAsync(mcpServerId, cancellationToken);
-            var toolNames = HuduMcpPayload.ReadToolNames(listBody);
-
-            if (!toolNames.Contains(HuduCompanyMapper.ToolName) && !toolNames.Contains(HuduArticleMapper.ListToolName))
-                throw new InvalidOperationException(MissingToolsMessage);
-
-            companies = [];
-            if (toolNames.Contains(HuduCompanyMapper.ToolName))
-            {
-                companies = await HuduCompanyMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
-                toolsUsed.Add(HuduCompanyMapper.ToolName);
-            }
-
-            if (toolNames.Contains(HuduFolderMapper.ToolName))
-            {
-                folders = await HuduFolderMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
-                toolsUsed.Add(HuduFolderMapper.ToolName);
-            }
-
-            articles = [];
-            if (toolNames.Contains(HuduArticleMapper.ListToolName))
-            {
-                var listed = await HuduArticleMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
-                toolsUsed.Add(HuduArticleMapper.ListToolName);
-
-                if (toolNames.Contains(HuduArticleMapper.GetToolName)
-                    && listed.Any(a => string.IsNullOrWhiteSpace(a.Content)))
-                {
-                    listed = await FillArticleContentAsync(listed, mcpServerId, cancellationToken);
-                    toolsUsed.Add(HuduArticleMapper.GetToolName);
-                }
-
-                articles = listed;
-            }
+            articles.AddRange(HuduArticleMapper.MapArticles(payload.CompactArticlesJson));
+            toolsUsed.Add(HuduArticleMapper.ListToolName);
         }
+
+        if (!string.IsNullOrWhiteSpace(payload?.CompactFoldersJson))
+        {
+            folders.AddRange(HuduFolderMapper.MapFolders(payload.CompactFoldersJson));
+            toolsUsed.Add(HuduFolderMapper.ToolName);
+        }
+
+        if (companies.Count == 0 && articles.Count == 0 && folders.Count == 0 && passwordsSkipped == 0)
+            throw new InvalidOperationException(MissingPayloadMessage);
+
+        // Mapper only: Compact Hudu tools are never invoked. _mcpClient is retained for DI
+        // compatibility and must stay unused.
+        _ = _mcpClient;
+        const string source = PayloadSource;
 
         articles = ApplyFolderNames(articles, folders);
 
@@ -155,42 +138,6 @@ public sealed class HuduMigrationService : IHuduMigrationService
             Message: passwordsSkipped > 0
                 ? "Password entities were skipped. Import credentials into Keeper; DocuEngAIne stores Keeper links only."
                 : null);
-    }
-
-    private async Task<IReadOnlyList<HuduArticleRecord>> FillArticleContentAsync(
-        IReadOnlyList<HuduArticleRecord> listed,
-        Guid mcpServerId,
-        CancellationToken cancellationToken)
-    {
-        var filled = new List<HuduArticleRecord>(listed.Count);
-        foreach (var article in listed)
-        {
-            if (!string.IsNullOrWhiteSpace(article.Content))
-            {
-                filled.Add(article);
-                continue;
-            }
-
-            var detail = await HuduArticleMapper.GetAsync(_mcpClient, mcpServerId, article.ExternalId, cancellationToken);
-            if (detail is null)
-            {
-                filled.Add(article);
-                continue;
-            }
-
-            filled.Add(article with
-            {
-                Content = detail.Content ?? article.Content,
-                Title = string.IsNullOrWhiteSpace(detail.Title) ? article.Title : detail.Title,
-                Slug = article.Slug ?? detail.Slug,
-                FolderName = article.FolderName ?? detail.FolderName,
-                FolderExternalId = article.FolderExternalId ?? detail.FolderExternalId,
-                CompanyExternalId = article.CompanyExternalId ?? detail.CompanyExternalId,
-                Draft = article.Draft || detail.Draft,
-            });
-        }
-
-        return filled;
     }
 
     private static IReadOnlyList<HuduArticleRecord> ApplyFolderNames(

@@ -25,8 +25,9 @@ public static class HuduMigrationEndpoints
     }
 
     /// <summary>
-    /// One-shot Hudu import through a tenant Compact MCP server. Other-tenant or non-Compact
-    /// <c>McpServerId</c> is 404. Password entities in the payload are counted and discarded.
+    /// One-shot Hudu mapper. <c>McpServerId</c> must be a tenant Compact registration (other-tenant
+    /// or non-Compact is 404). Compact Hudu tools are not called — supply Compact-shaped JSON.
+    /// Password entities in the payload are counted and discarded.
     /// </summary>
     public static async Task<IResult> ImportHuduAsync(
         [FromBody] HuduImportRequest request,
@@ -59,7 +60,12 @@ public static class HuduMigrationEndpoints
 
     private static HuduImportPayload? ToPayload(HuduImportRequest request)
     {
-        if (request.Companies is null && request.Articles is null && request.Passwords is null)
+        if (request.Companies is null
+            && request.Articles is null
+            && request.Passwords is null
+            && request.CompactCompanies is null
+            && request.CompactArticles is null
+            && request.CompactFolders is null)
             return null;
 
         return new HuduImportPayload(
@@ -67,15 +73,26 @@ public static class HuduMigrationEndpoints
                 c.ExternalId, c.Name, c.Slug, c.PrimaryDomain, c.City, c.State, c.Website, c.Address, c.IsInactive)).ToList(),
             Articles: request.Articles?.Select(a => new HuduArticleRecord(
                 a.ExternalId, a.Title, a.Content, a.Slug, a.CompanyExternalId, a.FolderExternalId, a.FolderName, a.Draft)).ToList(),
+            CompactCompaniesJson: RawJson(request.CompactCompanies),
+            CompactArticlesJson: RawJson(request.CompactArticles),
+            CompactFoldersJson: RawJson(request.CompactFolders),
             PasswordCount: request.Passwords?.Count ?? 0);
     }
+
+    private static string? RawJson(JsonElement? value)
+        => value is { ValueKind: not JsonValueKind.Undefined and not JsonValueKind.Null }
+            ? value.Value.GetRawText()
+            : null;
 }
 
 public record HuduImportRequest(
     Guid McpServerId,
     List<SyncCompanyDto>? Companies = null,
     List<HuduArticleImportDto>? Articles = null,
-    List<JsonElement>? Passwords = null);
+    List<JsonElement>? Passwords = null,
+    JsonElement? CompactCompanies = null,
+    JsonElement? CompactArticles = null,
+    JsonElement? CompactFolders = null);
 
 public record HuduArticleImportDto(
     string ExternalId,
