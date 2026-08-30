@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DocuEngAIne.Tests;
 
 /// <summary>
-/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1 and Autotask each own their own mapping rows. Without a match step
+/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask and Blackpoint each own their own mapping rows. Without a match step
 /// the same client is created once per connection. These cover the convergence path.
 /// </summary>
 public class CompanyConvergenceTests
@@ -255,6 +255,39 @@ public class CompanyConvergenceTests
         Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
         var autotaskMapping = Assert.Single(mappings, m => m.ExternalId == "0");
         Assert.Contains(CompanyMatchIndex.MatchedByName, autotaskMapping.MetadataJson!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Blackpoint_Adopts_The_Company_Already_Created_And_Records_ExternalId()
+    {
+        var (db, user, sync) = Create();
+        var halo = await AddConnectionAsync(db, user, IntegrationProvider.Halo);
+        await sync.SyncFromPayloadAsync(halo.Id, [
+            new ExternalCompanyDto("halo-100", "Adroc Capital LLC")
+        ]);
+
+        var blackpoint = await AddConnectionAsync(db, user, IntegrationProvider.Blackpoint);
+        var blackpointRun = await sync.SyncFromPayloadAsync(blackpoint.Id, [
+            new ExternalCompanyDto("ce212a59-dab3-49ec-b6d7-546a2159b8ad", "Adroc Capital LLC", Website: "https://adroccap.com")
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, blackpointRun.Status);
+        Assert.Equal(0, blackpointRun.ItemsCreated);
+        Assert.Equal(1, blackpointRun.ItemsUpdated);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("halo-100", company.HaloClientId);
+        Assert.Null(company.NinjaOrganizationId);
+
+        var ids = CompanyIdentity.ReadExternalIds(company.ExternalIdsJson);
+        Assert.Equal("halo-100", ids["halo"]);
+        Assert.Equal("ce212a59-dab3-49ec-b6d7-546a2159b8ad", ids["blackpoint"]);
+
+        var mappings = await db.IntegrationMappings.ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
+        var blackpointMapping = Assert.Single(mappings, m => m.ExternalId == "ce212a59-dab3-49ec-b6d7-546a2159b8ad");
+        Assert.Contains(CompanyMatchIndex.MatchedByName, blackpointMapping.MetadataJson!, StringComparison.Ordinal);
     }
 
     [Fact]

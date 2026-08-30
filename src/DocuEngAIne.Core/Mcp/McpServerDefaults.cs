@@ -17,9 +17,6 @@ public static class McpServerDefaults
     /// Providers whose live pulls run through StackJack Compact rather than a vendor REST API. Compact
     /// is built in for these: an admin supplies a Key Vault secret name and the tenant's Compact
     /// registration is resolved — or created once — on their behalf.
-    ///
-    /// Blackpoint is deliberately absent. It has a Compact connector (CompassOne) but no pull path in
-    /// IntegrationSyncService yet, so auto-creating a server for it would register egress nothing uses.
     /// </summary>
     public static bool IsCompactBacked(IntegrationProvider provider) => provider switch
     {
@@ -29,7 +26,8 @@ public static class McpServerDefaults
             or IntegrationProvider.Meraki
             or IntegrationProvider.UniFi
             or IntegrationProvider.Action1
-            or IntegrationProvider.Autotask => true,
+            or IntegrationProvider.Autotask
+            or IntegrationProvider.Blackpoint => true,
         _ => false,
     };
 

@@ -42,7 +42,7 @@ function formatTimestamp(value?: string | null) {
  * Providers the API resolves — or registers once — StackJack Compact for, so creating one needs
  * nothing but a Key Vault secret name. Mirrors McpServerDefaults.IsCompactBacked on the server.
  */
-const builtInCompactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Action1', 'Autotask']
+const builtInCompactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Action1', 'Autotask', 'Blackpoint']
 
 /** "44m", "12h", "30d" — short enough for a table cell. */
 function formatInterval(minutes: number) {
@@ -313,9 +313,7 @@ export function IntegrationsPage() {
       setErrorMessage(
         provider === 'Composio'
           ? 'Select a Composio MCP server under Advanced.'
-          : provider === 'CustomMcp'
-            ? 'Select an MCP server for CustomMcp under Advanced.'
-            : 'Blackpoint has no built-in connector yet — select an MCP server under Advanced.',
+          : 'Select an MCP server for CustomMcp under Advanced.',
       )
       return
     }
@@ -425,10 +423,10 @@ export function IntegrationsPage() {
     <div className="page">
       <h1>Integrations</h1>
       <p>
-        StackJack Compact is built in. Pick a provider — Halo, NinjaOne, CIPP, Meraki, UniFi, Action1 or Autotask — and give the
+        StackJack Compact is built in. Pick a provider — Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask or Blackpoint — and give the
         Key Vault secret name holding this tenant&rsquo;s Compact API key; the Compact MCP server is registered
         the first time and reused after that. A secret name is never a secret value: nothing but the name is stored.
-        Composio, CustomMcp and Blackpoint still need a server registered under Advanced.
+        Composio and CustomMcp still need a server registered under Advanced.
       </p>
       <p className="muted">
         Enabled connections with a Compact server and a detected plan sync on the cadence shown
@@ -500,7 +498,7 @@ export function IntegrationsPage() {
           </table>
         )}
 
-        <p>Halo company pull uses Compact <code>halo_list_clients</code>. NinjaOne company pull uses Compact <code>ninja_list_organizations</code>. CIPP tenant pull uses Compact <code>cipp_list_tenants</code>. Meraki organization pull uses Compact <code>meraki_get_organizations</code> (orgs → companies; networks later). UniFi console pull uses Compact <code>unifi_sm_list_hosts</code> (hosts → companies; not sites). Action1 organization pull uses Compact <code>action1_list_organizations</code> (skips the MSP default organization). Autotask company pull uses Compact <code>at_list_companies</code> (not the active/customer pre-filters; <code>SkipInactive</code> drops <code>isActive</code> false). Sync policy defaults skip inactive accounts and refuse overwriting company details.</p>
+        <p>Halo company pull uses Compact <code>halo_list_clients</code>. NinjaOne company pull uses Compact <code>ninja_list_organizations</code>. CIPP tenant pull uses Compact <code>cipp_list_tenants</code>. Meraki organization pull uses Compact <code>meraki_get_organizations</code> (orgs → companies; networks later). UniFi console pull uses Compact <code>unifi_sm_list_hosts</code> (hosts → companies; not sites). Action1 organization pull uses Compact <code>action1_list_organizations</code> (skips the MSP default organization). Autotask company pull uses Compact <code>at_list_companies</code> (not the active/customer pre-filters; <code>SkipInactive</code> drops <code>isActive</code> false). Blackpoint tenant pull uses Compact <code>compassone_list_tenants</code> (id/name/domain; installer URLs are not stored). Sync policy defaults skip inactive accounts and refuse overwriting company details.</p>
         <form onSubmit={onCreateIntegration}>
           <div className="form-grid">
             <label>
@@ -616,7 +614,7 @@ export function IntegrationsPage() {
         <summary>Advanced — MCP servers</summary>
         <p className="muted">
           Compact-backed providers register their StackJack Compact server automatically. Add one here only for
-          Composio, CustomMcp or Blackpoint, or to point a connection at a specific server. Do not add a second
+          Composio or CustomMcp, or to point a connection at a specific server. Do not add a second
           StackJack server.
         </p>
         {serversLoading && <p>Loading…</p>}
