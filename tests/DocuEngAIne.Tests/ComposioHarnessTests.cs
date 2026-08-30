@@ -133,7 +133,7 @@ public class ComposioHarnessTests
         using var doc = JsonDocument.Parse(McpServerDefaults.FilterComposioToolsList(raw));
         var names = doc.RootElement.GetProperty("result").GetProperty("tools")
             .EnumerateArray()
-            .Select(t => t.GetProperty("name").GetString())
+            .Select(t => t.GetProperty("name").GetString() ?? "")
             .ToArray();
 
         Assert.Equal(["GITHUB_LIST_REPOS", "NOTION_SEARCH"], names);

@@ -511,7 +511,7 @@ public class HttpMcpClientTests
         using var doc = JsonDocument.Parse(await client.ListToolsAsync(server.Id));
         var names = doc.RootElement.GetProperty("result").GetProperty("tools")
             .EnumerateArray()
-            .Select(t => t.GetProperty("name").GetString())
+            .Select(t => t.GetProperty("name").GetString() ?? "")
             .ToArray();
 
         Assert.Equal(["GITHUB_LIST_REPOS", "OUTLOOK_LIST_MESSAGES"], names);
