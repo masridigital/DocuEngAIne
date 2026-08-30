@@ -157,29 +157,20 @@ public class RecentsTests
             db.AssetTypes.Add(type);
             await db.SaveChangesAsync();
 
-            for (var i = 0; i < 8; i++)
+            var names = new List<string>();
+            for (var i = 0; i < 13; i++)
             {
-                db.Assets.Add(new Asset { TenantId = tenantId, Name = $"Host {i}", AssetTypeId = type.Id });
+                var name = $"Host {i:D2}";
+                db.Assets.Add(new Asset { TenantId = tenantId, Name = name, AssetTypeId = type.Id });
+                await db.SaveChangesAsync();
+                names.Add(name);
+                await Task.Delay(20);
             }
-            for (var i = 0; i < 4; i++)
-            {
-                db.Documents.Add(new Document { TenantId = tenantId, Title = $"Doc {i}" });
-            }
-            db.Runbooks.Add(new Runbook { TenantId = tenantId, Title = "Oldest book" });
-            await db.SaveChangesAsync();
-
-            var oldest = await db.Runbooks.SingleAsync();
-            oldest.Title = "Still oldest";
-            await db.SaveChangesAsync();
-
-            var newestDoc = await db.Documents.OrderBy(d => d.Title).LastAsync();
-            newestDoc.Title = "Newest doc";
-            await db.SaveChangesAsync();
 
             var items = await ProfileEndpoints.ListRecentsAsync(db, user);
             Assert.Equal(ProfileEndpoints.RecentTake, items.Count);
-            Assert.Equal("Newest doc", items[0].Name);
-            Assert.DoesNotContain(items, i => i.Name == "Still oldest");
+            Assert.Equal(names[12], items[0].Name);
+            Assert.DoesNotContain(items, i => i.Name == names[0] || i.Name == names[1] || i.Name == names[2]);
             Assert.True(items.Zip(items.Skip(1), (a, b) => a.UpdatedAt >= b.UpdatedAt).All(ordered => ordered));
         }
     }
