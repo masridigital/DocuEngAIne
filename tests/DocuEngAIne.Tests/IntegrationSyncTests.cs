@@ -2081,4 +2081,224 @@ public class IntegrationSyncTests
             Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
         }
     }
+
+    private sealed class RecordingPax8Mcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public string CompaniesJson { get; init; } = Pax8CompanyMapperTests.LiveCompactListFixture;
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            var inner = CompaniesJson;
+            if (!string.IsNullOrWhiteSpace(argumentsJson)
+                && !argumentsJson.Contains("\"page\":0", StringComparison.Ordinal))
+            {
+                inner = Pax8CompanyMapperTests.EmptyContentFixture;
+            }
+
+            var body = JsonSerializer.Serialize(new
+            {
+                jsonrpc = "2.0",
+                id = "1",
+                result = new { content = new[] { new { type = "text", text = inner } } },
+            });
+            return Task.FromResult(body);
+        }
+    }
+
+    private static async Task<(McpServer Server, IntegrationConnection Connection)> SeedPax8CompactAsync(
+        DocuEngAIneDbContext db, FakeCurrentUser user, bool skipInactive = true, bool updateCompanyDetails = false)
+    {
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "StackJack Compact",
+            Kind = McpServerKind.StackJackCompact,
+            Transport = McpTransport.Http,
+            EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            AuthSecretName = "kv-stackjack-compact",
+        };
+        db.McpServers.Add(server);
+        await db.SaveChangesAsync();
+
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.Pax8,
+            DisplayName = "Pax8",
+            McpServerId = server.Id,
+            SkipInactive = skipInactive,
+            UpdateCompanyDetails = updateCompanyDetails,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+        return (server, connection);
+    }
+
+    [Fact]
+    public async Task Pax8_SyncAsync_Creates_Company_And_Mapping_From_Company_Id_Stores_Website_City_State()
+    {
+        var mcp = new RecordingPax8Mcp { CompaniesJson = Pax8CompanyMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedPax8CompactAsync(db, user, skipInactive: false);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(3, run.ItemsCreated);
+        Assert.Equal(0, run.ItemsSkipped);
+        var call = Assert.Single(mcp.Calls);
+        Assert.Equal("pax8_list_companies", call.Tool);
+        Assert.Equal(server.Id, call.ServerId);
+        Assert.Contains("\"page\":0", call.Args, StringComparison.Ordinal);
+        Assert.Contains("\"size\":50", call.Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("status", call.Args, StringComparison.Ordinal);
+
+        var companies = await db.Companies.OrderBy(c => c.Name).ToListAsync();
+        Assert.Equal(3, companies.Count);
+
+        var acme = Assert.Single(companies, c => c.Name == "Acme Partner LLC");
+        Assert.Equal("https://acme-partner.example", acme.Website);
+        Assert.Equal("Austin", acme.City);
+        Assert.Equal("TX", acme.State);
+        Assert.Null(acme.HaloClientId);
+        Assert.Null(acme.NinjaOrganizationId);
+        Assert.Equal("11111111-1111-1111-1111-111111111111",
+            CompanyIdentity.ReadExternalIds(acme.ExternalIdsJson)["pax8"]);
+
+        var mapping = Assert.Single(await db.IntegrationMappings.Where(m => m.ExternalId == "11111111-1111-1111-1111-111111111111").ToListAsync());
+        Assert.Equal("company", mapping.ExternalType);
+        Assert.Equal(acme.Id, mapping.LocalEntityId);
+    }
+
+    [Fact]
+    public async Task Pax8_SkipInactive_Drops_Inactive_And_Deleted()
+    {
+        var mcp = new RecordingPax8Mcp { CompaniesJson = Pax8CompanyMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedPax8CompactAsync(db, user, skipInactive: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(1, run.ItemsCreated);
+        Assert.Equal(2, run.ItemsSkipped);
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("Acme Partner LLC", company.Name);
+        Assert.Equal("https://acme-partner.example", company.Website);
+        Assert.Equal("11111111-1111-1111-1111-111111111111",
+            CompanyIdentity.ReadExternalIds(company.ExternalIdsJson)["pax8"]);
+        Assert.DoesNotContain(await db.Companies.ToListAsync(), c => c.Name == "Inactive Client Inc");
+        Assert.DoesNotContain(await db.Companies.ToListAsync(), c => c.Name == "Deleted Client Co");
+        Assert.DoesNotContain(await db.IntegrationMappings.ToListAsync(),
+            m => m.ExternalId == "22222222-2222-2222-2222-222222222222");
+        Assert.DoesNotContain(await db.IntegrationMappings.ToListAsync(),
+            m => m.ExternalId == "33333333-3333-3333-3333-333333333333");
+    }
+
+    [Fact]
+    public async Task Pax8_SyncAsync_Missing_McpServerId_Fails_Without_Calling_Mcp()
+    {
+        var mcp = new RecordingPax8Mcp { CompaniesJson = Pax8CompanyMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.Pax8,
+            DisplayName = "Pax8",
+            AuthSecretName = "kv-name-only",
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        Assert.Contains("McpServerId", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Key Vault", run.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(mcp.Calls);
+        Assert.Empty(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Pax8_SyncAsync_Composio_Server_Fails_Without_Calling_Mcp()
+    {
+        var mcp = new RecordingPax8Mcp { CompaniesJson = Pax8CompanyMapperTests.LiveCompactListFixture };
+        var (db, user, sync) = Create(mcp);
+        var server = new McpServer
+        {
+            TenantId = user.TenantId!.Value,
+            Name = "Composio",
+            Kind = McpServerKind.Composio,
+            Transport = McpTransport.Http,
+            EndpointUrl = McpServerDefaults.ComposioEndpoint,
+            AuthSecretName = "kv-composio",
+        };
+        db.McpServers.Add(server);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId.Value,
+            Provider = IntegrationProvider.Pax8,
+            DisplayName = "Pax8",
+            McpServerId = server.Id,
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        Assert.Contains("Composio is not a Pax8 connector", run.ErrorSummary, StringComparison.Ordinal);
+        Assert.Empty(mcp.Calls);
+        Assert.Empty(await db.Companies.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Pax8_Other_Tenant_Connection_Sync_Returns_404_And_Does_Not_Call_Mcp()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var mcp = new RecordingPax8Mcp { CompaniesJson = Pax8CompanyMapperTests.LiveCompactListFixture };
+
+        Guid connectionBId;
+        var (dbB, userB) = Open(dbName, tenantB);
+        await using (dbB)
+        {
+            var server = new McpServer
+            {
+                TenantId = tenantB,
+                Name = "Compact B",
+                Kind = McpServerKind.StackJackCompact,
+                EndpointUrl = McpServerDefaults.StackJackCompactEndpoint,
+            };
+            dbB.McpServers.Add(server);
+            var connection = new IntegrationConnection
+            {
+                TenantId = tenantB,
+                Provider = IntegrationProvider.Pax8,
+                DisplayName = "Pax8 B",
+                McpServerId = server.Id,
+            };
+            dbB.IntegrationConnections.Add(connection);
+            await dbB.SaveChangesAsync();
+            connectionBId = connection.Id;
+        }
+
+        var (dbA, userA) = Open(dbName, tenantA);
+        await using (dbA)
+        {
+            var sync = new IntegrationSyncService(dbA, userA, mcp, new NoopAudit());
+            var result = await IntegrationEndpoints.SyncAsync(connectionBId, null, sync, dbA, userA);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(result).StatusCode);
+            Assert.Empty(mcp.Calls);
+            Assert.Empty(await dbA.IntegrationConnections.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.SyncRuns.ForTenant(userA).ToListAsync());
+            Assert.Empty(await dbA.Companies.ForTenant(userA).ToListAsync());
+        }
+    }
 }

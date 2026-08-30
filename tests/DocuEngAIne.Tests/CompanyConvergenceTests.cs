@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DocuEngAIne.Tests;
 
 /// <summary>
-/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint and DefensX each own their own mapping rows. Without a match step
+/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX and Pax8 each own their own mapping rows. Without a match step
 /// the same client is created once per connection. These cover the convergence path.
 /// </summary>
 public class CompanyConvergenceTests
@@ -321,6 +321,39 @@ public class CompanyConvergenceTests
         Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
         var defensxMapping = Assert.Single(mappings, m => m.ExternalId == "2db9e3bd-020b-4374-8c1d-c6b83d4cb7f4");
         Assert.Contains(CompanyMatchIndex.MatchedByName, defensxMapping.MetadataJson!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Pax8_Adopts_The_Company_Already_Created_And_Records_ExternalId()
+    {
+        var (db, user, sync) = Create();
+        var halo = await AddConnectionAsync(db, user, IntegrationProvider.Halo);
+        await sync.SyncFromPayloadAsync(halo.Id, [
+            new ExternalCompanyDto("halo-100", "Acme Partner LLC")
+        ]);
+
+        var pax8 = await AddConnectionAsync(db, user, IntegrationProvider.Pax8);
+        var pax8Run = await sync.SyncFromPayloadAsync(pax8.Id, [
+            new ExternalCompanyDto("11111111-1111-1111-1111-111111111111", "Acme Partner LLC", Website: "https://acme-partner.example", City: "Austin", State: "TX")
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, pax8Run.Status);
+        Assert.Equal(0, pax8Run.ItemsCreated);
+        Assert.Equal(1, pax8Run.ItemsUpdated);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("halo-100", company.HaloClientId);
+        Assert.Null(company.NinjaOrganizationId);
+
+        var ids = CompanyIdentity.ReadExternalIds(company.ExternalIdsJson);
+        Assert.Equal("halo-100", ids["halo"]);
+        Assert.Equal("11111111-1111-1111-1111-111111111111", ids["pax8"]);
+
+        var mappings = await db.IntegrationMappings.ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
+        var pax8Mapping = Assert.Single(mappings, m => m.ExternalId == "11111111-1111-1111-1111-111111111111");
+        Assert.Contains(CompanyMatchIndex.MatchedByName, pax8Mapping.MetadataJson!, StringComparison.Ordinal);
     }
 
     [Fact]
