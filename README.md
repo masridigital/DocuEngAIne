@@ -37,7 +37,7 @@ tests/                      # xUnit + EF InMemory tests
 - **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
 - **Document** — KB articles with full-text search and **versioning**. Optional `FolderId`.
 - **DocumentFolder** — nested KB folders (`ParentId`). Optional `CompanyId` (null = central KB; set = company KB). Tenant-scoped.
-- **Runbook / RunbookStep / RunbookRun** — ordered SOPs and checklists with start/complete/cancel run history. Tenant-wide books are templates; optional `CompanyId` is the per-client instance. Not a second process product. No local secrets.
+- **Runbook / RunbookStep / RunbookRun** — ordered SOPs and checklists with start/complete/cancel run history. A completed run can be promoted into a Document (one-click, not AI). Tenant-wide books are templates; optional `CompanyId` is the per-client instance. Not a second process product. No local secrets.
 - **KeeperLink** — links to credentials in **Keeper**; no secrets are stored locally.
 - **ResourceRoleAssignment** — object-level RBAC overriding tenant-wide roles.
 - **AuditLog** — action trail (tenant-scoped where applicable).
@@ -296,6 +296,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 | POST | `/api/runbooks/{id}/runs` | Start a run (optional `companyId`, must `ForTenant`) |
 | POST | `/api/runbooks/{id}/runs/{runId}/complete` | Mark a running run completed |
 | POST | `/api/runbooks/{id}/runs/{runId}/cancel` | Cancel a running run |
+| POST | `/api/runbooks/{id}/runs/{runId}/promote` | Create a Document from a completed run (`ForTenant`; other-tenant → 404). Idempotent: second call returns the existing document id. |
 
 ### Keeper Links
 
@@ -354,7 +355,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [ ] UniFi / Blackpoint as MCP connectors
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
 - [x] Flags (`GET/POST /api/flags`, assign, `/flags` review queue)
-- [x] Runbook runs (`POST/GET /api/runbooks/{id}/runs`, complete/cancel, `runCount`)
+- [x] Runbook runs (`POST/GET /api/runbooks/{id}/runs`, complete/cancel/promote, `runCount`)
 - [x] Process completion rollup (`GET /api/runbooks/runs?status=&companyId=`, `/runs`)
 - [x] Related items (`ResourceLink`, `GET/POST/DELETE /api/links`, company `relatedLinks`). Graph visualization later.
 - [x] Document folders (`CRUD /api/folders`, `folderId` on documents, `/documents` folder list). Other-tenant folder attach → 400.

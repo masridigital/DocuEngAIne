@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { useCompanies, useRunbookRuns, type RunbookRunRollup } from '../hooks/useApi'
+import { promoteRunbookRun, useCompanies, useRunbookRuns, type RunbookRunRollup } from '../hooks/useApi'
 
 const statuses = ['', 'Running', 'Completed', 'Cancelled'] as const
 
@@ -26,11 +26,14 @@ export function RunsPage() {
   const { data: companyData } = useCompanies()
   const companies = Array.isArray(companyData) ? companyData : []
 
-  const { data, error, isLoading } = useRunbookRuns({
+  const { data, error, isLoading, mutate } = useRunbookRuns({
     status: status || undefined,
     companyId: companyId || undefined,
   })
   const items: RunbookRunRollup[] = Array.isArray(data) ? data : []
+  const [promotingId, setPromotingId] = useState<string | null>(null)
+  const [promotedIds, setPromotedIds] = useState<Record<string, string>>({})
+  const [actionError, setActionError] = useState<string | null>(null)
 
   const countLabel = useMemo(() => {
     const n = items.length
@@ -48,12 +51,26 @@ export function RunsPage() {
     setParams(nextParams, { replace: true })
   }
 
+  async function onPromote(item: RunbookRunRollup) {
+    setActionError(null)
+    setPromotingId(item.id)
+    try {
+      const doc = await promoteRunbookRun(item.runbookId, item.id)
+      setPromotedIds((prev) => ({ ...prev, [item.id]: doc.id }))
+      await mutate()
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : 'Failed to promote run.')
+    } finally {
+      setPromotingId(null)
+    }
+  }
+
   return (
     <div className="page">
       <h1>Process completion</h1>
       <p>
         Recent runbook runs across companies. Start a run from a{' '}
-        <Link to="/runbooks">runbook</Link>; complete or cancel it from the API. Not a second process product.
+        <Link to="/runbooks">runbook</Link>; complete or cancel it from the API. Promote a completed run into a Document. Not a second process product.
       </p>
 
       <div className="toolbar flags-toolbar">
@@ -87,6 +104,7 @@ export function RunsPage() {
 
       {isLoading && <p>Loading…</p>}
       {error && <p className="error">Failed to load runs.</p>}
+      {actionError && <p className="error">{actionError}</p>}
       {!isLoading && !error && items.length === 0 && (
         <p>No runs match. Start a run from a runbook to track a pass through the steps.</p>
       )}
@@ -99,6 +117,7 @@ export function RunsPage() {
               <th>Status</th>
               <th>Started</th>
               <th>Finished</th>
+              <th>Document</th>
             </tr>
           </thead>
           <tbody>
@@ -117,6 +136,22 @@ export function RunsPage() {
                 <td className={statusClass(item.status)}>{item.status}</td>
                 <td>{formatWhen(item.startedAt)}</td>
                 <td>{formatWhen(item.finishedAt)}</td>
+                <td className="row-actions">
+                  {item.status.toLowerCase() === 'completed' && (
+                    promotedIds[item.id] ? (
+                      <Link to="/documents">Document</Link>
+                    ) : (
+                      <button
+                        className="btn btn-secondary"
+                        type="button"
+                        disabled={promotingId === item.id}
+                        onClick={() => onPromote(item)}
+                      >
+                        {promotingId === item.id ? 'Promoting…' : 'Promote'}
+                      </button>
+                    )
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
