@@ -310,7 +310,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 
 - Tenant isolation is enforced at the API/query layer.
 - Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers` and `/api/integrations` require Admin/Owner.
-- `ResourceRoleAssignment` **models** object-level RBAC per asset/document/runbook/Keeper link, but no endpoint consults it yet, so it is not an enforced control today. See `docs/NEXT-ITEMS.md` §5.
+- `ResourceRoleAssignment` is enforced on asset, document, runbook and Keeper write routes (`POST`/`PUT`/`DELETE`) via `IResourceAuthorizationService`. A Contributor grant on one resource lets a Reader write that resource; without a grant they get 403. Tenant-wide Admin/Owner write without a grant. Creates still require a tenant-wide Contributor-or-above role.
 - **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every reveal is audit-logged.
 - SQL auth is used in the skeleton for portability. Plan to switch to **Active Directory Managed Identity** for production and create the contained database user for the App Service identity.
 - HTTPS only, TLS 1.2+, FTPS disabled, health checks exposed.

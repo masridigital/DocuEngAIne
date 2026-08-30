@@ -50,56 +50,9 @@ public static class DocumentEndpoints
             });
         });
 
-        group.MapPost("", async (
-            [FromBody] CreateDocumentRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            // The document does not exist yet, so no grant can name it: creation gates on the
-            // tenant-wide role.
-            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Document, cancellationToken) is { } denied)
-                return denied;
-
-            return await CreateAsync(request, db, user, cancellationToken);
-        });
-
-        group.MapPut("/{id:guid}", async (
-            Guid id,
-            [FromBody] UpdateDocumentRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
-                return denied;
-
-            return await UpdateAsync(id, request, db, user, cancellationToken);
-        });
-
-        group.MapDelete("/{id:guid}", async (
-            Guid id,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
-                return denied;
-
-            var doc = await db.Documents
-                .ForTenant(user)
-                .FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
-
-            if (doc is null)
-                return Results.NotFound();
-
-            db.Documents.Remove(doc);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+        group.MapPost("", PostAsync);
+        group.MapPut("/{id:guid}", PutAsync);
+        group.MapDelete("/{id:guid}", DeleteAsync);
 
         group.MapGet("/{id:guid}/versions", async (
             Guid id,
@@ -142,52 +95,7 @@ public static class DocumentEndpoints
             });
         });
 
-        group.MapPost("/{id:guid}/restore", async (
-            Guid id,
-            [FromBody] RestoreVersionRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            // Restoring rewrites the document's current content, so it is a write on the document
-            // itself even though the route reads like history navigation.
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
-                return denied;
-
-            var doc = await db.Documents.ForTenant(user).FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
-            if (doc is null)
-                return Results.NotFound();
-
-            var version = await db.DocumentVersions
-                .FirstOrDefaultAsync(v => v.DocumentId == id && v.Id == request.VersionId, cancellationToken);
-
-            if (version is null)
-                return Results.NotFound();
-
-            var nextVersionNumber = (await db.DocumentVersions.Where(v => v.DocumentId == id).MaxAsync(v => (int?)v.VersionNumber, cancellationToken) ?? 0) + 1;
-
-            db.DocumentVersions.Add(new DocumentVersion
-            {
-                DocumentId = doc.Id,
-                VersionNumber = nextVersionNumber,
-                Title = doc.Title,
-                Slug = doc.Slug,
-                Summary = doc.Summary,
-                Content = doc.Content,
-                Tags = doc.Tags,
-                ChangeNote = $"Restore before version {version.VersionNumber}",
-            });
-
-            doc.Title = version.Title;
-            doc.Slug = version.Slug;
-            doc.Summary = version.Summary;
-            doc.Content = version.Content;
-            doc.Tags = version.Tags;
-
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+        group.MapPost("/{id:guid}/restore", RestoreAsync);
 
         return app;
     }
@@ -229,6 +137,104 @@ public static class DocumentEndpoints
             .ToListAsync(cancellationToken);
 
         return docs;
+    }
+
+    public static async Task<IResult> PostAsync(
+        [FromBody] CreateDocumentRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        // The document does not exist yet, so no grant can name it: creation gates on the
+        // tenant-wide role.
+        if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Document, cancellationToken) is { } denied)
+            return denied;
+
+        return await CreateAsync(request, db, user, cancellationToken);
+    }
+
+    public static async Task<IResult> PutAsync(
+        Guid id,
+        [FromBody] UpdateDocumentRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
+            return denied;
+
+        return await UpdateAsync(id, request, db, user, cancellationToken);
+    }
+
+    public static async Task<IResult> DeleteAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
+            return denied;
+
+        var doc = await db.Documents
+            .ForTenant(user)
+            .FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
+
+        if (doc is null)
+            return Results.NotFound();
+
+        db.Documents.Remove(doc);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
+    }
+
+    public static async Task<IResult> RestoreAsync(
+        Guid id,
+        [FromBody] RestoreVersionRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        // Restoring rewrites the document's current content, so it is a write on the document
+        // itself even though the route reads like history navigation.
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
+            return denied;
+
+        var doc = await db.Documents.ForTenant(user).FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
+        if (doc is null)
+            return Results.NotFound();
+
+        var version = await db.DocumentVersions
+            .FirstOrDefaultAsync(v => v.DocumentId == id && v.Id == request.VersionId, cancellationToken);
+
+        if (version is null)
+            return Results.NotFound();
+
+        var nextVersionNumber = (await db.DocumentVersions.Where(v => v.DocumentId == id).MaxAsync(v => (int?)v.VersionNumber, cancellationToken) ?? 0) + 1;
+
+        db.DocumentVersions.Add(new DocumentVersion
+        {
+            DocumentId = doc.Id,
+            VersionNumber = nextVersionNumber,
+            Title = doc.Title,
+            Slug = doc.Slug,
+            Summary = doc.Summary,
+            Content = doc.Content,
+            Tags = doc.Tags,
+            ChangeNote = $"Restore before version {version.VersionNumber}",
+        });
+
+        doc.Title = version.Title;
+        doc.Slug = version.Slug;
+        doc.Summary = version.Summary;
+        doc.Content = version.Content;
+        doc.Tags = version.Tags;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
     }
 
     public static async Task<IResult> CreateAsync(

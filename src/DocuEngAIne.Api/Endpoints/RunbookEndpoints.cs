@@ -43,53 +43,9 @@ public static class RunbookEndpoints
             CancellationToken cancellationToken) =>
             await GetAsync(id, db, user, cancellationToken));
 
-        group.MapPost("", async (
-            [FromBody] CreateRunbookRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            // The runbook does not exist yet, so no grant can name it: creation gates on the
-            // tenant-wide role.
-            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Runbook, cancellationToken) is { } denied)
-                return denied;
-
-            return await CreateAsync(request, db, user, cancellationToken);
-        });
-
-        group.MapPut("/{id:guid}", async (
-            Guid id,
-            [FromBody] UpdateRunbookRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
-                return denied;
-
-            return await UpdateAsync(id, request, db, user, cancellationToken);
-        });
-
-        group.MapDelete("/{id:guid}", async (
-            Guid id,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
-                return denied;
-
-            var runbook = await db.Runbooks.ForTenant(user).FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
-            if (runbook is null)
-                return Results.NotFound();
-
-            db.Runbooks.Remove(runbook);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+        group.MapPost("", PostAsync);
+        group.MapPut("/{id:guid}", PutAsync);
+        group.MapDelete("/{id:guid}", DeleteAsync);
 
         group.MapGet("/{id:guid}/runs", async (
             Guid id,
@@ -210,6 +166,54 @@ public static class RunbookEndpoints
                 s.ExpectedOutput)).ToList(),
             runbook.UpdatedAt,
             runCount));
+    }
+
+    public static async Task<IResult> PostAsync(
+        [FromBody] CreateRunbookRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        // The runbook does not exist yet, so no grant can name it: creation gates on the
+        // tenant-wide role.
+        if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Runbook, cancellationToken) is { } denied)
+            return denied;
+
+        return await CreateAsync(request, db, user, cancellationToken);
+    }
+
+    public static async Task<IResult> PutAsync(
+        Guid id,
+        [FromBody] UpdateRunbookRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
+            return denied;
+
+        return await UpdateAsync(id, request, db, user, cancellationToken);
+    }
+
+    public static async Task<IResult> DeleteAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
+            return denied;
+
+        var runbook = await db.Runbooks.ForTenant(user).FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
+        if (runbook is null)
+            return Results.NotFound();
+
+        db.Runbooks.Remove(runbook);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
     }
 
     public static async Task<IResult> CreateAsync(

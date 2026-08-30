@@ -66,55 +66,59 @@ public static class KeeperLinkEndpoints
             return Results.Ok(new { link.KeeperRecordUrl, link.Name });
         });
 
-        group.MapPost("", async (
-            [FromBody] CreateKeeperLinkRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            // The link does not exist yet, so no grant can name it: creation gates on the tenant-wide
-            // role.
-            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.KeeperLink, cancellationToken) is { } denied)
-                return denied;
-
-            return await CreateAsync(request, db, user, cancellationToken);
-        });
-
-        group.MapPut("/{id:guid}", async (
-            Guid id,
-            [FromBody] UpdateKeeperLinkRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.KeeperLink, cancellationToken) is { } denied)
-                return denied;
-
-            return await UpdateAsync(id, request, db, user, cancellationToken);
-        });
-
-        group.MapDelete("/{id:guid}", async (
-            Guid id,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.KeeperLink, cancellationToken) is { } denied)
-                return denied;
-
-            var link = await db.KeeperLinks.ForTenant(user).FirstOrDefaultAsync(k => k.Id == id, cancellationToken);
-            if (link is null)
-                return Results.NotFound();
-
-            db.KeeperLinks.Remove(link);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+        group.MapPost("", PostAsync);
+        group.MapPut("/{id:guid}", PutAsync);
+        group.MapDelete("/{id:guid}", DeleteAsync);
 
         return app;
+    }
+
+    public static async Task<IResult> PostAsync(
+        [FromBody] CreateKeeperLinkRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        // The link does not exist yet, so no grant can name it: creation gates on the tenant-wide
+        // role.
+        if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.KeeperLink, cancellationToken) is { } denied)
+            return denied;
+
+        return await CreateAsync(request, db, user, cancellationToken);
+    }
+
+    public static async Task<IResult> PutAsync(
+        Guid id,
+        [FromBody] UpdateKeeperLinkRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.KeeperLink, cancellationToken) is { } denied)
+            return denied;
+
+        return await UpdateAsync(id, request, db, user, cancellationToken);
+    }
+
+    public static async Task<IResult> DeleteAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.KeeperLink, cancellationToken) is { } denied)
+            return denied;
+
+        var link = await db.KeeperLinks.ForTenant(user).FirstOrDefaultAsync(k => k.Id == id, cancellationToken);
+        if (link is null)
+            return Results.NotFound();
+
+        db.KeeperLinks.Remove(link);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
     }
 
     public static async Task<IResult> CreateAsync(

@@ -111,31 +111,27 @@ Two independent gaps, both fine for local development and both blocking the firs
 - **Migrations on deploy.** `azure-deploy.yml` never applies them. Build a
   `dotnet ef migrations bundle` artifact and run it in `deploy-api` before the zip deploy.
 
-### 5. Enforce the authorization that already exists — **partly done**
+### 5. Enforce the authorization that already exists — **done**
 
 Shipped: `RequireAdmin` now gates `/api/mcp/servers` and `/api/integrations`, as a requirement +
 handler accepting an Entra `Admin`/`Owner` app-role claim **or** a `User` row with `Role >= Admin`
 (claims-only would have gated these routes on an optional setup step). `/api/me` provisions `Reader`,
 and `POST /api/tenant/onboard` grants the onboarding caller `Owner` in the same save as the tenant.
 
-Still open, and the more important half: **`IResourceAuthorizationService` is still called by no
-endpoint.** The README's claim that object-level `ResourceRoleAssignment` overrides a tenant-wide role
-remains false — a grant of Contributor on one document is consulted nowhere. Thread `EnforceAsync`
-through the asset/document/runbook/Keeper write paths, or drop the claim from the README.
+Shipped: every asset / document / runbook / Keeper write (`POST`/`PUT`/`DELETE`) goes through
+`ResourceWriteGuard`, which consults `IResourceAuthorizationService.CanWriteAsync` (the boolean
+form of `EnforceAsync` — the throwing form would surface as a 500). A Contributor grant on one
+document lets that Reader write that document and no other; absence is 403. Tenant-wide
+Admin/Owner (and Contributor) write without a grant. Creates gate on the tenant-wide role because
+nothing exists yet to name in a grant.
 
-Also still open: role management (see 5b) — nothing can change a `User.Role` after onboarding.
+Role management shipped in 5b.
 
-### 5b. Add role management — surfaced by the authorization work
+### 5b. Add role management — **done**
 
-With admin routes gated and auto-provisioning defaulted to `Reader`, **nothing in the codebase can
-change a `User.Role`**. The first user in a tenant is bootstrapped to `Owner`; everyone after is a
-`Reader` forever, and if that first person leaves, the tenant has no admin and no in-app recovery.
-
-An admin-gated `PUT /api/users/{id}/role` (plus a users list) is the smallest thing that makes the
-gate usable. Treat it as part of shipping authorization, not a follow-up.
-
-Note this is only safe to ship *because* nothing has been deployed yet — there are no existing tenants
-carrying the old `Contributor` default to be locked out.
+Shipped: admin-gated `GET /api/users` and `PUT /api/users/{id}/role`. Granting or revoking
+`Owner` requires an existing Owner, with a hatch that lets any admin-policy caller appoint one
+when the tenant has zero active Owners.
 
 ### 6. Resume the feature chain
 

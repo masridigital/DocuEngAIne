@@ -133,96 +133,100 @@ public static class AssetEndpoints
             return asset is null ? Results.NotFound() : Results.Ok(MapAsset(asset));
         });
 
-        group.MapPost("", async (
-            [FromBody] CreateAssetRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            // The asset does not exist yet, so no grant can name it: creation gates on the
-            // tenant-wide role.
-            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Asset, cancellationToken) is { } denied)
-                return denied;
-
-            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
-                return badCompany;
-
-            var asset = new Asset
-            {
-                TenantId = user.TenantId!.Value,
-                Name = request.Name,
-                Location = request.Location,
-                Notes = request.Notes,
-                Status = request.Status ?? "Active",
-                AssetTypeId = request.AssetTypeId,
-                CompanyId = request.CompanyId,
-                ExpiresAt = request.ExpiresAt,
-            };
-
-            db.Assets.Add(asset);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.Created($"/api/assets/{asset.Id}", new { asset.Id, asset.Name });
-        });
-
-        group.MapPut("/{id:guid}", async (
-            Guid id,
-            [FromBody] UpdateAssetRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
-                return denied;
-
-            var asset = await db.Assets
-                .ForTenant(user)
-                .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
-
-            if (asset is null)
-                return Results.NotFound();
-
-            if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
-                return badCompany;
-            if (request.CompanyId is Guid companyId)
-                asset.CompanyId = companyId;
-
-            asset.Name = request.Name ?? asset.Name;
-            asset.Location = request.Location ?? asset.Location;
-            asset.Notes = request.Notes ?? asset.Notes;
-            asset.Status = request.Status ?? asset.Status;
-            asset.AssetTypeId = request.AssetTypeId ?? asset.AssetTypeId;
-            if (request.ExpiresAt.HasValue)
-                asset.ExpiresAt = request.ExpiresAt;
-
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
-
-        group.MapDelete("/{id:guid}", async (
-            Guid id,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
-                return denied;
-
-            var asset = await db.Assets
-                .ForTenant(user)
-                .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
-
-            if (asset is null)
-                return Results.NotFound();
-
-            db.Assets.Remove(asset);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+        group.MapPost("", PostAsync);
+        group.MapPut("/{id:guid}", PutAsync);
+        group.MapDelete("/{id:guid}", DeleteAsync);
 
         return app;
+    }
+
+    public static async Task<IResult> PostAsync(
+        [FromBody] CreateAssetRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        // The asset does not exist yet, so no grant can name it: creation gates on the
+        // tenant-wide role.
+        if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Asset, cancellationToken) is { } denied)
+            return denied;
+
+        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+            return badCompany;
+
+        var asset = new Asset
+        {
+            TenantId = user.TenantId!.Value,
+            Name = request.Name,
+            Location = request.Location,
+            Notes = request.Notes,
+            Status = request.Status ?? "Active",
+            AssetTypeId = request.AssetTypeId,
+            CompanyId = request.CompanyId,
+            ExpiresAt = request.ExpiresAt,
+        };
+
+        db.Assets.Add(asset);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.Created($"/api/assets/{asset.Id}", new { asset.Id, asset.Name });
+    }
+
+    public static async Task<IResult> PutAsync(
+        Guid id,
+        [FromBody] UpdateAssetRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
+            return denied;
+
+        var asset = await db.Assets
+            .ForTenant(user)
+            .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+
+        if (asset is null)
+            return Results.NotFound();
+
+        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+            return badCompany;
+        if (request.CompanyId is Guid companyId)
+            asset.CompanyId = companyId;
+
+        asset.Name = request.Name ?? asset.Name;
+        asset.Location = request.Location ?? asset.Location;
+        asset.Notes = request.Notes ?? asset.Notes;
+        asset.Status = request.Status ?? asset.Status;
+        asset.AssetTypeId = request.AssetTypeId ?? asset.AssetTypeId;
+        if (request.ExpiresAt.HasValue)
+            asset.ExpiresAt = request.ExpiresAt;
+
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
+    }
+
+    public static async Task<IResult> DeleteAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
+            return denied;
+
+        var asset = await db.Assets
+            .ForTenant(user)
+            .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+
+        if (asset is null)
+            return Results.NotFound();
+
+        db.Assets.Remove(asset);
+        await db.SaveChangesAsync(cancellationToken);
+        return Results.NoContent();
     }
 
     private static object MapAsset(Asset asset)
