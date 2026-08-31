@@ -4,6 +4,7 @@ using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
 using DocuEngAIne.Infrastructure.Integrations;
 using DocuEngAIne.Infrastructure.Integrations.Migration;
+using DocuEngAIne.Infrastructure.Llm;
 using DocuEngAIne.Infrastructure.Search;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -25,6 +26,7 @@ public static class DependencyInjection
         services.AddScoped<IAuditService, AuditService>();
         services.AddHttpClient(nameof(HttpMcpClient));
         services.AddScoped<IMcpClient, HttpMcpClient>();
+        services.AddLlmClients(configuration);
         services.AddScoped<IIntegrationSyncService, IntegrationSyncService>();
         services.AddScoped<IItGlueMigrationService, ItGlueMigrationService>();
         services.Configure<AzureSearchOptions>(configuration.GetSection(AzureSearchOptions.SectionName));

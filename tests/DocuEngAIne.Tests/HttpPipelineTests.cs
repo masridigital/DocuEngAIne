@@ -19,6 +19,18 @@ public class HttpPipelineTests : IClassFixture<TestHost>
     public HttpPipelineTests(TestHost host) => _host = host;
 
     [Fact]
+    public async Task Unauthenticated_Llm_Chat_Returns_401()
+    {
+        using var client = _host.CreateAnonymousClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/llm/chat",
+            new LlmChatRequest([new LlmChatMessageRequest("user", "hello")]));
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Unauthenticated_Companies_Returns_401()
     {
         using var client = _host.CreateAnonymousClient();

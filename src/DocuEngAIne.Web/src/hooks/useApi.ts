@@ -389,6 +389,25 @@ export function createFolder(input: { name: string; parentId?: string | null; co
   return postJson<DocumentFolder>('/api/folders', input)
 }
 
+export type DocumentAssistAction = 'summarize' | 'rewrite'
+
+export type DocumentAssistRequest = {
+  action: DocumentAssistAction
+  instruction?: string
+  apply?: boolean
+}
+
+export type DocumentAssistResponse = {
+  content: string
+  model: string
+  provider: string
+}
+
+/** Preview (default) or apply an LLM summarize/rewrite for one document. */
+export function assistDocument(id: string, input: DocumentAssistRequest) {
+  return postJson<DocumentAssistResponse>(`/api/documents/${id}/assist`, input)
+}
+
 export type Runbook = {
   id: string
   title: string
@@ -486,6 +505,16 @@ export function useMcpServers() {
 
 export function useIntegrations() {
   return useSWR<IntegrationConnection[]>('/api/integrations', fetcher)
+}
+
+export type LlmConfig = {
+  provider: string
+  model: string
+}
+
+/** Current LLM provider and model from appsettings / Key Vault. Never includes API keys. */
+export function useLlmConfig() {
+  return useSWR<LlmConfig>('/api/llm/config', fetcher)
 }
 
 export type SyncRunStatus = 'Running' | 'Succeeded' | 'Failed' | 'Partial'
