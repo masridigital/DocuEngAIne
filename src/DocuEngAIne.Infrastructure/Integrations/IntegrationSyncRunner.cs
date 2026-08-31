@@ -96,13 +96,14 @@ public sealed class IntegrationSyncRunner
             .Where(c => c.IsEnabled && c.McpServerId != null)
             .ToListAsync(cancellationToken);
 
+        var now = DateTimeOffset.UtcNow;
+        await ReapStaleRunsAsync(db, user, now, cancellationToken);
+
         var running = (await db.SyncRuns.ForTenant(user)
             .AsNoTracking()
             .Where(r => r.Status == SyncRunStatus.Running)
             .Select(r => r.IntegrationConnectionId)
             .ToListAsync(cancellationToken)).ToHashSet();
-
-        var now = DateTimeOffset.UtcNow;
         foreach (var connection in connections)
         {
             if (connection.TenantId != tenantId)
@@ -144,6 +145,38 @@ public sealed class IntegrationSyncRunner
                 _inFlight.TryRemove(connection.Id, out _);
             }
         }
+    }
+
+    /// <summary>
+    /// Fails runs stuck in Running past <see cref="IntegrationSyncWork.StaleRunningThreshold"/> —
+    /// crash leftovers whose finish write never happened. Without this, the leftover keeps the
+    /// connection in the scheduler's running set forever and it is never synced again.
+    /// </summary>
+    private async Task ReapStaleRunsAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        var staleBefore = now - IntegrationSyncWork.StaleRunningThreshold;
+        var stale = await db.SyncRuns.ForTenant(user)
+            .Where(r => r.Status == SyncRunStatus.Running && r.StartedAt < staleBefore)
+            .ToListAsync(cancellationToken);
+        if (stale.Count == 0)
+            return;
+
+        foreach (var run in stale)
+        {
+            run.Status = SyncRunStatus.Failed;
+            run.FinishedAt = now;
+            run.ErrorSummary =
+                $"Marked failed by the scheduler: still Running {IntegrationSyncWork.StaleRunningThreshold.TotalMinutes:0} minutes after it started.";
+            _logger.LogWarning(
+                "Reaped stale sync run {RunId} for connection {ConnectionId} (started {StartedAt:u}).",
+                run.Id, run.IntegrationConnectionId, run.StartedAt);
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
     }
 
     private IServiceScope OpenTenantScope(Guid tenantId)

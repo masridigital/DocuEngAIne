@@ -9,6 +9,19 @@ public interface IIntegrationSyncService
     Task<SyncRun> SyncFromPayloadAsync(Guid connectionId, IReadOnlyList<ExternalCompanyDto> companies, CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// Thrown by <see cref="IIntegrationSyncService"/> when a sync is refused because another run for
+/// the same connection is still live. Two concurrent runs double-spend the StackJack allowance and
+/// fight over the same mappings, so the second caller is told to wait rather than queued.
+/// </summary>
+public sealed class SyncAlreadyRunningException : InvalidOperationException
+{
+    public SyncAlreadyRunningException()
+        : base("A sync is already running for this integration.")
+    {
+    }
+}
+
 public record ExternalCompanyDto(
     string ExternalId,
     string Name,

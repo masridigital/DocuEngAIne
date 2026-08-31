@@ -27,6 +27,15 @@ public class IntegrationSyncSchedulerTests
             => Task.FromResult("""{"result":{"content":[{"type":"text","text":"{\"clients\":[]}"}]}}""");
     }
 
+    private sealed class ThrowingMcp : IMcpClient
+    {
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Compact unreachable.");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+            => throw new InvalidOperationException("Compact unreachable.");
+    }
+
     [Fact]
     public void BackgroundCurrentUser_ForTenant_Is_Pinned_To_That_Tenant()
     {
@@ -232,17 +241,100 @@ public class IntegrationSyncSchedulerTests
         Assert.Equal(SyncRunStatus.Running, runs[0].Status);
     }
 
+    [Fact]
+    public async Task Stale_Running_Run_Is_Reaped_And_The_Connection_Syncs_Again()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await using var sp = BuildProvider(dbName);
+        var tenantId = Guid.NewGuid();
+
+        Guid connectionId, staleRunId;
+        await using (var seed = OpenBound(sp, tenantId))
+        {
+            var server = await AddCompactServerAsync(seed.Db, tenantId);
+            var connection = DueHalo(tenantId, server.Id);
+            seed.Db.IntegrationConnections.Add(connection);
+            await seed.Db.SaveChangesAsync();
+
+            var stuck = new SyncRun
+            {
+                TenantId = tenantId,
+                IntegrationConnectionId = connection.Id,
+                StartedAt = DateTimeOffset.UtcNow - IntegrationSyncWork.StaleRunningThreshold - TimeSpan.FromMinutes(10),
+                Status = SyncRunStatus.Running,
+            };
+            seed.Db.SyncRuns.Add(stuck);
+            await seed.Db.SaveChangesAsync();
+            connectionId = connection.Id;
+            staleRunId = stuck.Id;
+        }
+
+        var result = await CreateRunner(sp).RunDueAsync();
+
+        // Without the reap, the crash leftover kept the connection in the running set forever.
+        Assert.Contains(connectionId, result.QueuedConnectionIds);
+        Assert.DoesNotContain(connectionId, result.SkippedOverlapConnectionIds);
+
+        await using var check = OpenBound(sp, tenantId);
+        var reaped = await check.Db.SyncRuns.ForTenant(check.User).SingleAsync(r => r.Id == staleRunId);
+        Assert.Equal(SyncRunStatus.Failed, reaped.Status);
+        Assert.NotNull(reaped.FinishedAt);
+        Assert.Contains("scheduler", reaped.ErrorSummary, StringComparison.OrdinalIgnoreCase);
+        Assert.True(await check.Db.SyncRuns.ForTenant(check.User).AnyAsync(r => r.Id != staleRunId),
+            "the reaped connection should have been synced again this tick");
+    }
+
+    [Fact]
+    public async Task Failed_Run_Backs_Off_Instead_Of_Retrying_Next_Tick()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await using var sp = BuildProvider(dbName, new ThrowingMcp());
+        var tenantId = Guid.NewGuid();
+
+        Guid connectionId;
+        await using (var seed = OpenBound(sp, tenantId))
+        {
+            var server = await AddCompactServerAsync(seed.Db, tenantId);
+            var connection = DueHalo(tenantId, server.Id);
+            seed.Db.IntegrationConnections.Add(connection);
+            await seed.Db.SaveChangesAsync();
+            connectionId = connection.Id;
+        }
+
+        var first = await CreateRunner(sp).RunDueAsync();
+        Assert.Contains(connectionId, first.QueuedConnectionIds);
+
+        await using (var check = OpenBound(sp, tenantId))
+        {
+            var run = await check.Db.SyncRuns.ForTenant(check.User).SingleAsync();
+            Assert.Equal(SyncRunStatus.Failed, run.Status);
+            var connection = await check.Db.IntegrationConnections.ForTenant(check.User).SingleAsync();
+            Assert.NotNull(connection.LastAttemptAt);
+            Assert.Null(connection.LastSyncAt);
+        }
+
+        // The next tick must NOT pick the connection up again — before LastAttemptAt existed, a
+        // failing connection retried every minute and burned the plan allowance.
+        var second = await CreateRunner(sp).RunDueAsync();
+        Assert.DoesNotContain(connectionId, second.QueuedConnectionIds);
+
+        await using (var recheck = OpenBound(sp, tenantId))
+        {
+            Assert.Equal(1, await recheck.Db.SyncRuns.ForTenant(recheck.User).CountAsync());
+        }
+    }
+
     private static IntegrationSyncRunner CreateRunner(ServiceProvider sp)
         => new(sp.GetRequiredService<IServiceScopeFactory>(), NullLogger<IntegrationSyncRunner>.Instance);
 
-    private static ServiceProvider BuildProvider(string dbName)
+    private static ServiceProvider BuildProvider(string dbName, IMcpClient? mcp = null)
     {
         var services = new ServiceCollection();
         services.AddHttpContextAccessor();
         services.AddScoped<IBackgroundTenantContext, BackgroundTenantContext>();
         services.AddScoped<ICurrentUser, CurrentUser>();
         services.AddDbContext<DocuEngAIneDbContext>(o => o.UseInMemoryDatabase(dbName));
-        services.AddScoped<IMcpClient, NoopMcp>();
+        services.AddScoped<IMcpClient>(_ => mcp ?? new NoopMcp());
         services.AddScoped<IAuditService, NoopAudit>();
         services.AddScoped<IIntegrationSyncService, IntegrationSyncService>();
         return services.BuildServiceProvider();

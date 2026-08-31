@@ -369,17 +369,24 @@ public static class IntegrationEndpoints
         if (!exists)
             return Results.NotFound();
 
-        if (request?.Companies is { Count: > 0 })
+        try
         {
-            var run = await sync.SyncFromPayloadAsync(id, request.Companies.Select(c =>
-                new ExternalCompanyDto(c.ExternalId, c.Name, c.Slug, c.PrimaryDomain, c.City, c.State, c.Website, c.Address, c.IsInactive)).ToList(), ct);
-            return Results.Ok(MapRun(run));
-        }
+            if (request?.Companies is { Count: > 0 })
+            {
+                var run = await sync.SyncFromPayloadAsync(id, request.Companies.Select(c =>
+                    new ExternalCompanyDto(c.ExternalId, c.Name, c.Slug, c.PrimaryDomain, c.City, c.State, c.Website, c.Address, c.IsInactive)).ToList(), ct);
+                return Results.Ok(MapRun(run));
+            }
 
-        var result = await sync.SyncAsync(id, ct);
-        return result.Status == SyncRunStatus.Succeeded
-            ? Results.Ok(MapRun(result))
-            : Results.BadRequest(MapRun(result));
+            var result = await sync.SyncAsync(id, ct);
+            return result.Status == SyncRunStatus.Succeeded
+                ? Results.Ok(MapRun(result))
+                : Results.BadRequest(MapRun(result));
+        }
+        catch (SyncAlreadyRunningException ex)
+        {
+            return Results.Conflict(new { error = ex.Message });
+        }
     }
 
     private static object MapServer(McpServer s) => new

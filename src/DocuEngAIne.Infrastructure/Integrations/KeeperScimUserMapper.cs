@@ -92,10 +92,19 @@ public static class KeeperScimUserMapper
             var pageNow = pageStart ?? startIndex;
             var pageLen = itemsPerPage ?? rowCount;
             var next = pageNow + pageLen;
-            if (totalResults is int total && next > total)
+            if (totalResults is int total)
+            {
+                // totalResults is authoritative. A page shorter than the requested size is NOT an
+                // end signal here: SCIM servers may clamp count to a smaller itemsPerPage, and
+                // breaking on rowCount < size would silently drop everything past the first page.
+                if (next > total)
+                    break;
+            }
+            else if (rowCount < size)
+            {
+                // No totalResults reported: a short page is the only end-of-list signal left.
                 break;
-            if (rowCount < size)
-                break;
+            }
             startIndex = next;
         }
         return links;

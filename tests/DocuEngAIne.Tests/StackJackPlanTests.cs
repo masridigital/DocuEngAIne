@@ -157,6 +157,29 @@ public class StackJackPlanTests
         Assert.Null(SyncCadencePolicy.NextDueAt(connection));
     }
 
+    [Fact]
+    public void NextDueAt_Uses_The_Later_Of_Success_And_Attempt()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var connection = NewConnection(StackJackPlan.Enterprise, int.MaxValue); // 15-minute floor
+
+        // A connection whose runs keep failing has an old (or no) LastSyncAt but a fresh
+        // LastAttemptAt — it must wait out its interval, not retry on the next poll tick.
+        connection.LastSyncAt = null;
+        connection.LastAttemptAt = now.AddMinutes(-1);
+        var due = SyncCadencePolicy.NextDueAt(connection, now)!.Value;
+        Assert.True(due > now, "a just-attempted connection is not due again yet");
+        Assert.Equal(now.AddMinutes(14), due, TimeSpan.FromSeconds(5));
+
+        connection.LastSyncAt = now.AddHours(-3);
+        Assert.Equal(now.AddMinutes(14), SyncCadencePolicy.NextDueAt(connection, now)!.Value, TimeSpan.FromSeconds(5));
+
+        // A stale attempt never delays a fresher success.
+        connection.LastSyncAt = now.AddMinutes(-2);
+        connection.LastAttemptAt = now.AddHours(-3);
+        Assert.Equal(now.AddMinutes(13), SyncCadencePolicy.NextDueAt(connection, now)!.Value, TimeSpan.FromSeconds(5));
+    }
+
     private static IntegrationConnection NewConnection(StackJackPlan plan, int? limit) => new()
     {
         TenantId = Guid.NewGuid(),

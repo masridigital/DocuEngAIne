@@ -33,6 +33,7 @@ public class AuditService : IAuditService
         {
             TenantId = _currentUser.TenantId,
             UserId = userId,
+            ActorObjectId = _currentUser.ObjectId,
             Action = action,
             EntityType = entityType,
             EntityId = entityId,

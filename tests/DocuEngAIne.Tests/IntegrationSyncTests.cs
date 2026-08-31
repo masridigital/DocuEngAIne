@@ -540,6 +540,61 @@ public class IntegrationSyncTests
     }
 
     [Fact]
+    public async Task Sync_Refuses_While_Another_Run_Is_Live_But_Not_After_It_Goes_Stale()
+    {
+        var (db, user, sync) = Create();
+        var (_, connection) = await SeedHaloCompactAsync(db, user);
+
+        var stuck = new SyncRun
+        {
+            TenantId = user.TenantId!.Value,
+            IntegrationConnectionId = connection.Id,
+            StartedAt = DateTimeOffset.UtcNow,
+            Status = SyncRunStatus.Running,
+        };
+        db.SyncRuns.Add(stuck);
+        await db.SaveChangesAsync();
+
+        // Both entry points refuse while a run is live: a second concurrent run double-spends the
+        // plan allowance and fights the first over the same mappings.
+        await Assert.ThrowsAsync<SyncAlreadyRunningException>(() => sync.SyncAsync(connection.Id));
+        await Assert.ThrowsAsync<SyncAlreadyRunningException>(() =>
+            sync.SyncFromPayloadAsync(connection.Id, [new ExternalCompanyDto("1", "Acme")]));
+
+        // A crash leftover past the stale threshold must not block manual recovery.
+        stuck.StartedAt = DateTimeOffset.UtcNow - IntegrationSyncWork.StaleRunningThreshold - TimeSpan.FromMinutes(5);
+        await db.SaveChangesAsync();
+
+        var run = await sync.SyncFromPayloadAsync(connection.Id, [new ExternalCompanyDto("1", "Acme")]);
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+    }
+
+    [Fact]
+    public async Task Failed_Sync_Stamps_LastAttemptAt_For_Cadence_Backoff()
+    {
+        var mcp = new RecordingMcp { Clients = [new { id = 1, name = "ShouldNotImport" }] };
+        var (db, user, sync) = Create(mcp);
+        var connection = new IntegrationConnection
+        {
+            TenantId = user.TenantId!.Value,
+            Provider = IntegrationProvider.Halo,
+            DisplayName = "Halo",
+            AuthSecretName = "kv-name-only",
+        };
+        db.IntegrationConnections.Add(connection);
+        await db.SaveChangesAsync();
+
+        var before = DateTimeOffset.UtcNow;
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Failed, run.Status);
+        var refreshed = await db.IntegrationConnections.AsNoTracking().SingleAsync(c => c.Id == connection.Id);
+        Assert.NotNull(refreshed.LastAttemptAt);
+        Assert.True(refreshed.LastAttemptAt >= before);
+        Assert.Null(refreshed.LastSyncAt);
+    }
+
+    [Fact]
     public async Task Other_Tenant_Connection_Sync_Returns_404_And_Does_Not_Call_Mcp()
     {
         var dbName = Guid.NewGuid().ToString();

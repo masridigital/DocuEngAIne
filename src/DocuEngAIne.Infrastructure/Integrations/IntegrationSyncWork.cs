@@ -10,6 +10,14 @@ namespace DocuEngAIne.Infrastructure.Integrations;
 public static class IntegrationSyncWork
 {
     /// <summary>
+    /// A <c>SyncRun</c> still Running past this age is a crash leftover (the process died between
+    /// StartRunAsync and the finish write), not live work — a run is ~10 tool calls and finishes in
+    /// minutes. The scheduler reaps such runs as Failed; until it does, they must neither block the
+    /// connection's next scheduled sync nor refuse a manual one, or the connection starves forever.
+    /// </summary>
+    public static readonly TimeSpan StaleRunningThreshold = TimeSpan.FromHours(1);
+
+    /// <summary>
     /// Connections that are enabled, have a Compact <c>McpServerId</c>, are due now, and do not
     /// already have a live <c>SyncRun</c>. Order is stable for tests.
     /// </summary>

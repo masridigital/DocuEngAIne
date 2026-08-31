@@ -35,6 +35,9 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .HasMaxLength(128)
                         .HasColumnType("nvarchar(128)");
 
+                    b.Property<DateTimeOffset?>("ExpiresAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<DateTimeOffset?>("LastUsedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -192,6 +195,10 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<string>("Action")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("ActorObjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
 
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
@@ -648,6 +655,9 @@ namespace DocuEngAIne.Api.Data.Migrations
 
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("bit");
+
+                    b.Property<DateTimeOffset?>("LastAttemptAt")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<string>("LastError")
                         .HasColumnType("nvarchar(max)");

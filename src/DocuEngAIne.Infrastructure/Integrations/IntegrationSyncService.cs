@@ -89,6 +89,10 @@ public class IntegrationSyncService : IIntegrationSyncService
             .FirstOrDefaultAsync(c => c.Id == connectionId, cancellationToken)
             ?? throw new InvalidOperationException("Integration not found.");
 
+        // Before the provider pull, not just before the upsert: the pull is where the plan
+        // allowance is spent, so a racing second run must be refused before its first MCP call.
+        await EnsureNoLiveRunAsync(connection.Id, cancellationToken);
+
         if (connection.Provider == IntegrationProvider.Halo)
         {
             if (await ResolveMcpServerIdAsync(connection, cancellationToken) is not Guid mcpId)
@@ -98,6 +102,10 @@ public class IntegrationSyncService : IIntegrationSyncService
             {
                 var companies = await PullHaloCompaniesAsync(connection, mcpId, cancellationToken);
                 return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+            }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
             }
             catch (Exception ex)
             {
@@ -126,6 +134,10 @@ public class IntegrationSyncService : IIntegrationSyncService
                     await SyncDevicesAsync(connection, run, devices, cancellationToken);
                 return run;
             }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
+            }
             catch (Exception ex)
             {
                 return await FailRunAsync(connection, ex.Message, cancellationToken);
@@ -141,6 +153,10 @@ public class IntegrationSyncService : IIntegrationSyncService
             {
                 var companies = await PullCippCompaniesAsync(mcpId, cancellationToken);
                 return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+            }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
             }
             catch (Exception ex)
             {
@@ -158,6 +174,10 @@ public class IntegrationSyncService : IIntegrationSyncService
                 var companies = await PullMerakiCompaniesAsync(mcpId, cancellationToken);
                 return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
             }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
+            }
             catch (Exception ex)
             {
                 return await FailRunAsync(connection, ex.Message, cancellationToken);
@@ -173,6 +193,10 @@ public class IntegrationSyncService : IIntegrationSyncService
             {
                 var companies = await PullUniFiCompaniesAsync(mcpId, cancellationToken);
                 return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+            }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
             }
             catch (Exception ex)
             {
@@ -190,6 +214,10 @@ public class IntegrationSyncService : IIntegrationSyncService
                 var companies = await PullAction1CompaniesAsync(mcpId, cancellationToken);
                 return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
             }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
+            }
             catch (Exception ex)
             {
                 return await FailRunAsync(connection, ex.Message, cancellationToken);
@@ -205,6 +233,10 @@ public class IntegrationSyncService : IIntegrationSyncService
             {
                 var companies = await PullAutotaskCompaniesAsync(mcpId, cancellationToken);
                 return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+            }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
             }
             catch (Exception ex)
             {
@@ -222,6 +254,10 @@ public class IntegrationSyncService : IIntegrationSyncService
                 var companies = await PullBlackpointCompaniesAsync(mcpId, cancellationToken);
                 return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
             }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
+            }
             catch (Exception ex)
             {
                 return await FailRunAsync(connection, ex.Message, cancellationToken);
@@ -238,6 +274,10 @@ public class IntegrationSyncService : IIntegrationSyncService
                 var companies = await PullDefensXCompaniesAsync(mcpId, cancellationToken);
                 return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
             }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
+            }
             catch (Exception ex)
             {
                 return await FailRunAsync(connection, ex.Message, cancellationToken);
@@ -253,6 +293,10 @@ public class IntegrationSyncService : IIntegrationSyncService
             {
                 var companies = await PullPax8CompaniesAsync(mcpId, cancellationToken);
                 return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+            }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
             }
             catch (Exception ex)
             {
@@ -379,6 +423,10 @@ public class IntegrationSyncService : IIntegrationSyncService
         var connection = await _db.IntegrationConnections.ForTenant(_user)
             .FirstOrDefaultAsync(c => c.Id == connectionId, cancellationToken)
             ?? throw new InvalidOperationException("Integration not found.");
+
+        // Guards the payload entry point too — SyncAsync checks before its provider pull, but
+        // POST /api/integrations/{id}/sync with a body reaches here directly.
+        await EnsureNoLiveRunAsync(connection.Id, cancellationToken);
 
         var run = await StartRunAsync(connection, cancellationToken);
         connection.Status = IntegrationStatus.Syncing;
@@ -917,9 +965,32 @@ public class IntegrationSyncService : IIntegrationSyncService
             StartedAt = DateTimeOffset.UtcNow,
             Status = SyncRunStatus.Running,
         };
+        // Stamped at start, not finish, and on failures too: SyncCadencePolicy.NextDueAt keys off
+        // this so a failing connection backs off for its full interval instead of retrying each tick.
+        connection.LastAttemptAt = run.StartedAt;
         _db.SyncRuns.Add(run);
         await _db.SaveChangesAsync(cancellationToken);
         return run;
+    }
+
+    /// <summary>
+    /// Refuses to start when another run for this connection is still live. The scheduler already
+    /// skips running connections, but the manual HTTP sync path races it — and two concurrent runs
+    /// double-spend the plan allowance and fight over the same mappings. Runs older than
+    /// <see cref="IntegrationSyncWork.StaleRunningThreshold"/> don't count: they are crash leftovers
+    /// the scheduler reaps, and must not block manual recovery in the meantime.
+    /// </summary>
+    private async Task EnsureNoLiveRunAsync(Guid connectionId, CancellationToken cancellationToken)
+    {
+        var staleBefore = DateTimeOffset.UtcNow - IntegrationSyncWork.StaleRunningThreshold;
+        var hasLiveRun = await _db.SyncRuns.ForTenant(_user).AsNoTracking()
+            .AnyAsync(
+                r => r.IntegrationConnectionId == connectionId
+                    && r.Status == SyncRunStatus.Running
+                    && r.StartedAt >= staleBefore,
+                cancellationToken);
+        if (hasLiveRun)
+            throw new SyncAlreadyRunningException();
     }
 
     private async Task<string> EnsureUniqueSlugAsync(string slug, CancellationToken cancellationToken)

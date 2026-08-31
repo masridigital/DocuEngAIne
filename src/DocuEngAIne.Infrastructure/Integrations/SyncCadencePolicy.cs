@@ -102,8 +102,18 @@ public static class SyncCadencePolicy
             return null;
 
         var now = utcNow ?? DateTimeOffset.UtcNow;
-        // Never synced: due now.
-        return (connection.LastSyncAt ?? now.AddMinutes(-interval.Value))
-            .AddMinutes(interval.Value);
+
+        // The later of last success and last attempt. Deriving from LastSyncAt alone made every
+        // failed run due again on the next poll tick — a broken connector retried once a minute
+        // and could burn a Free plan's entire monthly allowance in a couple of hours.
+        var last = (connection.LastSyncAt, connection.LastAttemptAt) switch
+        {
+            (DateTimeOffset s, DateTimeOffset a) => s >= a ? s : a,
+            (DateTimeOffset s, null) => s,
+            (null, DateTimeOffset a) => a,
+            // Never attempted: due now.
+            _ => now.AddMinutes(-interval.Value),
+        };
+        return last.AddMinutes(interval.Value);
     }
 }
