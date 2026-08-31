@@ -140,7 +140,7 @@ Keep README direction: Azure AI Search + OpenAI RAG over documents, assets, runb
 ### Phase 2B — Stack depth
 1. Bidirectional or push: selected KB → Halo FAQ (only if ops wants it)
 2. UniFi + Blackpoint as MCP connectors
-3. Composio MCP as second harness
+3. Composio MCP as second harness — Kind + default Connect URL shipped; allowlist github/cloudflare/outlook/notion; ads/social skipped; no live mutations
 4. Sync schedules + SyncRun UI
 5. Asset external IDs + "open in Halo/Ninja" deep links (company portal URLs shipped)
 

@@ -5,6 +5,7 @@ using System.Text.Json;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
+using DocuEngAIne.Core.Mcp;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Integrations;
 using Microsoft.EntityFrameworkCore;
@@ -102,15 +103,19 @@ public class HttpMcpClientTests
         return (new DocuEngAIneDbContext(options, user), user);
     }
 
-    private static async Task<McpServer> SeedServerAsync(DocuEngAIneDbContext db, FakeCurrentUser user, string? authSecretName = null)
+    private static async Task<McpServer> SeedServerAsync(
+        DocuEngAIneDbContext db,
+        FakeCurrentUser user,
+        string? authSecretName = null,
+        McpServerKind kind = McpServerKind.StackJackCompact)
     {
         var server = new McpServer
         {
             TenantId = user.TenantId!.Value,
-            Name = "StackJack Compact",
-            Kind = McpServerKind.StackJackCompact,
+            Name = kind == McpServerKind.Composio ? McpServerDefaults.ComposioName : "StackJack Compact",
+            Kind = kind,
             Transport = McpTransport.Http,
-            EndpointUrl = Endpoint,
+            EndpointUrl = kind == McpServerKind.Composio ? McpServerDefaults.ComposioEndpoint : Endpoint,
             AuthSecretName = authSecretName,
         };
         db.McpServers.Add(server);
@@ -426,5 +431,89 @@ public class HttpMcpClientTests
         var company = Assert.Single(HaloClientMapper.MapClients(result));
         Assert.Equal("12", company.ExternalId);
         Assert.Equal("Masri", company.Name);
+    }
+
+    [Fact]
+    public async Task Composio_Skipped_Toolkit_Throws_Before_Any_Request_Is_Sent()
+    {
+        var (db, user) = CreateDb();
+        var server = await SeedServerAsync(db, user, kind: McpServerKind.Composio);
+        var handler = new StubHandler();
+        var client = CreateClient(db, user, handler);
+
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await client.CallToolAsync(server.Id, "FACEBOOK_CREATE_POST", """{"message":"hi"}"""));
+
+        Assert.Contains("allowed toolkits", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("facebook", ex.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("GOOGLEADS_CREATE_CAMPAIGN")]
+    [InlineData("INSTAGRAM_CREATE_MEDIA")]
+    [InlineData("LINKEDIN_CREATE_POST")]
+    [InlineData("REDDIT_SUBMIT_POST")]
+    [InlineData("COMPOSIO_MULTI_EXECUTE_TOOL")]
+    public async Task Composio_Ads_Social_And_Meta_Execute_Never_Reach_The_Wire(string toolName)
+    {
+        var (db, user) = CreateDb();
+        var server = await SeedServerAsync(db, user, kind: McpServerKind.Composio);
+        var handler = new StubHandler();
+        var client = CreateClient(db, user, handler);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(
+            async () => await client.CallToolAsync(server.Id, toolName, null));
+
+        Assert.Empty(handler.Requests);
+    }
+
+    [Theory]
+    [InlineData("GITHUB_LIST_REPOS")]
+    [InlineData("CLOUDFLARE_LIST_ZONES")]
+    [InlineData("OUTLOOK_LIST_MESSAGES")]
+    [InlineData("NOTION_SEARCH")]
+    public async Task Composio_Allowed_Toolkit_Is_Called_Against_The_Stub_Not_Live(string toolName)
+    {
+        var (db, user) = CreateDb();
+        var server = await SeedServerAsync(db, user, kind: McpServerKind.Composio);
+        var handler = new StubHandler()
+            .Enqueue(InitializeOk())
+            .Enqueue(Accepted())
+            .Enqueue(Json(ToolResultJson));
+        var client = CreateClient(db, user, handler);
+
+        var result = await client.CallToolAsync(server.Id, toolName, null);
+
+        Assert.Equal(ToolResultJson, result);
+        Assert.Contains($"\"name\":\"{toolName}\"", handler.Requests[2].Body);
+    }
+
+    [Fact]
+    public async Task Composio_Tools_List_Drops_Ads_And_Social_From_The_Catalog()
+    {
+        var (db, user) = CreateDb();
+        var server = await SeedServerAsync(db, user, kind: McpServerKind.Composio);
+        var listed = """
+            {"jsonrpc":"2.0","id":"1","result":{"tools":[
+              {"name":"GITHUB_LIST_REPOS"},
+              {"name":"FACEBOOK_CREATE_POST"},
+              {"name":"OUTLOOK_LIST_MESSAGES"},
+              {"name":"REDDIT_SUBMIT_POST"}
+            ]}}
+            """;
+        var handler = new StubHandler()
+            .Enqueue(InitializeOk())
+            .Enqueue(Accepted())
+            .Enqueue(Json(listed));
+        var client = CreateClient(db, user, handler);
+
+        using var doc = JsonDocument.Parse(await client.ListToolsAsync(server.Id));
+        var names = doc.RootElement.GetProperty("result").GetProperty("tools")
+            .EnumerateArray()
+            .Select(t => t.GetProperty("name").GetString() ?? "")
+            .ToArray();
+
+        Assert.Equal(["GITHUB_LIST_REPOS", "OUTLOOK_LIST_MESSAGES"], names);
     }
 }
