@@ -29,6 +29,7 @@ public static class DependencyInjection
         services.AddLlmClients(configuration);
         services.AddScoped<IIntegrationSyncService, IntegrationSyncService>();
         services.AddScoped<IItGlueMigrationService, ItGlueMigrationService>();
+        services.AddScoped<IHuduMigrationService, HuduMigrationService>();
         services.Configure<AzureSearchOptions>(configuration.GetSection(AzureSearchOptions.SectionName));
         services.AddSingleton<ISearchService, InMemorySearchService>();
         services.AddSingleton<IntegrationSyncRunner>();
