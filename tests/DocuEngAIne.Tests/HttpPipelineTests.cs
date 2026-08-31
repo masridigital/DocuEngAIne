@@ -92,6 +92,26 @@ public class HttpPipelineTests : IClassFixture<TestHost>
     }
 
     [Fact]
+    public async Task Integration_Runs_Returns_403_For_Reader()
+    {
+        using var client = _host.CreateReaderClient();
+
+        var response = await client.GetAsync($"/api/integrations/{Guid.NewGuid()}/runs");
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
+    [Fact]
+    public async Task Integration_Runs_Returns_401_When_Anonymous()
+    {
+        using var client = _host.CreateAnonymousClient();
+
+        var response = await client.GetAsync($"/api/integrations/{Guid.NewGuid()}/runs");
+
+        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+    }
+
+    [Fact]
     public async Task Tokens_Returns_403_For_Reader()
     {
         using var client = _host.CreateReaderClient();

@@ -120,23 +120,7 @@ public static class IntegrationEndpoints
 
         group.MapPost("/{id:guid}/sync", SyncAsync);
 
-        group.MapGet("/{id:guid}/runs", async (
-            Guid id,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            CancellationToken ct) =>
-        {
-            var exists = await db.IntegrationConnections.ForTenant(user).AnyAsync(i => i.Id == id, ct);
-            if (!exists)
-                return Results.NotFound();
-
-            var runs = await db.SyncRuns.ForTenant(user).AsNoTracking()
-                .Where(r => r.IntegrationConnectionId == id)
-                .OrderByDescending(r => r.StartedAt)
-                .Take(50)
-                .ToListAsync(ct);
-            return Results.Ok(runs.Select(MapRun));
-        });
+        group.MapGet("/{id:guid}/runs", ListRunsAsync);
 
         group.MapGet("/{id:guid}/mappings", async (
             Guid id,
@@ -357,6 +341,29 @@ public static class IntegrationEndpoints
         return Results.Created($"/api/integrations/{connection.Id}", MapIntegration(connection));
     }
 
+    /// <summary>
+    /// The 50 most recent <see cref="SyncRun"/> rows for one integration. Tenant-scoped on both
+    /// the connection and the runs so another tenant's id is a 404, never a leak.
+    /// </summary>
+    public static async Task<IResult> ListRunsAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken ct = default)
+    {
+        var connection = await db.IntegrationConnections.ForTenant(user).AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (connection is null)
+            return Results.NotFound();
+
+        var runs = await db.SyncRuns.ForTenant(user).AsNoTracking()
+            .Where(r => r.IntegrationConnectionId == id)
+            .OrderByDescending(r => r.StartedAt)
+            .Take(50)
+            .ToListAsync(ct);
+        return Results.Ok(runs.Select(r => MapRun(r, connection.Provider)));
+    }
+
     public static async Task<IResult> SyncAsync(
         Guid id,
         [FromBody] SyncPayloadRequest? request,
@@ -365,21 +372,22 @@ public static class IntegrationEndpoints
         ICurrentUser user,
         CancellationToken ct = default)
     {
-        var exists = await db.IntegrationConnections.ForTenant(user).AnyAsync(i => i.Id == id, ct);
-        if (!exists)
+        var connection = await db.IntegrationConnections.ForTenant(user).AsNoTracking()
+            .FirstOrDefaultAsync(i => i.Id == id, ct);
+        if (connection is null)
             return Results.NotFound();
 
         if (request?.Companies is { Count: > 0 })
         {
             var run = await sync.SyncFromPayloadAsync(id, request.Companies.Select(c =>
                 new ExternalCompanyDto(c.ExternalId, c.Name, c.Slug, c.PrimaryDomain, c.City, c.State, c.Website, c.Address, c.IsInactive)).ToList(), ct);
-            return Results.Ok(MapRun(run));
+            return Results.Ok(MapRun(run, connection.Provider));
         }
 
         var result = await sync.SyncAsync(id, ct);
         return result.Status == SyncRunStatus.Succeeded
-            ? Results.Ok(MapRun(result))
-            : Results.BadRequest(MapRun(result));
+            ? Results.Ok(MapRun(result, connection.Provider))
+            : Results.BadRequest(MapRun(result, connection.Provider));
     }
 
     private static object MapServer(McpServer s) => new
@@ -428,10 +436,11 @@ public static class IntegrationEndpoints
         i.UpdatedAt,
     };
 
-    private static object MapRun(SyncRun r) => new
+    private static object MapRun(SyncRun r, IntegrationProvider provider) => new
     {
         r.Id,
         r.IntegrationConnectionId,
+        Provider = provider.ToString(),
         r.StartedAt,
         r.FinishedAt,
         Status = r.Status.ToString(),
