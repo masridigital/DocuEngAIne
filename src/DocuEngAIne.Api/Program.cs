@@ -81,6 +81,7 @@ app.MapProfileEndpoints();
 app.MapUserEndpoints();
 app.MapResourceAccessEndpoints();
 app.MapApiTokenEndpoints();
+app.MapPortalEndpoints();
 app.MapOutboundMcpEndpoints();
 
 app.UseDefaultFiles();

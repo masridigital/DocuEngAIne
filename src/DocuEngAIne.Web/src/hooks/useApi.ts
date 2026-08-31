@@ -125,6 +125,7 @@ export type CreateCompanyInput = {
   ninjaOrganizationId?: string | null
   haloPortalUrl?: string | null
   ninjaPortalUrl?: string | null
+  portalEnabled?: boolean
 }
 
 export type UpdateCompanyInput = {
@@ -134,6 +135,7 @@ export type UpdateCompanyInput = {
   ninjaOrganizationId?: string | null
   haloPortalUrl?: string | null
   ninjaPortalUrl?: string | null
+  portalEnabled?: boolean
 }
 
 export type McpTransport = 'Http' | 'Sse' | 'Stdio'
@@ -539,6 +541,67 @@ async function postJson<T>(url: string, body?: unknown): Promise<T> {
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   return readJson<T>(res)
+}
+
+export type PortalCompanyListItem = {
+  id: string
+  name: string
+  slug: string
+  website?: string | null
+}
+
+export type PortalCounts = {
+  documents: number
+  expirations: number
+  keeperLinks: number
+}
+
+export type PortalCompanyDetail = {
+  id: string
+  name: string
+  slug: string
+  website?: string | null
+  phone?: string | null
+  hoursOfOperation?: string | null
+  counts: PortalCounts
+}
+
+export type PortalDocument = {
+  id: string
+  title: string
+  slug?: string | null
+  summary?: string | null
+  content?: string | null
+  tags?: string | null
+  updatedAt: string
+}
+
+export type PortalKeeperLink = {
+  id: string
+  title: string
+  companyId?: string | null
+  updatedAt: string
+  hasRecordUrl: boolean
+}
+
+export function usePortalCompanies() {
+  return useSWR<PortalCompanyListItem[]>('/api/portal/companies', fetcher)
+}
+
+export function usePortalCompany(id: string | undefined) {
+  return useSWR<PortalCompanyDetail>(id ? `/api/portal/companies/${id}` : null, fetcher)
+}
+
+export function usePortalDocuments(companyId: string | undefined) {
+  return useSWR<PortalDocument[]>(companyId ? `/api/portal/companies/${companyId}/documents` : null, fetcher)
+}
+
+export function usePortalExpirations(companyId: string | undefined) {
+  return useSWR<ExpirationItem[]>(companyId ? `/api/portal/companies/${companyId}/expirations` : null, fetcher)
+}
+
+export function usePortalKeeperLinks(companyId: string | undefined) {
+  return useSWR<PortalKeeperLink[]>(companyId ? `/api/portal/companies/${companyId}/keeper-links` : null, fetcher)
 }
 
 export function createCompany(input: CreateCompanyInput) {

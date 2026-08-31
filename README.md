@@ -379,12 +379,28 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 | DELETE | `/api/keeper/{id}` | Delete Keeper link |
 | POST | `/api/keeper/{id}/reveal` | Audit-log and return Keeper URL |
 
+### Client portal (read-only)
+
+Company-scoped client view. Companies must have `PortalEnabled`. Every query is `ForTenant`. Other-tenant or portal-disabled companies are 404. **No password vault. Keeper reveal is not a portal path.**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/portal` | Surface card (`readOnly`, `passwordVault: false`, `keeper.reveal: false`) |
+| GET | `/api/portal/companies` | Portal-enabled companies in the caller's tenant |
+| GET | `/api/portal/companies/{id}` | Company overview + counts (docs / expirations / Keeper links) |
+| GET | `/api/portal/companies/{id}/documents` | Published company documents. Unpublished / other-company / other-tenant → absent or 404 |
+| GET | `/api/portal/companies/{id}/documents/{docId}` | One published company document |
+| GET | `/api/portal/companies/{id}/expirations` | Company expirations (`showExpired`, `q`). Same rollup as `/api/expirations` |
+| GET | `/api/portal/companies/{id}/keeper-links` | Keeper **metadata only** (title, `hasRecordUrl`). No URL, UID, username hint, notes, or reveal audit |
+
+SPA stub: `/portal` and `/portal/:companyId`. Enable a company with `portalEnabled` on create/update.
+
 ## Security Notes
 
 - Tenant isolation is enforced at the API/query layer.
 - Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, and `/api/tokens` require Admin/Owner.
 - `ResourceRoleAssignment` is enforced on asset, document, runbook and Keeper write routes (`POST`/`PUT`/`DELETE`) via `IResourceAuthorizationService`. A Contributor grant on one resource lets a Reader write that resource; without a grant they get 403. Tenant-wide Admin/Owner write without a grant. Creates still require a tenant-wide Contributor-or-above role.
-- **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every HTTP reveal is audit-logged. The outbound MCP surface does not expose reveal.
+- **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every HTTP reveal is audit-logged. The outbound MCP surface and the client portal do not expose reveal. The portal returns Keeper titles only.
 - Outbound MCP tokens are stored as SHA-256 hashes. The plaintext is shown once at create.
 - Production Azure SQL uses **Active Directory Default** (DefaultAzureCredential / App Service managed identity). SQL auth remains the local-dev fallback via connection string / user-secrets. After deploy, run `infra/grant-sql-contained-user.sh` to create the contained database user for the App Service identity.
 - HTTPS only, TLS 1.2+, FTPS disabled, health checks exposed.
@@ -431,7 +447,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Process completion rollup (`GET /api/runbooks/runs?status=&companyId=`, `/runs`)
 - [x] Related items (`ResourceLink`, `GET/POST/DELETE /api/links`, company `relatedLinks`, `GET /api/companies/{id}/graph`).
 - [x] Document folders (`CRUD /api/folders`, `folderId` on documents, `/documents` folder list). Other-tenant folder attach → 400.
-- [ ] Client portal
+- [x] Client portal skeleton (`GET /api/portal`, `/portal`) — documents, expirations, Keeper metadata; no reveal; `ForTenant`; `PortalEnabled`
 - [x] Switch SQL auth to managed identity (production AD Default; local SQL auth / user-secrets unchanged; contained user via `infra/grant-sql-contained-user.sh`)
 - [x] One-time IT Glue migrate-only import (`POST /api/migrations/itglue`; Compact or JSON:API fixture; passwords never stored)
 - [ ] One-time Hudu export migration (passwords → Keeper only)
