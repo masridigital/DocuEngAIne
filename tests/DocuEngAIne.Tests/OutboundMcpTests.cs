@@ -183,6 +183,7 @@ public class OutboundMcpTests
                 DocuEngAIneMcpServer.ListCompanies,
                 DocuEngAIneMcpServer.GetCompany,
                 DocuEngAIneMcpServer.ListAssets,
+                DocuEngAIneMcpServer.GetAsset,
                 DocuEngAIneMcpServer.ListDocuments,
                 DocuEngAIneMcpServer.ListRunbooks,
                 DocuEngAIneMcpServer.ListExpirations,
@@ -338,6 +339,9 @@ public class OutboundMcpTests
             var list = await DocuEngAIneMcpServer.HandleAsync(Rpc("tools/list"), db, user);
             var listJson = JsonSerializer.Serialize(list, DocuEngAIneMcpServer.JsonOptions);
             Assert.Contains(DocuEngAIneMcpServer.ListCompanies, listJson);
+            Assert.Contains(DocuEngAIneMcpServer.ListAssets, listJson);
+            Assert.Contains(DocuEngAIneMcpServer.GetAsset, listJson);
+            Assert.Contains(DocuEngAIneMcpServer.ListExpirations, listJson);
             Assert.DoesNotContain(DocuEngAIneMcpServer.Tools, t => t.Name.Contains("reveal", StringComparison.OrdinalIgnoreCase));
 
             var call = await DocuEngAIneMcpServer.HandleAsync(
@@ -347,6 +351,22 @@ public class OutboundMcpTests
             Assert.Null(call.Error);
             Assert.Contains("ExampleCo", ResultText(call));
             Assert.DoesNotContain("PoisonCo", ResultText(call));
+
+            var assetsCall = await DocuEngAIneMcpServer.HandleAsync(
+                Rpc("tools/call", new { name = DocuEngAIneMcpServer.ListAssets, arguments = new { } }),
+                db,
+                user);
+            Assert.Null(assetsCall.Error);
+            Assert.Contains("A-Server", ResultText(assetsCall));
+            Assert.DoesNotContain("Poison-Server", ResultText(assetsCall));
+
+            var expirationsCall = await DocuEngAIneMcpServer.HandleAsync(
+                Rpc("tools/call", new { name = DocuEngAIneMcpServer.ListExpirations, arguments = new { } }),
+                db,
+                user);
+            Assert.Null(expirationsCall.Error);
+            Assert.Contains("A-Server", ResultText(expirationsCall));
+            Assert.DoesNotContain("Poison-Server", ResultText(expirationsCall));
         }
     }
 
@@ -356,6 +376,9 @@ public class OutboundMcpTests
         var json = JsonSerializer.Serialize(OutboundMcpEndpoints.Describe(), DocuEngAIneMcpServer.JsonOptions);
         Assert.Contains("/mcp", json);
         Assert.Contains("apiToken", json);
+        Assert.Contains(DocuEngAIneMcpServer.ListAssets, json);
+        Assert.Contains(DocuEngAIneMcpServer.GetAsset, json);
+        Assert.Contains(DocuEngAIneMcpServer.ListExpirations, json);
         Assert.Contains(DocuEngAIneMcpServer.ListKeeperLinks, json);
         using (var doc = JsonDocument.Parse(json))
         {
@@ -363,6 +386,174 @@ public class OutboundMcpTests
             Assert.DoesNotContain(tools, n => n is not null && n.Contains("reveal", StringComparison.OrdinalIgnoreCase));
         }
         Assert.Contains("ForTenant", json);
+    }
+
+    [Fact]
+    public async Task Get_Asset_Is_ForTenant_And_Returns_Fields()
+    {
+        var seed = await SeedAsync();
+        var (db, _) = Open(seed.DbName, seed.TenantA);
+        await using (db)
+        {
+            var type = await db.AssetTypes.SingleAsync(t => t.TenantId == seed.TenantA);
+            var warranty = new FieldDefinition
+            {
+                AssetTypeId = type.Id,
+                Name = "Warranty",
+                FieldType = "Date",
+                IsExpiration = true,
+            };
+            db.FieldDefinitions.Add(warranty);
+            await db.SaveChangesAsync();
+            db.CustomFieldValues.Add(new CustomFieldValue
+            {
+                AssetId = seed.AssetA,
+                FieldDefinitionId = warranty.Id,
+                Value = "2027-03-01",
+            });
+            await db.SaveChangesAsync();
+
+            var user = TokenUser(seed.TenantA);
+            var ownArgs = JsonSerializer.SerializeToElement(new { assetId = seed.AssetA.ToString() });
+            var foreignArgs = JsonSerializer.SerializeToElement(new { assetId = (await db.Assets.SingleAsync(a => a.Name == "Poison-Server")).Id.ToString() });
+
+            var own = JsonSerializer.Serialize(
+                await DocuEngAIneMcpServer.InvokeToolAsync(DocuEngAIneMcpServer.GetAsset, ownArgs, db, user));
+            Assert.Contains("A-Server", own);
+            Assert.Contains("Warranty", own);
+            Assert.Contains("2027-03-01", own);
+            Assert.DoesNotContain("Poison-Server", own);
+
+            var missing = await Assert.ThrowsAsync<McpToolException>(() =>
+                DocuEngAIneMcpServer.InvokeToolAsync(DocuEngAIneMcpServer.GetAsset, foreignArgs, db, user));
+            Assert.Equal("Asset not found.", missing.Message);
+        }
+    }
+
+    [Fact]
+    public async Task List_Assets_Filters_By_Company_And_Name_Without_Cross_Tenant()
+    {
+        var seed = await SeedAsync();
+        var (db, _) = Open(seed.DbName, seed.TenantA);
+        await using (db)
+        {
+            var type = await db.AssetTypes.SingleAsync(t => t.TenantId == seed.TenantA);
+            var other = new Company { TenantId = seed.TenantA, Name = "FilterCo", Slug = "filterco" };
+            db.Companies.Add(other);
+            await db.SaveChangesAsync();
+            db.Assets.Add(new Asset
+            {
+                TenantId = seed.TenantA,
+                Name = "Filter-Laptop",
+                AssetTypeId = type.Id,
+                CompanyId = other.Id,
+            });
+            await db.SaveChangesAsync();
+
+            var user = TokenUser(seed.TenantA);
+            var byCompany = JsonSerializer.Serialize(
+                await DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.ListAssets,
+                    JsonSerializer.SerializeToElement(new { companyId = seed.CompanyA.ToString() }),
+                    db,
+                    user));
+            Assert.Contains("A-Server", byCompany);
+            Assert.DoesNotContain("Filter-Laptop", byCompany);
+            Assert.DoesNotContain("Poison-Server", byCompany);
+
+            var byName = JsonSerializer.Serialize(
+                await DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.ListAssets,
+                    JsonSerializer.SerializeToElement(new { q = "Laptop" }),
+                    db,
+                    user));
+            Assert.Contains("Filter-Laptop", byName);
+            Assert.DoesNotContain("A-Server", byName);
+            Assert.DoesNotContain("Poison-Server", byName);
+        }
+    }
+
+    [Fact]
+    public async Task List_Expirations_Filters_ShowExpired_Search_And_Company()
+    {
+        var seed = await SeedAsync();
+        var (db, _) = Open(seed.DbName, seed.TenantA);
+        await using (db)
+        {
+            var type = await db.AssetTypes.SingleAsync(t => t.TenantId == seed.TenantA);
+            db.Assets.Add(new Asset
+            {
+                TenantId = seed.TenantA,
+                Name = "A-Expired",
+                AssetTypeId = type.Id,
+                CompanyId = seed.CompanyA,
+                ExpiresAt = DateTimeOffset.UtcNow.AddDays(-5),
+            });
+            await db.SaveChangesAsync();
+
+            var user = TokenUser(seed.TenantA);
+
+            var upcoming = JsonSerializer.Serialize(
+                await DocuEngAIneMcpServer.InvokeToolAsync(DocuEngAIneMcpServer.ListExpirations, null, db, user));
+            Assert.Contains("A-Server", upcoming);
+            Assert.DoesNotContain("A-Expired", upcoming);
+            Assert.DoesNotContain("Poison-Server", upcoming);
+
+            var includingPast = JsonSerializer.Serialize(
+                await DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.ListExpirations,
+                    JsonSerializer.SerializeToElement(new { showExpired = true }),
+                    db,
+                    user));
+            Assert.Contains("A-Server", includingPast);
+            Assert.Contains("A-Expired", includingPast);
+            Assert.DoesNotContain("Poison-Server", includingPast);
+
+            var byName = JsonSerializer.Serialize(
+                await DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.ListExpirations,
+                    JsonSerializer.SerializeToElement(new { showExpired = true, q = "Expired" }),
+                    db,
+                    user));
+            Assert.Contains("A-Expired", byName);
+            Assert.DoesNotContain("A-Server", byName);
+
+            var otherCompany = new Company { TenantId = seed.TenantA, Name = "NoExpireCo", Slug = "noexpireco" };
+            db.Companies.Add(otherCompany);
+            await db.SaveChangesAsync();
+            var emptyCompany = JsonSerializer.Serialize(
+                await DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.ListExpirations,
+                    JsonSerializer.SerializeToElement(new { companyId = otherCompany.Id.ToString(), showExpired = true }),
+                    db,
+                    user));
+            Assert.DoesNotContain("A-Server", emptyCompany);
+            Assert.DoesNotContain("A-Expired", emptyCompany);
+            Assert.DoesNotContain("Poison-Server", emptyCompany);
+        }
+    }
+
+    [Fact]
+    public async Task List_Companies_Search_Is_ForTenant()
+    {
+        var seed = await SeedAsync();
+        var (db, _) = Open(seed.DbName, seed.TenantA);
+        await using (db)
+        {
+            db.Companies.Add(new Company { TenantId = seed.TenantA, Name = "Alpha Widgets", Slug = "alpha-widgets" });
+            await db.SaveChangesAsync();
+
+            var user = TokenUser(seed.TenantA);
+            var json = JsonSerializer.Serialize(
+                await DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.ListCompanies,
+                    JsonSerializer.SerializeToElement(new { q = "Alpha" }),
+                    db,
+                    user));
+            Assert.Contains("Alpha Widgets", json);
+            Assert.DoesNotContain("ExampleCo", json);
+            Assert.DoesNotContain("PoisonCo", json);
+        }
     }
 
     [Fact]
