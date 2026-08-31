@@ -144,6 +144,7 @@ public static class DocumentEndpoints
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        ISearchService? search = null,
         CancellationToken cancellationToken = default)
     {
         // The document does not exist yet, so no grant can name it: creation gates on the
@@ -151,7 +152,7 @@ public static class DocumentEndpoints
         if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Document, cancellationToken) is { } denied)
             return denied;
 
-        return await CreateAsync(request, db, user, cancellationToken);
+        return await CreateAsync(request, db, user, cancellationToken, search);
     }
 
     public static async Task<IResult> PutAsync(
@@ -160,12 +161,13 @@ public static class DocumentEndpoints
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        ISearchService? search = null,
         CancellationToken cancellationToken = default)
     {
         if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
             return denied;
 
-        return await UpdateAsync(id, request, db, user, cancellationToken);
+        return await UpdateAsync(id, request, db, user, cancellationToken, search);
     }
 
     public static async Task<IResult> DeleteAsync(
@@ -173,6 +175,7 @@ public static class DocumentEndpoints
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        ISearchService? search = null,
         CancellationToken cancellationToken = default)
     {
         if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
@@ -185,8 +188,11 @@ public static class DocumentEndpoints
         if (doc is null)
             return Results.NotFound();
 
+        var tenantId = doc.TenantId;
         db.Documents.Remove(doc);
         await db.SaveChangesAsync(cancellationToken);
+        if (search is not null)
+            await search.RemoveDocumentAsync(id, tenantId, cancellationToken);
         return Results.NoContent();
     }
 
@@ -196,6 +202,7 @@ public static class DocumentEndpoints
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        ISearchService? search = null,
         CancellationToken cancellationToken = default)
     {
         // Restoring rewrites the document's current content, so it is a write on the document
@@ -234,6 +241,7 @@ public static class DocumentEndpoints
         doc.Tags = version.Tags;
 
         await db.SaveChangesAsync(cancellationToken);
+        await IndexDocumentAsync(search, doc, cancellationToken);
         return Results.NoContent();
     }
 
@@ -241,7 +249,8 @@ public static class DocumentEndpoints
         CreateDocumentRequest request,
         DocuEngAIneDbContext db,
         ICurrentUser user,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ISearchService? search = null)
     {
         if (user.TenantId is null)
             return Results.Unauthorized();
@@ -266,6 +275,7 @@ public static class DocumentEndpoints
 
         db.Documents.Add(doc);
         await db.SaveChangesAsync(cancellationToken);
+        await IndexDocumentAsync(search, doc, cancellationToken);
         return Results.Created($"/api/documents/{doc.Id}", new { doc.Id, doc.Title, doc.Slug, doc.FolderId });
     }
 
@@ -274,7 +284,8 @@ public static class DocumentEndpoints
         UpdateDocumentRequest request,
         DocuEngAIneDbContext db,
         ICurrentUser user,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ISearchService? search = null)
     {
         var doc = await db.Documents
             .ForTenant(user)
@@ -316,7 +327,21 @@ public static class DocumentEndpoints
         doc.IsPublished = request.IsPublished ?? doc.IsPublished;
 
         await db.SaveChangesAsync(cancellationToken);
+        await IndexDocumentAsync(search, doc, cancellationToken);
         return Results.NoContent();
+    }
+
+    private static Task IndexDocumentAsync(
+        ISearchService? search,
+        Document doc,
+        CancellationToken cancellationToken)
+    {
+        if (search is null)
+            return Task.CompletedTask;
+
+        return search.IndexDocumentAsync(
+            new SearchDocument(doc.Id, doc.Title, doc.Content, doc.CompanyId, doc.TenantId),
+            cancellationToken);
     }
 }
 

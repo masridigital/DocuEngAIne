@@ -58,6 +58,9 @@ public sealed class TestHost : WebApplicationFactory<Program>
                 ["EntraId:Authority"] = "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000001/v2.0",
                 ["EntraId:Audience"] = "api://docuengaine-pipeline-tests",
                 ["Azure:KeyVault:VaultUri"] = "",
+                ["Azure:Search:IndexName"] = "",
+                ["Azure:Search:Endpoint"] = "",
+                ["Azure:Search:ApiKeySecretName"] = "",
             });
         });
 
@@ -99,6 +102,9 @@ public sealed class TestHost : WebApplicationFactory<Program>
         Environment.SetEnvironmentVariable("EntraId__Authority", "https://login.microsoftonline.com/00000000-0000-0000-0000-000000000001/v2.0");
         Environment.SetEnvironmentVariable("EntraId__Audience", "api://docuengaine-pipeline-tests");
         Environment.SetEnvironmentVariable("Azure__KeyVault__VaultUri", "");
+        Environment.SetEnvironmentVariable("Azure__Search__IndexName", "");
+        Environment.SetEnvironmentVariable("Azure__Search__Endpoint", "");
+        Environment.SetEnvironmentVariable("Azure__Search__ApiKeySecretName", "");
     }
 
     public HttpClient CreateAnonymousClient() => CreateClient();
