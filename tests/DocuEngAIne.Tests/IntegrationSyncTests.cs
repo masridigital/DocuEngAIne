@@ -40,19 +40,32 @@ public class IntegrationSyncTests
         public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
         {
             Calls.Add((mcpServerId, toolName, argumentsJson));
-            var pageNo = 1;
-            var pageSize = PageSizeOverride > 0 ? PageSizeOverride : HaloClientMapper.DefaultPageSize;
-            if (!string.IsNullOrWhiteSpace(argumentsJson))
+            string inner;
+            if (toolName == HaloUserMapper.ToolName)
             {
-                using var doc = JsonDocument.Parse(argumentsJson);
-                if (doc.RootElement.TryGetProperty("pageNo", out var p))
-                    pageNo = p.GetInt32();
-                if (PageSizeOverride == 0 && doc.RootElement.TryGetProperty("pageSize", out var s))
-                    pageSize = s.GetInt32();
+                inner = """{"users":[]}""";
+            }
+            else if (toolName == HaloSiteMapper.ToolName)
+            {
+                inner = """{"sites":[]}""";
+            }
+            else
+            {
+                var pageNo = 1;
+                var pageSize = PageSizeOverride > 0 ? PageSizeOverride : HaloClientMapper.DefaultPageSize;
+                if (!string.IsNullOrWhiteSpace(argumentsJson))
+                {
+                    using var doc = JsonDocument.Parse(argumentsJson);
+                    if (doc.RootElement.TryGetProperty("pageNo", out var p))
+                        pageNo = p.GetInt32();
+                    if (PageSizeOverride == 0 && doc.RootElement.TryGetProperty("pageSize", out var s))
+                        pageSize = s.GetInt32();
+                }
+
+                var slice = Clients.Skip((pageNo - 1) * pageSize).Take(pageSize).ToList();
+                inner = JsonSerializer.Serialize(new { clients = slice });
             }
 
-            var slice = Clients.Skip((pageNo - 1) * pageSize).Take(pageSize).ToList();
-            var inner = JsonSerializer.Serialize(new { clients = slice });
             var body = JsonSerializer.Serialize(new
             {
                 jsonrpc = "2.0",
@@ -195,6 +208,7 @@ public class IntegrationSyncTests
     {
         public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
         public string TenantsJson { get; init; } = "[]";
+        public string DevicesJson { get; init; } = "[]";
 
         public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
             => Task.FromResult("""{"result":{"tools":[]}}""");
@@ -202,11 +216,12 @@ public class IntegrationSyncTests
         public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
         {
             Calls.Add((mcpServerId, toolName, argumentsJson));
+            var inner = toolName == CippDeviceMapper.ToolName ? DevicesJson : TenantsJson;
             var body = JsonSerializer.Serialize(new
             {
                 jsonrpc = "2.0",
                 id = "1",
-                result = new { content = new[] { new { type = "text", text = TenantsJson } } },
+                result = new { content = new[] { new { type = "text", text = inner } } },
             });
             return Task.FromResult(body);
         }
@@ -417,7 +432,9 @@ public class IntegrationSyncTests
 
         Assert.Equal(SyncRunStatus.Succeeded, run.Status);
         Assert.Equal(1, run.ItemsCreated);
-        Assert.Equal("halo_list_clients", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(HaloClientMapper.ToolName, mcp.Calls[0].Tool);
+        Assert.Contains(mcp.Calls, c => c.Tool == HaloSiteMapper.ToolName);
+        Assert.Contains(mcp.Calls, c => c.Tool == HaloUserMapper.ToolName);
         Assert.Equal(server.Id, mcp.Calls[0].ServerId);
         Assert.Contains("\"includeInactive\":false", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.Contains("\"activeInactive\":\"active\"", mcp.Calls[0].Args, StringComparison.Ordinal);
@@ -480,7 +497,8 @@ public class IntegrationSyncTests
 
         Assert.Equal(SyncRunStatus.Succeeded, run.Status);
         Assert.Equal(1, run.ItemsUpdated);
-        Assert.Equal("halo_list_clients", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(HaloClientMapper.ToolName, mcp.Calls[0].Tool);
+        Assert.Contains(mcp.Calls, c => c.Tool == HaloUserMapper.ToolName);
         var company = await db.Companies.SingleAsync();
         Assert.Equal("Local Name", company.Name);
         Assert.Equal("halo-100", company.HaloClientId);
@@ -826,7 +844,8 @@ public class IntegrationSyncTests
         Assert.Equal(SyncRunStatus.Succeeded, run.Status);
         Assert.Equal(1, run.ItemsCreated);
         Assert.Equal(1, run.ItemsSkipped);
-        Assert.Equal("cipp_list_tenants", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(CippTenantMapper.ToolName, mcp.Calls[0].Tool);
+        Assert.Contains(mcp.Calls, c => c.Tool == CippDeviceMapper.ToolName);
         Assert.Equal(server.Id, mcp.Calls[0].ServerId);
         Assert.Contains("\"tenantsOnly\":\"true\"", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.DoesNotContain("pageSize", mcp.Calls[0].Args, StringComparison.Ordinal);
@@ -939,6 +958,7 @@ public class IntegrationSyncTests
     {
         public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
         public string OrganizationsJson { get; init; } = "[]";
+        public string NetworksJson { get; init; } = "[]";
 
         public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
             => Task.FromResult("""{"result":{"tools":[]}}""");
@@ -947,7 +967,9 @@ public class IntegrationSyncTests
         {
             Calls.Add((mcpServerId, toolName, argumentsJson));
             string? startingAfter = null;
-            var perPage = MerakiOrganizationMapper.DefaultPageSize;
+            var perPage = toolName == MerakiNetworkMapper.ToolName
+                ? MerakiNetworkMapper.DefaultPageSize
+                : MerakiOrganizationMapper.DefaultPageSize;
             if (!string.IsNullOrWhiteSpace(argumentsJson))
             {
                 using var doc = JsonDocument.Parse(argumentsJson);
@@ -957,7 +979,8 @@ public class IntegrationSyncTests
                     perPage = s.GetInt32();
             }
 
-            var inner = SliceOrganizationsJson(OrganizationsJson, startingAfter, perPage);
+            var source = toolName == MerakiNetworkMapper.ToolName ? NetworksJson : OrganizationsJson;
+            var inner = SliceOrganizationsJson(source, startingAfter, perPage);
             var body = JsonSerializer.Serialize(new
             {
                 jsonrpc = "2.0",
@@ -1030,11 +1053,11 @@ public class IntegrationSyncTests
         Assert.Equal(SyncRunStatus.Succeeded, run.Status);
         Assert.Equal(2, run.ItemsCreated);
         Assert.Equal(0, run.ItemsSkipped);
-        Assert.Equal("meraki_get_organizations", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(MerakiOrganizationMapper.ToolName, mcp.Calls[0].Tool);
+        Assert.Contains(mcp.Calls, c => c.Tool == MerakiNetworkMapper.ToolName);
         Assert.Equal(server.Id, mcp.Calls[0].ServerId);
         Assert.DoesNotContain("startingAfter", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.Contains("\"perPage\":50", mcp.Calls[0].Args, StringComparison.Ordinal);
-        Assert.DoesNotContain("meraki_get_organization_networks", mcp.Calls.Select(c => c.Tool));
 
         var companies = await db.Companies.ToListAsync();
         Assert.Equal(2, companies.Count);
@@ -1147,6 +1170,8 @@ public class IntegrationSyncTests
     {
         public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
         public string HostsJson { get; init; } = """{"data":[]}""";
+        public string SitesJson { get; init; } = """{"data":[]}""";
+        public string DevicesJson { get; init; } = """{"data":[]}""";
 
         public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
             => Task.FromResult("""{"result":{"tools":[]}}""");
@@ -1165,7 +1190,13 @@ public class IntegrationSyncTests
                     pageSize = s.GetInt32();
             }
 
-            var inner = SliceHostsJson(HostsJson, nextToken, pageSize);
+            var source = toolName switch
+            {
+                var t when t == UnifiSiteMapper.ToolName => SitesJson,
+                var t when t == UnifiDeviceMapper.ToolName => DevicesJson,
+                _ => HostsJson,
+            };
+            var inner = SliceHostsJson(source, nextToken, pageSize);
             var body = JsonSerializer.Serialize(new
             {
                 jsonrpc = "2.0",
@@ -1246,11 +1277,12 @@ public class IntegrationSyncTests
         Assert.Equal(SyncRunStatus.Succeeded, run.Status);
         Assert.Equal(1, run.ItemsCreated);
         Assert.Equal(1, run.ItemsSkipped);
-        Assert.Equal("unifi_sm_list_hosts", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(UnifiHostMapper.ToolName, mcp.Calls[0].Tool);
+        Assert.Contains(mcp.Calls, c => c.Tool == UnifiSiteMapper.ToolName);
+        Assert.Contains(mcp.Calls, c => c.Tool == UnifiDeviceMapper.ToolName);
         Assert.Equal(server.Id, mcp.Calls[0].ServerId);
         Assert.DoesNotContain("nextToken", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.Contains("\"pageSize\":50", mcp.Calls[0].Args, StringComparison.Ordinal);
-        Assert.DoesNotContain("unifi_sm_list_sites", mcp.Calls.Select(c => c.Tool));
 
         var company = await db.Companies.SingleAsync();
         Assert.Equal("Adroc Capital: 1425 RXR Plaza", company.Name);
@@ -1414,6 +1446,7 @@ public class IntegrationSyncTests
     {
         public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
         public string OrganizationsJson { get; init; } = """{"id":"1","type":"ResultPage","items":[],"next_page":""}""";
+        public string EndpointsJson { get; init; } = """{"id":"1","type":"ResultPage","items":[],"next":null}""";
 
         public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
             => Task.FromResult("""{"result":{"tools":[]}}""");
@@ -1421,11 +1454,12 @@ public class IntegrationSyncTests
         public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
         {
             Calls.Add((mcpServerId, toolName, argumentsJson));
+            var inner = toolName == Action1EndpointMapper.ToolName ? EndpointsJson : OrganizationsJson;
             var body = JsonSerializer.Serialize(new
             {
                 jsonrpc = "2.0",
                 id = "1",
-                result = new { content = new[] { new { type = "text", text = OrganizationsJson } } },
+                result = new { content = new[] { new { type = "text", text = inner } } },
             });
             return Task.FromResult(body);
         }
@@ -1472,7 +1506,8 @@ public class IntegrationSyncTests
         Assert.Equal(SyncRunStatus.Succeeded, run.Status);
         Assert.Equal(1, run.ItemsCreated);
         Assert.Equal(0, run.ItemsSkipped);
-        Assert.Equal("action1_list_organizations", Assert.Single(mcp.Calls).Tool);
+        Assert.Equal(Action1OrganizationMapper.ToolName, mcp.Calls[0].Tool);
+        Assert.Contains(mcp.Calls, c => c.Tool == Action1EndpointMapper.ToolName);
         Assert.Equal(server.Id, mcp.Calls[0].ServerId);
         Assert.Contains("\"admin\":true", mcp.Calls[0].Args, StringComparison.Ordinal);
         Assert.Contains("\"pageSize\":50", mcp.Calls[0].Args, StringComparison.Ordinal);
