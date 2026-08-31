@@ -12,7 +12,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DocuEngAIne.Tests;
 
 /// <summary>
-/// StackJack Compact is a built-in connector: creating a Halo/NinjaOne/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint/DefensX/Pax8 integration
+/// StackJack Compact is a built-in connector: creating a Halo/NinjaOne/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint/DefensX/Pax8/Slide integration
 /// asks for a provider and a Key Vault secret name, and the Compact MCP server behind it is resolved
 /// -- or registered once -- on the admin's behalf. Also covers the plan detection that Test performs
 /// and the cadence the detected allowance feeds.
@@ -137,6 +137,7 @@ public class BuiltInCompactTests
     [InlineData(IntegrationProvider.Blackpoint)]
     [InlineData(IntegrationProvider.DefensX)]
     [InlineData(IntegrationProvider.Pax8)]
+    [InlineData(IntegrationProvider.Slide)]
     public async Task Every_Compact_Backed_Provider_Adopts_The_Tenants_One_Compact_Server(IntegrationProvider provider)
     {
         var (db, user) = Create();

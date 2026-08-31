@@ -199,9 +199,9 @@ export type IntegrationConnection = {
   nextSyncDueAt?: string | null
 } & Partial<SyncPolicy>
 
-export type IntegrationProvider = 'Halo' | 'NinjaOne' | 'UniFi' | 'Blackpoint' | 'CustomMcp' | 'Cipp' | 'Meraki' | 'Composio' | 'Action1' | 'Autotask' | 'DefensX' | 'Pax8'
+export type IntegrationProvider = 'Halo' | 'NinjaOne' | 'UniFi' | 'Blackpoint' | 'CustomMcp' | 'Cipp' | 'Meraki' | 'Composio' | 'Action1' | 'Autotask' | 'DefensX' | 'Pax8' | 'Slide'
 
-const compactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Blackpoint', 'Action1', 'Autotask', 'DefensX', 'Pax8']
+const compactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Blackpoint', 'Action1', 'Autotask', 'DefensX', 'Pax8', 'Slide']
 
 export function mcpKindForProvider(provider: IntegrationProvider): McpServerKind | null {
   if (provider === 'Composio') return 'Composio'
