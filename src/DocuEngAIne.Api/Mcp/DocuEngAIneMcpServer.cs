@@ -328,6 +328,8 @@ public static class DocuEngAIneMcpServer
                 a.Status,
                 a.CompanyId,
                 a.ExpiresAt,
+                a.HaloAssetUrl,
+                a.NinjaDeviceUrl,
                 AssetType = a.AssetType != null ? a.AssetType.Name : null,
                 a.UpdatedAt,
             })
@@ -362,6 +364,9 @@ public static class DocuEngAIneMcpServer
             asset.Notes,
             asset.CompanyId,
             asset.ExpiresAt,
+            asset.HaloAssetUrl,
+            asset.NinjaDeviceUrl,
+            asset.ExternalIdsJson,
             AssetType = new { asset.AssetType?.Id, asset.AssetType?.Name },
             Fields = asset.CustomFieldValues.Select(v => new
             {

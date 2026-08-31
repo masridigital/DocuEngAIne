@@ -34,7 +34,7 @@ tests/                      # xUnit + EF InMemory tests
 - **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets. Every provider's external id is also recorded in `ExternalIdsJson`, which is how sync converges Halo/Ninja/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint/DefensX/Pax8/Slide onto one company instead of one per connection. One-shot IT Glue / Hudu imports stamp `ExternalIdsJson` keys `itglue` and `hudu` the same way; neither is a live `IntegrationProvider`.
 - **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry (StackJack Compact or Composio) and PSA/RMM sync. Secrets live in Key Vault names only.
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
-- **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
+- **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields. Optional Halo asset / Ninja device portal URLs (Open in Halo / Open in Ninja) and `ExternalIdsJson` (same shape as Company). URLs only; no secrets. Sync does not stamp these yet.
 - **Document** — KB articles with **versioning** and Azure AI Search scaffolding (`ISearchService`; title / body / companyId / tenantId). Optional `FolderId`.
 - **DocumentFolder** — nested KB folders (`ParentId`). Optional `CompanyId` (null = central KB; set = company KB). Tenant-scoped.
 - **Runbook / RunbookStep / RunbookRun** — ordered SOPs and checklists with start/complete/cancel run history. A completed run can be promoted into a Document (one-click, not AI). Tenant-wide books are templates; optional `CompanyId` is the per-client instance. Not a second process product. No local secrets.
@@ -300,10 +300,10 @@ IT Glue and Hudu are **not** live company-sync systems of record. There is no `I
 | GET | `/api/assets/types` | List asset types (fields include `isExpiration`) |
 | POST | `/api/assets/types` | Create asset type (fields accept `isExpiration`) |
 | PUT | `/api/assets/fields/{id}` | Update field definition (`isExpiration`, type, name) |
-| GET | `/api/assets` | List assets |
-| GET | `/api/assets/{id}` | Asset detail |
-| POST | `/api/assets` | Create asset (`expiresAt` optional) |
-| PUT | `/api/assets/{id}` | Update asset (`expiresAt` optional). `companyId` null = leave unchanged; detach with `companyIdClear: true` or empty GUID. Other-tenant company → 400. |
+| GET | `/api/assets` | List assets (includes `haloAssetUrl` / `ninjaDeviceUrl` when set) |
+| GET | `/api/assets/{id}` | Asset detail (URLs + `externalIdsJson`) |
+| POST | `/api/assets` | Create asset (`expiresAt`, `haloAssetUrl`, `ninjaDeviceUrl`, `externalIdsJson` optional) |
+| PUT | `/api/assets/{id}` | Update asset (`expiresAt`, portal URLs, `externalIdsJson` optional). `companyId` null = leave unchanged; detach with `companyIdClear: true` or empty GUID. Empty URL clears. Other-tenant company → 400. |
 | DELETE | `/api/assets/{id}` | Delete asset |
 
 ### Expirations
@@ -443,10 +443,11 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] GET MCP server and integration by id; SQL cascade fix
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 - [x] Optional `Company.HaloPortalUrl` / `Company.NinjaPortalUrl` (Open in Halo / Open in Ninja)
+- [x] Optional `Asset.HaloAssetUrl` / `Asset.NinjaDeviceUrl` / `Asset.ExternalIdsJson` (Open in Halo / Open in Ninja on Assets)
 - [x] Cross-provider company convergence (`ExternalIdsJson` for every provider; match on provider id → domain → exact name; ambiguous keys refuse to merge)
 - [x] Outbound read-only MCP server (`/mcp`) + per-tenant API tokens (`/api/tokens`). Reveal is not a tool.
 
-> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`), `20260828044000_Phase2ParentCompany` (`Companies.ParentCompanyId`, `CompanyType`, `Nickname`, `Fax`, `Country`, `PostalCode`), `20260828045000_Phase2DocumentFolders` (`DocumentFolders`; `Documents.FolderId` Restrict; Parent Restrict; Company Restrict), `20260828050000_Phase2McpServerKind` (`McpServers.Kind`: StackJackCompact=0, Composio=1), `20260828060000_Phase2StackJackPlan` (`IntegrationConnections.StackJackPlan`, `MonthlyCallLimit`, `PlanDetectedAt`, `SyncIntervalMinutesOverride`), empty `20260830181353_Phase2IntegrationsReconcile` (snapshot catch-up), and `20260830190000_Phase2ApiTokens` (`ApiTokens`; unique `TokenHash`; Tenant FK Restrict).
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`), `20260828044000_Phase2ParentCompany` (`Companies.ParentCompanyId`, `CompanyType`, `Nickname`, `Fax`, `Country`, `PostalCode`), `20260828045000_Phase2DocumentFolders` (`DocumentFolders`; `Documents.FolderId` Restrict; Parent Restrict; Company Restrict), `20260828050000_Phase2McpServerKind` (`McpServers.Kind`: StackJackCompact=0, Composio=1), `20260828060000_Phase2StackJackPlan` (`IntegrationConnections.StackJackPlan`, `MonthlyCallLimit`, `PlanDetectedAt`, `SyncIntervalMinutesOverride`), empty `20260830181353_Phase2IntegrationsReconcile` (snapshot catch-up), `20260830190000_Phase2ApiTokens` (`ApiTokens`; unique `TokenHash`; Tenant FK Restrict), and `20260830210000_Phase2AssetDeepLinks` (`Assets.ExternalIdsJson`, `Assets.HaloAssetUrl`, `Assets.NinjaDeviceUrl`).
 
 
 ### Later

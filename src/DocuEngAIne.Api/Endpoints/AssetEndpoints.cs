@@ -104,34 +104,14 @@ public static class AssetEndpoints
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            var assets = await db.Assets
-                .ForTenant(user)
-                .AsNoTracking()
-                .Include(a => a.AssetType)
-                .OrderBy(a => a.Name)
-                .ToListAsync(cancellationToken);
-
-            return Results.Ok(assets.Select(a => new { a.Id, a.Name, a.Location, a.Status, a.CompanyId, a.ExpiresAt, AssetType = a.AssetType?.Name }));
-        });
+            await ListAsync(db, user, cancellationToken));
 
         group.MapGet("/{id:guid}", async (
             Guid id,
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
-        {
-            var asset = await db.Assets
-                .ForTenant(user)
-                .AsNoTracking()
-                .Include(a => a.AssetType)
-                    .ThenInclude(t => t!.Fields)
-                .Include(a => a.CustomFieldValues)
-                    .ThenInclude(v => v.FieldDefinition)
-                .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
-
-            return asset is null ? Results.NotFound() : Results.Ok(MapAsset(asset));
-        });
+            await GetAsync(id, db, user, cancellationToken));
 
         group.MapPost("", PostAsync);
         group.MapPut("/{id:guid}", PutAsync);
@@ -165,6 +145,9 @@ public static class AssetEndpoints
             AssetTypeId = request.AssetTypeId,
             CompanyId = request.CompanyId,
             ExpiresAt = request.ExpiresAt,
+            HaloAssetUrl = NullIfEmpty(request.HaloAssetUrl),
+            NinjaDeviceUrl = NullIfEmpty(request.NinjaDeviceUrl),
+            ExternalIdsJson = NullIfEmpty(request.ExternalIdsJson),
         };
 
         db.Assets.Add(asset);
@@ -234,10 +217,62 @@ public static class AssetEndpoints
         asset.AssetTypeId = request.AssetTypeId ?? asset.AssetTypeId;
         if (request.ExpiresAt.HasValue)
             asset.ExpiresAt = request.ExpiresAt;
+        if (request.HaloAssetUrl is not null)
+            asset.HaloAssetUrl = NullIfEmpty(request.HaloAssetUrl);
+        if (request.NinjaDeviceUrl is not null)
+            asset.NinjaDeviceUrl = NullIfEmpty(request.NinjaDeviceUrl);
+        if (request.ExternalIdsJson is not null)
+            asset.ExternalIdsJson = NullIfEmpty(request.ExternalIdsJson);
 
         await db.SaveChangesAsync(cancellationToken);
         return Results.NoContent();
     }
+
+    public static async Task<IResult> ListAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var assets = await db.Assets
+            .ForTenant(user)
+            .AsNoTracking()
+            .Include(a => a.AssetType)
+            .OrderBy(a => a.Name)
+            .ToListAsync(cancellationToken);
+
+        return Results.Ok(assets.Select(MapListAsset));
+    }
+
+    public static async Task<IResult> GetAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        var asset = await db.Assets
+            .ForTenant(user)
+            .AsNoTracking()
+            .Include(a => a.AssetType)
+                .ThenInclude(t => t!.Fields)
+            .Include(a => a.CustomFieldValues)
+                .ThenInclude(v => v.FieldDefinition)
+            .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+
+        return asset is null ? Results.NotFound() : Results.Ok(MapAsset(asset));
+    }
+
+    private static object MapListAsset(Asset asset) => new
+    {
+        asset.Id,
+        asset.Name,
+        asset.Location,
+        asset.Status,
+        asset.CompanyId,
+        asset.ExpiresAt,
+        asset.HaloAssetUrl,
+        asset.NinjaDeviceUrl,
+        AssetType = asset.AssetType?.Name,
+    };
 
     private static object MapAsset(Asset asset)
     {
@@ -250,6 +285,9 @@ public static class AssetEndpoints
             asset.Notes,
             asset.CompanyId,
             asset.ExpiresAt,
+            asset.HaloAssetUrl,
+            asset.NinjaDeviceUrl,
+            asset.ExternalIdsJson,
             AssetType = new { asset.AssetType?.Id, asset.AssetType?.Name },
             Fields = asset.CustomFieldValues.Select(v => new
             {
@@ -259,6 +297,9 @@ public static class AssetEndpoints
             }),
         };
     }
+
+    private static string? NullIfEmpty(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 }
 
 /// <summary>
@@ -334,5 +375,26 @@ public static class ResourceWriteGuard
 public record CreateAssetTypeRequest(string Name, string? Description, string? Icon, List<AssetTypeFieldRequest>? Fields);
 public record AssetTypeFieldRequest(string Name, string Type, bool IsRequired, bool IsExpiration = false);
 public record UpdateFieldDefinitionRequest(string? Name = null, string? FieldType = null, bool? IsRequired = null, bool? IsExpiration = null, int? SortOrder = null);
-public record CreateAssetRequest(string Name, Guid AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null, DateTimeOffset? ExpiresAt = null);
-public record UpdateAssetRequest(string? Name, Guid? AssetTypeId, string? Location, string? Notes, string? Status, Guid? CompanyId = null, DateTimeOffset? ExpiresAt = null, bool CompanyIdClear = false);
+public record CreateAssetRequest(
+    string Name,
+    Guid AssetTypeId,
+    string? Location,
+    string? Notes,
+    string? Status,
+    Guid? CompanyId = null,
+    DateTimeOffset? ExpiresAt = null,
+    string? HaloAssetUrl = null,
+    string? NinjaDeviceUrl = null,
+    string? ExternalIdsJson = null);
+public record UpdateAssetRequest(
+    string? Name,
+    Guid? AssetTypeId,
+    string? Location,
+    string? Notes,
+    string? Status,
+    Guid? CompanyId = null,
+    DateTimeOffset? ExpiresAt = null,
+    bool CompanyIdClear = false,
+    string? HaloAssetUrl = null,
+    string? NinjaDeviceUrl = null,
+    string? ExternalIdsJson = null);

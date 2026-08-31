@@ -90,12 +90,21 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<DateTimeOffset?>("ExpiresAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("ExternalIdsJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("HaloAssetUrl")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Location")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("NinjaDeviceUrl")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Notes")
                         .HasColumnType("nvarchar(max)");
