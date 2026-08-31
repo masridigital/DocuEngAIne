@@ -9,8 +9,11 @@ namespace DocuEngAIne.Api.Mcp;
 
 /// <summary>
 /// Read-only outbound MCP catalog. Every tool query is <c>ForTenant</c> on the token-mapped
-/// <see cref="ICurrentUser"/>. Keeper reveal is not a tool — list_keeper_links returns titles and
-/// URLs only, and never writes <c>KeeperLink.Reveal</c>.
+/// <see cref="ICurrentUser"/>. Keeper record URLs follow the same discipline as the HTTP surface:
+/// list_keeper_links returns titles only, and reveal_keeper_link discloses one URL at a time,
+/// writing the same <c>KeeperLink.Reveal</c> audit row the HTTP reveal endpoint writes. Handing a
+/// token holder every record URL in one unaudited list response was the one place this surface
+/// was weaker than the app it fronts.
 /// </summary>
 public static class DocuEngAIneMcpServer
 {
@@ -25,6 +28,7 @@ public static class DocuEngAIneMcpServer
     public const string ListRunbooks = "list_runbooks";
     public const string ListExpirations = "list_expirations";
     public const string ListKeeperLinks = "list_keeper_links";
+    public const string RevealKeeperLink = "reveal_keeper_link";
 
     public static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -90,12 +94,21 @@ public static class DocuEngAIneMcpServer
                 q = new { type = "string", description = "Optional name / company / field search." },
             },
         }),
-        new(ListKeeperLinks, "List Keeper links (titles and record URLs only). Does not reveal or audit-log a reveal.", new
+        new(ListKeeperLinks, "List Keeper links (titles and ids only). Record URLs require reveal_keeper_link, which is audit-logged.", new
         {
             type = "object",
             properties = new
             {
                 companyId = new { type = "string", description = "Optional company filter. Other-tenant ids yield an empty list." },
+            },
+        }),
+        new(RevealKeeperLink, "Reveal one Keeper link's record URL. Audit-logged as KeeperLink.Reveal, exactly like the HTTP reveal endpoint.", new
+        {
+            type = "object",
+            required = new[] { "keeperLinkId" },
+            properties = new
+            {
+                keeperLinkId = new { type = "string", description = "Keeper link id (GUID). Other-tenant or unknown ids are not found." },
             },
         }),
     ];
@@ -112,7 +125,7 @@ public static class DocuEngAIneMcpServer
             protocolVersion = ProtocolVersion,
             capabilities = new { tools = new { listChanged = false } },
             serverInfo = new { name = ServerName, version = ServerVersion },
-            instructions = "Read-only DocuEngAIne documentation for one tenant. Authenticate with a per-tenant API token (Authorization: Bearer). Every query is scoped to that tenant. Keeper reveal is not a tool.",
+            instructions = "Read-only DocuEngAIne documentation for one tenant. Authenticate with a per-tenant API token (Authorization: Bearer). Every query is scoped to that tenant. Keeper record URLs are disclosed only by reveal_keeper_link, one at a time, and every reveal is audit-logged.",
         });
 
     public static McpJsonRpcResponse ListTools(object? id) =>
@@ -122,6 +135,7 @@ public static class DocuEngAIneMcpServer
         McpJsonRpcRequest request,
         DocuEngAIneDbContext db,
         ICurrentUser user,
+        IAuditService? audit = null,
         CancellationToken cancellationToken = default)
     {
         if (IsNotification(request.Method, request.HasId))
@@ -135,7 +149,7 @@ public static class DocuEngAIneMcpServer
             "initialize" => Initialize(request.Id),
             "ping" => Ok(request.Id, new { }),
             "tools/list" => ListTools(request.Id),
-            "tools/call" => await CallToolRpcAsync(request, db, user, cancellationToken),
+            "tools/call" => await CallToolRpcAsync(request, db, user, audit, cancellationToken),
             _ => Error(request.Id, -32601, $"Method not found: {request.Method}"),
         };
     }
@@ -144,6 +158,7 @@ public static class DocuEngAIneMcpServer
         McpJsonRpcRequest request,
         DocuEngAIneDbContext db,
         ICurrentUser user,
+        IAuditService? audit,
         CancellationToken cancellationToken)
     {
         if (request.Params is not { } p || p.ValueKind != JsonValueKind.Object)
@@ -162,7 +177,7 @@ public static class DocuEngAIneMcpServer
 
         try
         {
-            var payload = await InvokeToolAsync(name!, arguments, db, user, cancellationToken);
+            var payload = await InvokeToolAsync(name!, arguments, db, user, audit, cancellationToken);
             return Ok(request.Id, ToolResult(payload, isError: false));
         }
         catch (McpToolException ex)
@@ -176,6 +191,7 @@ public static class DocuEngAIneMcpServer
         JsonElement? arguments,
         DocuEngAIneDbContext db,
         ICurrentUser user,
+        IAuditService? audit = null,
         CancellationToken cancellationToken = default)
     {
         return name switch
@@ -187,6 +203,7 @@ public static class DocuEngAIneMcpServer
             ListRunbooks => await ListRunbooksAsync(arguments, db, user, cancellationToken),
             ListExpirations => await ListExpirationsAsync(arguments, db, user, cancellationToken),
             ListKeeperLinks => await ListKeeperLinksAsync(arguments, db, user, cancellationToken),
+            RevealKeeperLink => await RevealKeeperLinkAsync(arguments, db, user, audit, cancellationToken),
             _ => throw new McpToolException($"Tool not found: {name}"),
         };
     }
@@ -385,18 +402,47 @@ public static class DocuEngAIneMcpServer
         if (companyId is Guid cid)
             query = query.Where(k => k.CompanyId == cid);
 
-        // Titles and URLs only. Notes / username hints stay off this surface. This is not a reveal:
-        // the HTTP reveal path is POST /api/keeper/{id}/reveal and writes KeeperLink.Reveal.
+        // Titles and ids only. The record URL is exactly what the HTTP surface treats as a reveal --
+        // list/get withhold it and POST /api/keeper/{id}/reveal audits each disclosure -- so handing
+        // every URL out in one unaudited list response here would have made a leaked MCP token a
+        // silent bulk reveal of the tenant's vault index. reveal_keeper_link is the audited path.
         var items = await query.OrderBy(k => k.Name)
             .Select(k => new
             {
                 k.Id,
                 Title = k.Name,
-                Url = k.KeeperRecordUrl,
                 k.CompanyId,
             })
             .ToListAsync(cancellationToken);
         return items;
+    }
+
+    private static async Task<object> RevealKeeperLinkAsync(
+        JsonElement? arguments,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IAuditService? audit,
+        CancellationToken cancellationToken)
+    {
+        // Fail closed: with no audit sink there is no reveal, because an unlogged disclosure is the
+        // exact failure this tool exists to prevent.
+        if (audit is null)
+            throw new McpToolException("Reveal is unavailable: no audit sink is configured.");
+
+        var id = ReadGuid(arguments, "keeperLinkId")
+            ?? throw new McpToolException("keeperLinkId is required.");
+
+        var link = await db.KeeperLinks.ForTenant(user).AsNoTracking()
+            .FirstOrDefaultAsync(k => k.Id == id, cancellationToken)
+            ?? throw new McpToolException("Keeper link not found.");
+
+        if (string.IsNullOrWhiteSpace(link.KeeperRecordUrl))
+            throw new McpToolException("No Keeper URL configured for this link.");
+
+        await audit.LogAsync("KeeperLink.Reveal", nameof(Core.Entities.KeeperLink), link.Id,
+            $"Revealed link '{link.Name}' via the outbound MCP token surface", cancellationToken);
+
+        return new { link.KeeperRecordUrl, link.Name };
     }
 
     /// <summary>

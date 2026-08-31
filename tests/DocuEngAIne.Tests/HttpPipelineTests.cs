@@ -109,7 +109,7 @@ public class HttpPipelineTests : IClassFixture<TestHost>
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
         var body = await response.Content.ReadAsStringAsync();
         Assert.Contains("list_companies", body);
-        Assert.DoesNotContain("\"reveal\"", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reveal_keeper_link", body);
     }
 
     [Fact]

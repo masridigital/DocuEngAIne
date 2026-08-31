@@ -3,6 +3,7 @@ using DocuEngAIne.Api.Endpoints;
 using DocuEngAIne.Api.Mcp;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
+using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -11,6 +12,17 @@ namespace DocuEngAIne.Tests;
 
 public class OutboundMcpTests
 {
+    private sealed class RecordingAudit : IAuditService
+    {
+        public List<(string Action, string EntityType, Guid? EntityId, string? Details)> Entries { get; } = [];
+
+        public Task LogAsync(string action, string entityType, Guid? entityId = null, string? details = null, CancellationToken cancellationToken = default)
+        {
+            Entries.Add((action, entityType, entityId, details));
+            return Task.CompletedTask;
+        }
+    }
+
     private static (DocuEngAIneDbContext Db, FakeCurrentUser User) Open(string dbName, Guid tenantId)
     {
         var user = new FakeCurrentUser
@@ -174,7 +186,7 @@ public class OutboundMcpTests
     }
 
     [Fact]
-    public void Tools_List_Is_Read_Only_And_Does_Not_Expose_Reveal()
+    public void Tools_List_Exposes_Single_Audited_Reveal_Only()
     {
         var names = DocuEngAIneMcpServer.Tools.Select(t => t.Name).ToArray();
         Assert.Equal(
@@ -187,13 +199,13 @@ public class OutboundMcpTests
                 DocuEngAIneMcpServer.ListRunbooks,
                 DocuEngAIneMcpServer.ListExpirations,
                 DocuEngAIneMcpServer.ListKeeperLinks,
+                DocuEngAIneMcpServer.RevealKeeperLink,
             },
             names);
 
-        Assert.DoesNotContain(names, n => n.Contains("reveal", StringComparison.OrdinalIgnoreCase));
+        Assert.True(DocuEngAIneMcpServer.IsKnownTool(DocuEngAIneMcpServer.RevealKeeperLink));
         Assert.False(DocuEngAIneMcpServer.IsKnownTool("reveal"));
         Assert.False(DocuEngAIneMcpServer.IsKnownTool("keeper_reveal"));
-        Assert.False(DocuEngAIneMcpServer.IsKnownTool("reveal_keeper_link"));
     }
 
     [Fact]
@@ -258,9 +270,8 @@ public class OutboundMcpTests
             var keepers = JsonSerializer.Serialize(
                 await DocuEngAIneMcpServer.InvokeToolAsync(DocuEngAIneMcpServer.ListKeeperLinks, null, db, user));
             Assert.Contains("A-Vault", keepers);
-            Assert.Contains("https://keeper.example/a", keepers);
+            Assert.DoesNotContain("keeper.example", keepers);
             Assert.DoesNotContain("Poison-Vault", keepers);
-            Assert.DoesNotContain("keeper.example/poison", keepers);
         }
     }
 
@@ -302,7 +313,7 @@ public class OutboundMcpTests
     }
 
     [Fact]
-    public async Task List_Keeper_Links_Returns_Url_And_Title_Only_Without_Reveal_Audit()
+    public async Task List_Keeper_Links_Returns_Titles_And_Ids_Only_Never_Urls()
     {
         var seed = await SeedAsync();
         var (db, _) = Open(seed.DbName, seed.TenantA);
@@ -314,10 +325,115 @@ public class OutboundMcpTests
             var json = JsonSerializer.Serialize(items, DocuEngAIneMcpServer.JsonOptions);
 
             Assert.Contains("A-Vault", json);
-            Assert.Contains("https://keeper.example/a", json);
+            Assert.Contains(seed.KeeperA.ToString(), json);
+            Assert.DoesNotContain("keeper.example", json);
             Assert.DoesNotContain("admin-a", json);
             Assert.DoesNotContain("do-not-leak-notes", json);
             Assert.Empty(await db.AuditLogs.Where(a => a.Action == "KeeperLink.Reveal").ToListAsync());
+        }
+    }
+
+    [Fact]
+    public async Task Reveal_Keeper_Link_Returns_One_Url_And_Writes_Audit_Row()
+    {
+        var seed = await SeedAsync();
+        var (db, _) = Open(seed.DbName, seed.TenantA);
+        await using (db)
+        {
+            var user = TokenUser(seed.TenantA);
+            var audit = new RecordingAudit();
+            var args = JsonSerializer.SerializeToElement(new { keeperLinkId = seed.KeeperA.ToString() });
+
+            var result = await DocuEngAIneMcpServer.InvokeToolAsync(
+                DocuEngAIneMcpServer.RevealKeeperLink, args, db, user, audit);
+            var json = JsonSerializer.Serialize(result, DocuEngAIneMcpServer.JsonOptions);
+
+            Assert.Contains("https://keeper.example/a", json);
+            Assert.Contains("A-Vault", json);
+
+            var entry = Assert.Single(audit.Entries);
+            Assert.Equal("KeeperLink.Reveal", entry.Action);
+            Assert.Equal(nameof(KeeperLink), entry.EntityType);
+            Assert.Equal(seed.KeeperA, entry.EntityId);
+        }
+    }
+
+    [Fact]
+    public async Task Reveal_Keeper_Link_Foreign_Tenant_Is_Not_Found_And_Not_Audited()
+    {
+        var seed = await SeedAsync();
+        Guid keeperB;
+        var (dbB, _) = Open(seed.DbName, seed.TenantB);
+        await using (dbB)
+        {
+            keeperB = (await dbB.KeeperLinks.SingleAsync(k => k.Name == "Poison-Vault")).Id;
+        }
+
+        var (db, _) = Open(seed.DbName, seed.TenantA);
+        await using (db)
+        {
+            var user = TokenUser(seed.TenantA);
+            var audit = new RecordingAudit();
+            var args = JsonSerializer.SerializeToElement(new { keeperLinkId = keeperB.ToString() });
+
+            var ex = await Assert.ThrowsAsync<McpToolException>(() =>
+                DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.RevealKeeperLink, args, db, user, audit));
+
+            Assert.Equal("Keeper link not found.", ex.Message);
+            Assert.Empty(audit.Entries);
+        }
+    }
+
+    [Fact]
+    public async Task Reveal_Keeper_Link_Fails_Closed_Without_Audit_Sink()
+    {
+        var seed = await SeedAsync();
+        var (db, _) = Open(seed.DbName, seed.TenantA);
+        await using (db)
+        {
+            var user = TokenUser(seed.TenantA);
+            var args = JsonSerializer.SerializeToElement(new { keeperLinkId = seed.KeeperA.ToString() });
+
+            var ex = await Assert.ThrowsAsync<McpToolException>(() =>
+                DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.RevealKeeperLink, args, db, user));
+
+            Assert.Contains("audit", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+    }
+
+    [Fact]
+    public async Task Reveal_Keeper_Link_Requires_Id_And_Configured_Url()
+    {
+        var seed = await SeedAsync();
+        var (db, _) = Open(seed.DbName, seed.TenantA);
+        await using (db)
+        {
+            var user = TokenUser(seed.TenantA);
+            var audit = new RecordingAudit();
+
+            var missingId = await Assert.ThrowsAsync<McpToolException>(() =>
+                DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.RevealKeeperLink, null, db, user, audit));
+            Assert.Equal("keeperLinkId is required.", missingId.Message);
+
+            db.KeeperLinks.Add(new KeeperLink
+            {
+                TenantId = seed.TenantA,
+                Name = "A-NoUrl",
+                CompanyId = seed.CompanyA,
+            });
+            await db.SaveChangesAsync();
+            var noUrl = await db.KeeperLinks.SingleAsync(k => k.Name == "A-NoUrl");
+
+            var args = JsonSerializer.SerializeToElement(new { keeperLinkId = noUrl.Id.ToString() });
+            var noUrlEx = await Assert.ThrowsAsync<McpToolException>(() =>
+                DocuEngAIneMcpServer.InvokeToolAsync(
+                    DocuEngAIneMcpServer.RevealKeeperLink, args, db, user, audit));
+            Assert.Equal("No Keeper URL configured for this link.", noUrlEx.Message);
+
+            Assert.Empty(audit.Entries);
         }
     }
 
@@ -338,7 +454,7 @@ public class OutboundMcpTests
             var list = await DocuEngAIneMcpServer.HandleAsync(Rpc("tools/list"), db, user);
             var listJson = JsonSerializer.Serialize(list, DocuEngAIneMcpServer.JsonOptions);
             Assert.Contains(DocuEngAIneMcpServer.ListCompanies, listJson);
-            Assert.DoesNotContain(DocuEngAIneMcpServer.Tools, t => t.Name.Contains("reveal", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(DocuEngAIneMcpServer.RevealKeeperLink, listJson);
 
             var call = await DocuEngAIneMcpServer.HandleAsync(
                 Rpc("tools/call", new { name = DocuEngAIneMcpServer.ListCompanies, arguments = new { } }),
@@ -360,7 +476,7 @@ public class OutboundMcpTests
         using (var doc = JsonDocument.Parse(json))
         {
             var tools = doc.RootElement.GetProperty("tools").EnumerateArray().Select(t => t.GetString()).ToArray();
-            Assert.DoesNotContain(tools, n => n is not null && n.Contains("reveal", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(DocuEngAIneMcpServer.RevealKeeperLink, tools);
         }
         Assert.Contains("ForTenant", json);
     }

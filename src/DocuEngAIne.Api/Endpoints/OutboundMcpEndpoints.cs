@@ -1,5 +1,6 @@
 using System.Text.Json;
 using DocuEngAIne.Api.Mcp;
+using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
 
@@ -46,7 +47,7 @@ public static class OutboundMcpEndpoints
         notes = new[]
         {
             "Read-only. Every tool query is ForTenant on the token identity.",
-            "Keeper reveal is not a tool. list_keeper_links returns titles and URLs only.",
+            "list_keeper_links returns titles and ids only. reveal_keeper_link returns one link's Keeper URL and writes a KeeperLink.Reveal audit row.",
             "POST application/json JSON-RPC 2.0. Accept: application/json, text/event-stream.",
             "A text/event-stream-only Accept wraps the JSON-RPC result as a single SSE message event.",
         },
@@ -55,6 +56,7 @@ public static class OutboundMcpEndpoints
     public static async Task<IResult> HandlePostAsync(
         HttpContext http,
         DocuEngAIneDbContext db,
+        IAuditService audit,
         CancellationToken cancellationToken)
     {
         var presented = ApiTokenAuthenticator.ReadPresentedToken(
@@ -98,7 +100,7 @@ public static class OutboundMcpEndpoints
         if (DocuEngAIneMcpServer.IsNotification(request.Method, request.HasId))
             return Results.Accepted();
 
-        var response = await DocuEngAIneMcpServer.HandleAsync(request, db, user, cancellationToken);
+        var response = await DocuEngAIneMcpServer.HandleAsync(request, db, user, audit, cancellationToken);
 
         http.Response.Headers[ProtocolVersionHeader] = DocuEngAIneMcpServer.ProtocolVersion;
         if (!http.Response.Headers.ContainsKey(SessionIdHeader))
