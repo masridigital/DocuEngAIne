@@ -15,4 +15,5 @@ public enum IntegrationProvider
     DefensX = 10,
     Pax8 = 11,
     Slide = 12,
+    Datto = 13,
 }

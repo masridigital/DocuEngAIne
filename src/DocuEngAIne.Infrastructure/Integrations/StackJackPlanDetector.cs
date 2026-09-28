@@ -23,7 +23,7 @@ public static class StackJackPlanDetector
     /// <summary>
     /// StackJack's connector name for one of our providers. These are the names
     /// <c>stackjack_session_info</c> actually returns, which do not all match our enum
-    /// (NinjaOne is "NinjaRMM"; Blackpoint's platform is "CompassOne").
+    /// (NinjaOne is "NinjaRMM", Datto is "DattoRMM"; Blackpoint's platform is "CompassOne").
     /// </summary>
     public static string? ConnectorName(IntegrationProvider provider) => provider switch
     {
@@ -38,6 +38,7 @@ public static class StackJackPlanDetector
         IntegrationProvider.DefensX => "DefensX",
         IntegrationProvider.Pax8 => "Pax8",
         IntegrationProvider.Slide => "Slide",
+        IntegrationProvider.Datto => "DattoRMM",
         _ => null,
     };
 

@@ -50,7 +50,8 @@ public static class McpServerDefaults
             or IntegrationProvider.Blackpoint
             or IntegrationProvider.DefensX
             or IntegrationProvider.Pax8
-            or IntegrationProvider.Slide => true,
+            or IntegrationProvider.Slide
+            or IntegrationProvider.Datto => true,
         _ => false,
     };
 

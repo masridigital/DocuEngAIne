@@ -17,10 +17,10 @@ Since `be7465b`, roughly fifty PRs landed in two days. The wave was wide and mos
   dispatched by `IntegrationSyncService.SyncAsync`, converge through `CompanyIdentity` /
   `CompanyMatchIndex`, and stamp `ExternalIdsJson`. PR #66 additionally wired Halo sites/users,
   Action1 endpoints, CIPP devices, Meraki networks, and UniFi sites/devices into child passes.
-- **Nine mappers still have no caller** (Keeper MSP/SCIM, Datto, Huntress, ImmyBot, Liongard,
-  Azure subscriptions/resource groups, Graph partner/delegated-admin, DNSFilter, ThreatLocker).
-  Halo assets, Ninja locations and CIPP users are now dispatched as child passes of their
-  providers' syncs. They are tested dead code until a sync pass
+- **Eight mappers still have no caller** (Keeper MSP/SCIM, Huntress, ImmyBot, Liongard, Azure
+  subscriptions/resource groups, Graph partner/delegated-admin, DNSFilter, ThreatLocker). Halo
+  assets, Ninja locations and CIPP users are dispatched as child passes of their providers'
+  syncs, and Datto RMM is a provider (sites → companies). They are tested dead code until a sync pass
   dispatches them — see "Decide the mapper backlog" below.
 - **The scheduler is real**: `IntegrationSyncHostedService` polls every minute;
   `SyncCadencePolicy` budgets 20% of the detected StackJack allowance (plan auto-detected from
@@ -142,7 +142,12 @@ Stale branches safe to delete: `feature/integrations-mcp`, `cursor/unifi-host-pu
 ### 2. Decide the mapper backlog: wire or stop building
 
 Halo assets, Ninja locations and CIPP users are wired (each behind its connection's skip flag,
-pulled before the company upsert so a tool failure fails the run once). The rest are still dead code. Each is well-tested against fixtures, but no sync pass dispatches them,
+pulled before the company upsert so a tool failure fails the run once), and Datto RMM syncs its
+sites as companies. Wiring Datto against the live tool schema found its pages start at 0: the mapper
+started at 1 and would have skipped the first page of sites. Huntress, ImmyBot, Liongard, DNSFilter
+and ThreatLocker have no tools in the StackJack catalog this tenant sees, so there is nothing yet to
+check their mappers against; wire each when its connector appears. The Keeper, Azure and Graph
+mappers are not company pulls and need their own design. Each is well-tested against fixtures, but no sync pass dispatches them,
 and each unwired provider that later gets wired without an `IntegrationProvider` enum value would
 fall through to the `"custom"` provider key and collide in `ExternalIdsJson`. Either schedule the
 site/user/device passes that consume them (the Ninja device pass is the template) or stop merging

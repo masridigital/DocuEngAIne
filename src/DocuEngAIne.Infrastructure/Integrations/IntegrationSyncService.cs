@@ -413,6 +413,26 @@ public class IntegrationSyncService : IIntegrationSyncService
             }
         }
 
+        if (connection.Provider == IntegrationProvider.Datto)
+        {
+            if (await ResolveMcpServerIdAsync(connection, cancellationToken) is not Guid mcpId)
+                return await FailRunAsync(connection, CompactServerMissing("Datto RMM"), cancellationToken);
+
+            try
+            {
+                var companies = await PullDattoSitesAsync(mcpId, cancellationToken);
+                return await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+            }
+            catch (SyncAlreadyRunningException)
+            {
+                throw; // Another run won the race mid-pull; a Failed row here would misreport a healthy sync.
+            }
+            catch (Exception ex)
+            {
+                return await FailRunAsync(connection, ex.Message, cancellationToken);
+            }
+        }
+
         if (string.IsNullOrWhiteSpace(connection.AuthSecretName) && connection.McpServerId is null)
         {
             return await FailRunAsync(connection,
@@ -1444,6 +1464,20 @@ public class IntegrationSyncService : IIntegrationSyncService
             throw new InvalidOperationException("Slide client pull requires a StackJack Compact MCP server. Composio is not a Slide connector.");
 
         return await SlideClientMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
+    }
+
+    private async Task<IReadOnlyList<ExternalCompanyDto>> PullDattoSitesAsync(
+        Guid mcpServerId,
+        CancellationToken cancellationToken)
+    {
+        var server = await _db.McpServers.ForTenant(_user)
+            .FirstOrDefaultAsync(s => s.Id == mcpServerId, cancellationToken)
+            ?? throw new InvalidOperationException("MCP server not found.");
+
+        if (server.Kind != McpServerKind.StackJackCompact)
+            throw new InvalidOperationException("Datto RMM site pull requires a StackJack Compact MCP server. Composio is not a Datto RMM connector.");
+
+        return await DattoSiteMapper.PullAsync(_mcpClient, mcpServerId, cancellationToken: cancellationToken);
     }
 
     /// <summary>Overwrites local company detail only when the connection opts in. Default is refuse-to-clobber.</summary>
