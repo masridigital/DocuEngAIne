@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './App.css'
 import { Layout } from './components/Layout'
 import { AssetsPage } from './pages/AssetsPage'
+import { AuditPage } from './pages/AuditPage'
 import { CompaniesPage } from './pages/CompaniesPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DocumentsPage } from './pages/DocumentsPage'
@@ -31,6 +32,7 @@ function App() {
           <Route path="keeper" element={<KeeperPage />} />
           <Route path="integrations" element={<IntegrationsPage />} />
           <Route path="users" element={<UsersPage />} />
+          <Route path="audit" element={<AuditPage />} />
           <Route path="portal" element={<PortalPage />} />
           <Route path="portal/:companyId" element={<PortalPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

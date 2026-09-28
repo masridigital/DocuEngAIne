@@ -94,10 +94,13 @@ public static class ApiTokenEndpoints
         await db.SaveChangesAsync(cancellationToken);
 
         await audit.LogAsync(
-            "ApiToken.Create",
-            nameof(ApiToken),
-            token.Id,
-            $"Created token '{token.Name}' prefix={token.TokenPrefix}",
+            new AuditEntry(
+                "ApiToken.Create",
+                nameof(ApiToken),
+                token.Id,
+                $"Created token '{token.Name}' prefix={token.TokenPrefix}",
+                Category: AuditCategories.Access,
+                TargetLabel: token.Name),
             cancellationToken);
 
         return Results.Created($"/api/tokens/{token.Id}", new CreatedApiTokenResponse(
@@ -129,10 +132,13 @@ public static class ApiTokenEndpoints
             await db.SaveChangesAsync(cancellationToken);
 
             await audit.LogAsync(
-                "ApiToken.Revoke",
-                nameof(ApiToken),
-                token.Id,
-                $"Revoked token '{token.Name}' prefix={token.TokenPrefix}",
+                new AuditEntry(
+                    "ApiToken.Revoke",
+                    nameof(ApiToken),
+                    token.Id,
+                    $"Revoked token '{token.Name}' prefix={token.TokenPrefix}",
+                    Category: AuditCategories.Access,
+                    TargetLabel: token.Name),
                 cancellationToken);
         }
 

@@ -25,6 +25,7 @@ export function Layout() {
           <NavLink to="/portal">Portal</NavLink>
           <NavLink to="/integrations">Integrations</NavLink>
           {showUsers ? <NavLink to="/users">Users</NavLink> : null}
+          {showUsers ? <NavLink to="/audit">Audit</NavLink> : null}
         </nav>
         <div className="profile">
           <span>{isLoading ? '…' : profile?.displayName ?? profile?.email ?? account?.name ?? account?.username ?? 'Guest'}</span>

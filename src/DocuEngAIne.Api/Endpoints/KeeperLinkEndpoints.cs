@@ -61,7 +61,15 @@ public static class KeeperLinkEndpoints
             if (string.IsNullOrWhiteSpace(link.KeeperRecordUrl))
                 return Results.BadRequest("No Keeper URL configured for this link.");
 
-            await audit.LogAsync("KeeperLink.Reveal", nameof(KeeperLink), link.Id, $"User revealed link '{link.Name}'", cancellationToken);
+            await audit.LogAsync(
+                new AuditEntry(
+                    "KeeperLink.Reveal",
+                    nameof(KeeperLink),
+                    link.Id,
+                    $"User revealed link '{link.Name}'",
+                    Category: AuditCategories.Access,
+                    TargetLabel: link.Name),
+                cancellationToken);
 
             return Results.Ok(new { link.KeeperRecordUrl, link.Name });
         });

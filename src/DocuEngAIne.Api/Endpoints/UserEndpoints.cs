@@ -162,13 +162,17 @@ public static class UserEndpoints
         await db.SaveChangesAsync(cancellationToken);
 
         // Audited after the save so the trail only ever records changes that actually landed. The
-        // AuditService stamps the acting user and IP itself; the old and new role go in the details
-        // because a role change is only reviewable if you can see what it moved *from*.
+        // AuditService stamps the acting user and IP itself; the old and new role go in the changes
+        // diff because a role change is only reviewable if you can see what it moved *from*.
         await audit.LogAsync(
-            "User.ChangeRole",
-            nameof(User),
-            target.Id,
-            $"Role changed from {previousRole} to {newRole} by {user.Email ?? user.ObjectId ?? "unknown"}",
+            new AuditEntry(
+                "User.ChangeRole",
+                nameof(User),
+                target.Id,
+                $"Role changed from {previousRole} to {newRole} by {user.Email ?? user.ObjectId ?? "unknown"}",
+                Category: AuditCategories.Security,
+                TargetLabel: target.DisplayName ?? target.Email,
+                ChangesJson: $$"""{"role":{"from":"{{previousRole}}","to":"{{newRole}}"}}"""),
             cancellationToken);
 
         return Results.NoContent();

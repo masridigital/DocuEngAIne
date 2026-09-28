@@ -20,4 +20,20 @@ public class AuditLog : EntityBase
     public Guid? EntityId { get; set; }
     public string? Details { get; set; }
     public string? IpAddress { get; set; }
+
+    /// <summary>Coarse grouping for filtering: resource | access | archive | export | system | security.</summary>
+    public string? Category { get; set; }
+
+    /// <summary>Human name of the target at the time of the event (survives later rename/delete).</summary>
+    public string? TargetLabel { get; set; }
+
+    /// <summary>Structured before/after diff: <c>{"field":{"from":...,"to":...}}</c>. Never secrets.</summary>
+    public string? ChangesJson { get; set; }
+
+    /// <summary>Actor display name / email at the time of the event, denormalized so the trail survives user removal.</summary>
+    public string? ActorName { get; set; }
+
+    public string? RequestMethod { get; set; }
+    public string? RequestPath { get; set; }
+    public string? UserAgent { get; set; }
 }

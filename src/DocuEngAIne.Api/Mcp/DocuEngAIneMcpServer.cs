@@ -493,8 +493,15 @@ public static class DocuEngAIneMcpServer
         if (string.IsNullOrWhiteSpace(link.KeeperRecordUrl))
             throw new McpToolException("No Keeper URL configured for this link.");
 
-        await audit.LogAsync("KeeperLink.Reveal", nameof(Core.Entities.KeeperLink), link.Id,
-            $"Revealed link '{link.Name}' via the outbound MCP token surface", cancellationToken);
+        await audit.LogAsync(
+            new AuditEntry(
+                "KeeperLink.Reveal",
+                nameof(Core.Entities.KeeperLink),
+                link.Id,
+                $"Revealed link '{link.Name}' via the outbound MCP token surface",
+                Category: AuditCategories.Access,
+                TargetLabel: link.Name),
+            cancellationToken);
 
         return new { link.KeeperRecordUrl, link.Name };
     }

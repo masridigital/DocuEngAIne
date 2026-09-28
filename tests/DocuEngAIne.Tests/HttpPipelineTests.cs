@@ -206,6 +206,21 @@ public class HttpPipelineTests : IClassFixture<TestHost>
     }
 
     [Fact]
+    public async Task Audit_Events_Require_Admin()
+    {
+        using (var reader = _host.CreateReaderClient())
+        {
+            var forbidden = await reader.GetAsync("/api/audit-events");
+            Assert.Equal(HttpStatusCode.Forbidden, forbidden.StatusCode);
+        }
+
+        using var owner = _host.CreateOwnerClient();
+        var ok = await owner.GetAsync("/api/audit-events");
+        Assert.Equal(HttpStatusCode.OK, ok.StatusCode);
+        Assert.Contains("\"items\"", await ok.Content.ReadAsStringAsync());
+    }
+
+    [Fact]
     public async Task Mcp_Get_Is_Anonymous_200()
     {
         using var client = _host.CreateAnonymousClient();

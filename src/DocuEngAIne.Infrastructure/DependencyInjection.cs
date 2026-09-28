@@ -1,4 +1,5 @@
 using DocuEngAIne.Core.Interfaces;
+using DocuEngAIne.Infrastructure.Audit;
 using DocuEngAIne.Infrastructure.Configuration;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
@@ -34,6 +35,8 @@ public static class DependencyInjection
         services.AddSingleton<ISearchService, InMemorySearchService>();
         services.AddSingleton<IntegrationSyncRunner>();
         services.AddHostedService<IntegrationSyncHostedService>();
+        services.AddScoped<AuditRetentionService>();
+        services.AddHostedService<AuditRetentionHostedService>();
 
         var connectionString = SqlConnectionDefaults.Resolve(
             configuration.GetConnectionString("DocuEngAIne"),
