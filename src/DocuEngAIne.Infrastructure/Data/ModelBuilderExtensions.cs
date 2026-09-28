@@ -208,9 +208,19 @@ public static class ModelBuilderExtensions
         modelBuilder.Entity<AuditLog>(a =>
         {
             a.Property(x => x.ActorObjectId).HasMaxLength(128);
+            a.Property(x => x.ActorName).HasMaxLength(200);
+            a.Property(x => x.Category).HasMaxLength(100);
+            // Bounded so it can participate in the composite target index (max columns can't be indexed).
+            a.Property(x => x.EntityType).HasMaxLength(200);
+            a.Property(x => x.TargetLabel).HasMaxLength(200);
+            a.Property(x => x.RequestMethod).HasMaxLength(16);
+            a.Property(x => x.RequestPath).HasMaxLength(512);
+            a.Property(x => x.UserAgent).HasMaxLength(512);
             a.HasIndex(x => x.TenantId);
             a.HasIndex(x => x.Action);
             a.HasIndex(x => x.CreatedAt);
+            // The per-record activity feed reads by target.
+            a.HasIndex(x => new { x.TenantId, x.EntityType, x.EntityId });
         });
 
         modelBuilder.Entity<ApiToken>(a =>

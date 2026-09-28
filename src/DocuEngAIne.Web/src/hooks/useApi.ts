@@ -709,3 +709,81 @@ export function syncIntegration(id: string) {
     itemsSkipped?: number
   }>(`/api/integrations/${id}/sync`, {})
 }
+
+export type AuditEvent = {
+  id: string
+  action: string
+  category?: string | null
+  entityType: string
+  entityId?: string | null
+  targetLabel?: string | null
+  details?: string | null
+  changesJson?: string | null
+  actorObjectId?: string | null
+  actorName?: string | null
+  userId?: string | null
+  ipAddress?: string | null
+  requestMethod?: string | null
+  requestPath?: string | null
+  occurredAt: string
+}
+
+export type AuditEventPage = {
+  total: number
+  page: number
+  pageSize: number
+  items: AuditEvent[]
+}
+
+export type AuditFilters = {
+  action?: string
+  category?: string
+  entityType?: string
+  from?: string
+  to?: string
+  page?: number
+}
+
+function auditQuery(filters: AuditFilters) {
+  const params = new URLSearchParams()
+  if (filters.action) params.set('action', filters.action)
+  if (filters.category) params.set('category', filters.category)
+  if (filters.entityType) params.set('entityType', filters.entityType)
+  if (filters.from) params.set('from', new Date(filters.from).toISOString())
+  if (filters.to) params.set('to', new Date(filters.to).toISOString())
+  return params
+}
+
+/** Admin-gated audit trail. Pass enabled=false to skip the request entirely. */
+export function useAuditEvents(filters: AuditFilters, enabled = true) {
+  const params = auditQuery(filters)
+  if (filters.page && filters.page > 1) params.set('page', String(filters.page))
+  const qs = params.toString()
+  return useSWR<AuditEventPage>(enabled ? `/api/audit-events${qs ? `?${qs}` : ''}` : null, fetcher)
+}
+
+/** Full activity feed for one record — newest first, capped server-side. */
+export function useAuditActivity(entityType?: string, entityId?: string) {
+  return useSWR<AuditEvent[]>(
+    entityType && entityId ? `/api/audit-events/activity/${entityType}/${entityId}` : null,
+    fetcher,
+  )
+}
+
+/** Downloads the filtered trail as CSV. The export itself is audit-logged server-side. */
+export async function exportAuditCsv(filters: AuditFilters) {
+  const qs = auditQuery(filters).toString()
+  const res = await apiFetch(`/api/audit-events/export${qs ? `?${qs}` : ''}`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  try {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `audit-events-${new Date().toISOString().slice(0, 10)}.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
