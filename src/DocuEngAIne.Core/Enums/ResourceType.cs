@@ -7,4 +7,5 @@ public static class ResourceType
     public const string Runbook = nameof(Runbook);
     public const string KeeperLink = nameof(KeeperLink);
     public const string DocumentFolder = nameof(DocumentFolder);
+    public const string Company = nameof(Company);
 }

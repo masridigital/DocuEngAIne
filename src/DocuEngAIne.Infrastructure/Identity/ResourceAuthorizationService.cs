@@ -95,9 +95,13 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
             ResourceType.KeeperLink => await _db.KeeperLinks.IgnoreQueryFilters(softDelete)
                 .Where(x => x.TenantId == tenantId && x.Id == resourceId)
                 .Select(x => new CompanyOwner(x.CompanyId)).FirstOrDefaultAsync(cancellationToken),
-            ResourceType.DocumentFolder => await _db.DocumentFolders
+            ResourceType.DocumentFolder => await _db.DocumentFolders.IgnoreQueryFilters(softDelete)
                 .Where(x => x.TenantId == tenantId && x.Id == resourceId)
                 .Select(x => new CompanyOwner(x.CompanyId)).FirstOrDefaultAsync(cancellationToken),
+            // A company owns itself; archived or not, it resolves only if the caller can see it.
+            ResourceType.Company => await _db.Companies.IgnoreQueryFilters(softDelete)
+                .Where(x => x.TenantId == tenantId && x.Id == resourceId)
+                .Select(x => new CompanyOwner(x.Id)).FirstOrDefaultAsync(cancellationToken),
             _ => null,
         };
 

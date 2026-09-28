@@ -47,7 +47,10 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<Company>(c =>
         {
-            c.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
+            c.HasQueryFilter(SoftDeleteFilter, x => x.DeletedAt == null);
+            // Live rows only, like documents and runbooks: a new company may take an archived one's
+            // slug, and restoring the archived one then suffixes its own.
+            c.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique().HasFilter(ActiveSlugFilter);
             c.HasIndex(x => new { x.TenantId, x.HaloClientId });
             c.HasIndex(x => new { x.TenantId, x.NinjaOrganizationId });
             c.HasIndex(x => x.ParentCompanyId);
@@ -124,7 +127,8 @@ public static class ModelBuilderExtensions
             c.HasIndex(x => new { x.TenantId, x.CompanyId });
             c.Property(x => x.ActivatedByObjectId).HasMaxLength(128);
             // Restrict on both Tenant and Company: the row already cascades from Tenant through
-            // AssetType, and SQL Server forbids a second path. Company delete removes them itself.
+            // AssetType, and SQL Server forbids a second path. A company's permanent delete removes
+            // them itself.
             c.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
             c.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -175,6 +179,10 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<DocumentFolder>(f =>
         {
+            // A company's knowledge base disappears with the company while it is in the Museum. The
+            // null check matters: the join to Company carries Company's own filter, so an archived
+            // company arrives as no company at all.
+            f.HasQueryFilter(SoftDeleteFilter, x => x.CompanyId == null || (x.Company != null && x.Company.DeletedAt == null));
             f.HasIndex(x => new { x.TenantId, x.Name });
             f.HasIndex(x => new { x.TenantId, x.CompanyId });
             f.HasIndex(x => x.ParentId);
@@ -232,7 +240,9 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<RunbookRun>(r =>
         {
-            r.HasQueryFilter(SoftDeleteFilter, x => x.Runbook.DeletedAt == null);
+            // Hidden with an archived runbook or company (see DocumentFolder for the null check).
+            r.HasQueryFilter(SoftDeleteFilter, x => x.Runbook.DeletedAt == null
+                && (x.CompanyId == null || (x.Company != null && x.Company.DeletedAt == null)));
             r.HasIndex(x => new { x.RunbookId, x.StartedAt });
             r.HasIndex(x => new { x.TenantId, x.StartedAt });
             // Restrict: Runbook already cascades from Tenant — SQL Server forbids multiple cascade paths.
@@ -303,6 +313,7 @@ public static class ModelBuilderExtensions
             a.Property(x => x.PermanentlyDeletedByObjectId).HasMaxLength(128);
             a.HasIndex(x => new { x.TenantId, x.ResourceType, x.ResourceId });
             a.HasIndex(x => new { x.TenantId, x.ArchivedAt });
+            a.HasIndex(x => x.ParentEntryId);
             a.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 

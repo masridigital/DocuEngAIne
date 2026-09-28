@@ -1,10 +1,13 @@
 using System.Text.Json;
+using DocuEngAIne.Api.Endpoints;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Core.Mcp;
 using DocuEngAIne.Infrastructure.Data;
+using DocuEngAIne.Infrastructure.Identity;
 using DocuEngAIne.Infrastructure.Integrations;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace DocuEngAIne.Tests;
@@ -303,6 +306,40 @@ public class NinjaDeviceMapperTests
         Assert.Equal(2, second.ItemsSkipped);
         Assert.Equal(3, await db.Assets.CountAsync());
         Assert.Equal(4, await db.Assets.IgnoreQueryFilters().CountAsync());
+    }
+
+    [Fact]
+    public async Task Ninja_SyncAsync_Leaves_An_Archived_Company_And_Its_Devices_Alone()
+    {
+        var mcp = NinjaMcp();
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedNinjaCompactAsync(db, user);
+        await sync.SyncAsync(connection.Id);
+
+        // Organization 11 owns HIPPO and EAGLE; both go to the Museum with it.
+        var dawn = await db.Companies.SingleAsync(c => c.NinjaOrganizationId == "11");
+        var archived = await CompanyEndpoints.ArchiveAsync(dawn.Id, db, user, new ResourceAuthorizationService(db, user));
+        Assert.Equal(StatusCodes.Status200OK, (archived as IStatusCodeHttpResult)?.StatusCode);
+
+        // Since then Ninja has a new device in that organization.
+        var withNewDevice = new RecordingNinjaMcp
+        {
+            OrganizationsJson = NinjaOrganizationMapperTests.LiveCompactListFixture,
+            DevicesJson = LiveCompactDeviceListFixture.Trim().TrimEnd(']')
+                + """,{"id":900,"organizationId":11,"nodeClass":"WINDOWS_WORKSTATION","systemName":"NEW-PC"}]""",
+        };
+        var second = await new IntegrationSyncService(db, user, withNewDevice, new NoopAudit()).SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, second.Status);
+        Assert.Equal(0, second.ItemsCreated);
+        // The 4 live companies and their 2 devices.
+        Assert.Equal(6, second.ItemsUpdated);
+        // The archived company, its 2 archived devices, its new device, and the orphan-org device.
+        Assert.Equal(5, second.ItemsSkipped);
+        Assert.False(await db.Assets.IgnoreQueryFilters().AnyAsync(a => a.Name == "NEW-PC"));
+        Assert.Equal(4, await db.Assets.IgnoreQueryFilters().CountAsync());
+        Assert.Equal(5, await db.Companies.IgnoreQueryFilters().CountAsync());
+        Assert.NotNull((await db.Companies.IgnoreQueryFilters().SingleAsync(c => c.Id == dawn.Id)).DeletedAt);
     }
 
     [Fact]

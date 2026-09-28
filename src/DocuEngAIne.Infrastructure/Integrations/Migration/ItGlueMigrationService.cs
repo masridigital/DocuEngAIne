@@ -95,20 +95,22 @@ public sealed class ItGlueMigrationService : IItGlueMigrationService
     {
         var companiesCreated = 0;
         var companiesUpdated = 0;
-        var companyByItGlueId = await ImportOrganizationsAsync(
-            slice.Organizations, cancellationToken, incrementCreated: () => companiesCreated++, incrementUpdated: () => companiesUpdated++);
+        var skipped = 0;
+        var (companyByItGlueId, archivedCompanyIds) = await ImportOrganizationsAsync(
+            slice.Organizations, cancellationToken,
+            incrementCreated: () => companiesCreated++, incrementUpdated: () => companiesUpdated++, incrementSkipped: () => skipped++);
 
         var documentsCreated = 0;
         var documentsUpdated = 0;
         await ImportDocumentsAsync(
-            slice.Documents, companyByItGlueId, cancellationToken,
-            incrementCreated: () => documentsCreated++, incrementUpdated: () => documentsUpdated++);
+            slice.Documents, companyByItGlueId, archivedCompanyIds, cancellationToken,
+            incrementCreated: () => documentsCreated++, incrementUpdated: () => documentsUpdated++, incrementSkipped: () => skipped++);
 
         var assetsCreated = 0;
         var assetsUpdated = 0;
         await ImportFlexibleAssetsAsync(
-            slice.FlexibleAssets, companyByItGlueId, cancellationToken,
-            incrementCreated: () => assetsCreated++, incrementUpdated: () => assetsUpdated++);
+            slice.FlexibleAssets, companyByItGlueId, archivedCompanyIds, cancellationToken,
+            incrementCreated: () => assetsCreated++, incrementUpdated: () => assetsUpdated++, incrementSkipped: () => skipped++);
 
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -120,21 +122,35 @@ public sealed class ItGlueMigrationService : IItGlueMigrationService
             DocumentsUpdated: documentsUpdated,
             AssetsCreated: assetsCreated,
             AssetsUpdated: assetsUpdated,
-            ItemsSkipped: slice.PasswordsSkipped);
+            ItemsSkipped: slice.PasswordsSkipped + skipped);
     }
 
-    private async Task<Dictionary<string, Guid>> ImportOrganizationsAsync(
+    /// <summary>
+    /// Matches or creates a company per organization. One that matches only a company in the Museum
+    /// is skipped rather than re-created, and its documents and assets are skipped with it: their
+    /// organization resolves to the archived company, which the document and asset passes check.
+    /// </summary>
+    private async Task<(Dictionary<string, Guid> ByItGlueId, HashSet<Guid> ArchivedCompanyIds)> ImportOrganizationsAsync(
         IReadOnlyList<ExternalCompanyDto> organizations,
         CancellationToken cancellationToken,
         Action incrementCreated,
-        Action incrementUpdated)
+        Action incrementUpdated,
+        Action incrementSkipped)
     {
-        var index = new CompanyMatchIndex(
-            await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken));
+        var live = await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken);
+        var archived = await _db.Companies.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(_user)
+            .Where(c => c.DeletedAt != null)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
+        var index = new CompanyMatchIndex(live);
+        // Apart from the live index, so an archived namesake cannot make a live match ambiguous.
+        var archivedIndex = new CompanyMatchIndex(archived);
+        var archivedIds = archived.Select(c => c.Id).ToHashSet();
         var claimed = new HashSet<Guid>();
         var byItGlueId = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var company in await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken))
+        // Live companies last, so they win an IT Glue id an archived company also carries.
+        foreach (var company in archived.Concat(live))
         {
             if (CompanyIdentity.ReadExternalIds(company.ExternalIdsJson)
                 .TryGetValue(CompanyIdentity.ItGlueKey, out var existingId))
@@ -146,6 +162,14 @@ public sealed class ItGlueMigrationService : IItGlueMigrationService
         foreach (var dto in organizations)
         {
             var match = index.Find(CompanyIdentity.ItGlueKey, dto);
+            if ((match is null || claimed.Contains(match.Company.Id))
+                && archivedIndex.Find(CompanyIdentity.ItGlueKey, dto) is { } archivedMatch)
+            {
+                byItGlueId[dto.ExternalId] = archivedMatch.Company.Id;
+                incrementSkipped();
+                continue;
+            }
+
             if (match is not null && !claimed.Contains(match.Company.Id))
             {
                 StampItGlueId(match.Company, dto.ExternalId);
@@ -179,30 +203,45 @@ public sealed class ItGlueMigrationService : IItGlueMigrationService
             incrementCreated();
         }
 
-        return byItGlueId;
+        return (byItGlueId, archivedIds);
     }
 
     private async Task ImportDocumentsAsync(
         IReadOnlyList<ItGlueDocumentDto> documents,
         IReadOnlyDictionary<string, Guid> companyByItGlueId,
+        IReadOnlySet<Guid> archivedCompanyIds,
         CancellationToken cancellationToken,
         Action incrementCreated,
-        Action incrementUpdated)
+        Action incrementUpdated,
+        Action incrementSkipped)
     {
-        var existing = await _db.Documents.ForTenant(_user)
+        // Archived documents too: re-importing must not re-create what a technician archived.
+        var existing = await _db.Documents.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(_user)
             .Where(d => d.Slug != null && d.Slug.StartsWith(ItGlueJsonApiMapper.DocumentSlugPrefix))
             .ToListAsync(cancellationToken);
-        var bySlug = existing
-            .Where(d => d.Slug is not null)
-            .ToDictionary(d => d.Slug!, StringComparer.OrdinalIgnoreCase);
+        // A live document wins a slug it shares with an archived one (live slugs are unique, archived ones need not be).
+        var bySlug = new Dictionary<string, Document>(StringComparer.OrdinalIgnoreCase);
+        foreach (var candidate in existing.Where(d => d.Slug is not null).OrderBy(d => d.DeletedAt is null))
+            bySlug[candidate.Slug!] = candidate;
 
         foreach (var dto in documents)
         {
             var slug = ItGlueJsonApiMapper.DocumentSlug(dto.ExternalId);
             var companyId = ResolveCompanyId(dto.OrganizationExternalId, companyByItGlueId);
+            if (companyId is Guid owner && archivedCompanyIds.Contains(owner))
+            {
+                incrementSkipped();
+                continue;
+            }
 
             if (bySlug.TryGetValue(slug, out var doc))
             {
+                if (doc.DeletedAt is not null)
+                {
+                    incrementSkipped();
+                    continue;
+                }
+
                 doc.Title = dto.Title;
                 doc.Summary = dto.Summary;
                 doc.Content = dto.Content;
@@ -231,9 +270,11 @@ public sealed class ItGlueMigrationService : IItGlueMigrationService
     private async Task ImportFlexibleAssetsAsync(
         IReadOnlyList<ItGlueFlexibleAssetDto> assets,
         IReadOnlyDictionary<string, Guid> companyByItGlueId,
+        IReadOnlySet<Guid> archivedCompanyIds,
         CancellationToken cancellationToken,
         Action incrementCreated,
-        Action incrementUpdated)
+        Action incrementUpdated,
+        Action incrementSkipped)
     {
         if (assets.Count == 0)
             return;
@@ -241,12 +282,13 @@ public sealed class ItGlueMigrationService : IItGlueMigrationService
         var assetType = await EnsureFlexibleAssetTypeAsync(cancellationToken);
         var idField = await EnsureItGlueIdFieldAsync(assetType, cancellationToken);
 
-        var existing = await _db.Assets.ForTenant(_user)
+        // Archived assets too, for the same reason as documents; a live one wins a shared IT Glue id.
+        var existing = await _db.Assets.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(_user)
             .Include(a => a.CustomFieldValues)
             .Where(a => a.AssetTypeId == assetType.Id)
             .ToListAsync(cancellationToken);
         var byItGlueId = new Dictionary<string, Asset>(StringComparer.OrdinalIgnoreCase);
-        foreach (var asset in existing)
+        foreach (var asset in existing.OrderBy(a => a.DeletedAt is null))
         {
             var value = asset.CustomFieldValues.FirstOrDefault(v => v.FieldDefinitionId == idField.Id)?.Value;
             if (!string.IsNullOrWhiteSpace(value))
@@ -256,8 +298,20 @@ public sealed class ItGlueMigrationService : IItGlueMigrationService
         foreach (var dto in assets)
         {
             var companyId = ResolveCompanyId(dto.OrganizationExternalId, companyByItGlueId);
+            if (companyId is Guid owner && archivedCompanyIds.Contains(owner))
+            {
+                incrementSkipped();
+                continue;
+            }
+
             if (byItGlueId.TryGetValue(dto.ExternalId, out var asset))
             {
+                if (asset.DeletedAt is not null)
+                {
+                    incrementSkipped();
+                    continue;
+                }
+
                 asset.Name = dto.Name;
                 asset.Notes = dto.Notes;
                 asset.CompanyId = companyId ?? asset.CompanyId;

@@ -1179,27 +1179,46 @@ export async function exportAuditCsv(filters: AuditFilters) {
   }
 }
 
-export type ArchiveResourceType = 'Asset' | 'Document' | 'Runbook' | 'KeeperLink'
+export type ArchiveResourceType = 'Company' | 'Asset' | 'Document' | 'Runbook' | 'KeeperLink'
+
+export const ARCHIVE_RESOURCE_TYPES: ArchiveResourceType[] = ['Company', 'Asset', 'Document', 'Runbook', 'KeeperLink']
 
 const ARCHIVE_ROUTES: Record<ArchiveResourceType, string> = {
+  Company: '/api/companies',
   Asset: '/api/assets',
   Document: '/api/documents',
   Runbook: '/api/runbooks',
   KeeperLink: '/api/keeper',
 }
 
-/** Revalidates every cached list for the archivable resource types (all query-string variants). */
-function revalidateResourceLists() {
+/**
+ * Revalidates every cached list for the archivable resource types (all query-string variants).
+ * `except` skips one record's own keys: an archived record's detail would only refetch into a 404.
+ */
+function revalidateResourceLists(except?: string) {
   const prefixes = Object.values(ARCHIVE_ROUTES)
-  return mutate((key) => typeof key === 'string' && prefixes.some((p) => key.startsWith(p)))
+  return mutate(
+    (key) =>
+      typeof key === 'string' &&
+      prefixes.some((p) => key.startsWith(p)) &&
+      !(except && (key === except || key.startsWith(`${except}/`) || key.startsWith(`${except}?`))),
+  )
 }
 
-/** DELETE archives to the Museum (restorable). The reason is optional and lands on the entry + audit row. */
+function revalidateArchive() {
+  return mutate((key) => typeof key === 'string' && key.startsWith('/api/archive'))
+}
+
+/**
+ * DELETE archives to the Museum (restorable). The reason is optional and lands on the entry + audit
+ * row. A company goes with its assets, documents, runbooks and Keeper links.
+ */
 export async function archiveResource(type: ArchiveResourceType, id: string, reason?: string) {
   const trimmed = reason?.trim()
   const qs = trimmed ? `?reason=${encodeURIComponent(trimmed)}` : ''
-  await apiFetch(`${ARCHIVE_ROUTES[type]}/${id}${qs}`, { method: 'DELETE' })
-  await Promise.all([revalidateResourceLists(), mutate((key) => typeof key === 'string' && key.startsWith('/api/archive'))])
+  const route = `${ARCHIVE_ROUTES[type]}/${id}`
+  await apiFetch(`${route}${qs}`, { method: 'DELETE' })
+  await Promise.all([revalidateResourceLists(route), revalidateArchive()])
 }
 
 export type ArchiveState = 'archived' | 'restored' | 'deleted' | 'all'
@@ -1216,6 +1235,10 @@ export type ArchiveEntry = {
   archivedByObjectId?: string | null
   restoredAt?: string | null
   permanentlyDeletedAt?: string | null
+  /** Set on an item archived with its company: the company's entry. */
+  parentEntryId?: string | null
+  /** On a company's entry: how many items were archived with it. */
+  items?: number
 }
 
 export type ArchivePage = {
@@ -1225,23 +1248,27 @@ export type ArchivePage = {
   items: ArchiveEntry[]
 }
 
-export function useArchive(opts: { state: ArchiveState; resourceType?: ArchiveResourceType; page?: number }) {
+/** Top-level entries, or with `parentId` the items archived with that company entry. */
+export function useArchive(opts: { state: ArchiveState; resourceType?: ArchiveResourceType; page?: number; parentId?: string }) {
   const params = new URLSearchParams()
   params.set('state', opts.state)
   if (opts.resourceType) params.set('resourceType', opts.resourceType)
   if (opts.page && opts.page > 1) params.set('page', String(opts.page))
+  if (opts.parentId) params.set('parentId', opts.parentId)
   return useSWR<ArchivePage>(`/api/archive?${params.toString()}`, fetcher)
 }
 
+/** A company comes back with everything archived with it. */
 export async function restoreArchiveEntry(id: string) {
   const entry = await postJson<ArchiveEntry>(`/api/archive/${id}/restore`)
-  await revalidateResourceLists()
+  await Promise.all([revalidateResourceLists(), revalidateArchive()])
   return entry
 }
 
 /** Admin only. Irreversible: the row is destroyed; the Museum entry stays as a tombstone. */
 export async function permanentlyDeleteArchiveEntry(id: string) {
   await apiFetch(`/api/archive/${id}`, { method: 'DELETE' })
+  await revalidateArchive()
 }
 
 export type AccessReviewStatus = 'Draft' | 'InProgress' | 'Completed' | 'Cancelled'

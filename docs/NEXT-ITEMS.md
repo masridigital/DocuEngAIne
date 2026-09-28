@@ -49,8 +49,7 @@ Shipped:
   per-record activity feed, CSV export (formula-escaped), retention purge. Also fixed a
   cross-tenant document-version read found while porting.
 - **Museum** — soft delete + archive registry + restore / permanent delete for assets, documents,
-  runbooks and Keeper links. Company archive is deliberately excluded until sync, portal and
-  import semantics for an archived company are decided.
+  runbooks and Keeper links.
 - **Deactivation that means something** — a suspended user is refused everywhere, including with
   an Entra Admin app role; Owner invariants guard suspend / reactivate.
 - **Access reviews** — snapshot, decide (applied immediately), complete, CSV evidence.
@@ -80,11 +79,19 @@ Shipped:
   is kept and reactivation restores it. Audited in both the operator's and the tenant's trail.
   Docuengine's separate "inactive" state is folded into Suspended; hard tenant deletion is not
   ported (decide retention and export first).
+- **Company archive** — the Museum's deferred slice. A company is archived with everything it owns,
+  each item filed under the company's entry, and restored or permanently deleted with it as one
+  bundle; nothing is restored into an archived company, and sub-companies go first and come back
+  after their parent. Sync and the IT Glue / Hudu imports match archived companies and skip them
+  (and what belongs to them) rather than re-creating them, and re-imports skip archived documents
+  and assets. The portal, search and MCP simply never see an archived company. Closed two
+  pre-existing gaps on the way: a sync mapping left pointing at a deleted company failed the
+  company pass on every run, and a new device in that company's organization failed the device
+  pass.
 
 Next, in order:
 
-1. **Company archive** — the Museum slice deferred above.
-2. **Regional settings** — tenant timezone and date / time formats, applied to every date the SPA
+1. **Regional settings** — tenant timezone and date / time formats, applied to every date the SPA
    shows and to expiration day boundaries.
 
 Open decision from the scoping slice: links, flag assignments and flag definitions are still

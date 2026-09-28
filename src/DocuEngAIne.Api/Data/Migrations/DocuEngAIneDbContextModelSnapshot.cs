@@ -221,6 +221,9 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<Guid?>("ParentEntryId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTimeOffset?>("PermanentlyDeletedAt")
                         .HasColumnType("datetimeoffset");
 
@@ -259,6 +262,8 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ParentEntryId");
 
                     b.HasIndex("TenantId", "ArchivedAt");
 
@@ -590,6 +595,9 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<string>("ExternalIdsJson")
                         .HasColumnType("nvarchar(max)");
 
@@ -664,7 +672,8 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.HasIndex("TenantId", "NinjaOrganizationId");
 
                     b.HasIndex("TenantId", "Slug")
-                        .IsUnique();
+                        .IsUnique()
+                        .HasFilter("[Slug] IS NOT NULL AND [DeletedAt] IS NULL");
 
                     b.ToTable("Companies");
                 });

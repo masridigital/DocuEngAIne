@@ -15,6 +15,7 @@ public static class CompanyEndpoints
     public const string CompanyAccessDeniedMessage = "Your access to this company does not allow that.";
     public const string TenantWideAccessDeniedMessage = "Only users with access to every company can create or change records that belong to no company.";
     public const string CreateRequiresFullAccessMessage = "Only users with access to every company can create companies.";
+    public const string HasSubCompaniesMessage = "This company has sub-companies. Archive them, or move them to another parent, first.";
 
     public static IEndpointRouteBuilder MapCompanyEndpoints(this IEndpointRouteBuilder app)
     {
@@ -85,32 +86,47 @@ public static class CompanyEndpoints
             return await UpdateAsync(id, request, db, user, cancellationToken);
         });
 
-        group.MapDelete("/{id:guid}", async (
-            Guid id,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, nameof(Company), cancellationToken) is { } denied)
-                return denied;
-
-            var company = await db.Companies.ForTenant(user).FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
-            if (company is null)
-                return Results.NotFound();
-            if (RequireCompanyAccess(db, id, CompanyAccessLevel.Manage) is { } deniedCompany)
-                return deniedCompany;
-
-            // Restrict FK (the rows already cascade from Tenant through their layout), so remove them here.
-            db.AssetTypeCompanyActivations.RemoveRange(await db.AssetTypeCompanyActivations.IgnoreQueryFilters().ForTenant(user)
-                .Where(a => a.CompanyId == id).ToListAsync(cancellationToken));
-            db.Companies.Remove(company);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
+        // DELETE archives: the company goes to the Museum with everything it owns.
+        group.MapDelete("/{id:guid}", ArchiveAsync);
 
         return app;
     }
+
+    /// <summary>
+    /// Archives a company with its assets, documents, runbooks and Keeper links, which are restored
+    /// or permanently deleted with it from the Museum. Refused while it has live sub-companies:
+    /// they would be left under a parent nobody can see.
+    /// </summary>
+    public static async Task<IResult> ArchiveAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        IAuditService? audit = null,
+        ISearchService? search = null,
+        [FromQuery] string? reason = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Company, cancellationToken, CompanyAccessLevel.Manage) is { } denied)
+            return denied;
+
+        var company = await db.Companies.ForTenant(user).FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
+        if (company is null)
+            return Results.NotFound();
+
+        // Every live sub-company counts, including ones outside the caller's own company scope.
+        if (await db.Companies.IgnoreQueryFilters([DocuEngAIneDbContext.CompanyScopeFilter]).ForTenant(user)
+            .AnyAsync(c => c.ParentCompanyId == id, cancellationToken))
+        {
+            return Results.Conflict(new { error = HasSubCompaniesMessage });
+        }
+
+        var (entry, items) = await ArchiveEndpoints.ArchiveCompanyAsync(db, user, audit, search, company, reason, cancellationToken);
+        return Results.Ok(new CompanyArchived(entry.Id, items));
+    }
+
+    /// <summary>The company's Museum entry, and how many of its records went to the Museum with it.</summary>
+    public sealed record CompanyArchived(Guid ArchiveEntryId, int Items);
 
     public static async Task<IResult> ListAsync(
         string? q,

@@ -168,6 +168,14 @@ public sealed class HuduMigrationService : IHuduMigrationService
         var byHuduId = new Dictionary<string, Company>(StringComparer.OrdinalIgnoreCase);
 
         var index = new CompanyMatchIndex(await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken));
+        // Companies in the Museum, apart from the live index so an archived namesake cannot make a
+        // live match ambiguous. A company that matches only one of these is skipped, not re-created,
+        // and its articles are skipped with it.
+        var archivedIndex = new CompanyMatchIndex(
+            await _db.Companies.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(_user)
+                .Where(c => c.DeletedAt != null)
+                .AsNoTracking()
+                .ToListAsync(cancellationToken));
         var claimed = new HashSet<Guid>();
 
         foreach (var dto in companies)
@@ -179,6 +187,13 @@ public sealed class HuduMigrationService : IHuduMigrationService
             }
 
             var match = index.Find(CompanyIdentity.HuduKey, dto);
+            if (match is null && archivedIndex.Find(CompanyIdentity.HuduKey, dto) is { } archivedMatch)
+            {
+                byHuduId[dto.ExternalId] = archivedMatch.Company;
+                skipped++;
+                continue;
+            }
+
             if (match is not null && !claimed.Contains(match.Company.Id))
             {
                 var company = match.Company;
@@ -232,9 +247,12 @@ public sealed class HuduMigrationService : IHuduMigrationService
         var updated = 0;
         var skipped = 0;
 
-        var documents = await _db.Documents.ForTenant(_user).ToListAsync(cancellationToken);
+        // Archived documents too, so re-importing does not re-create what a technician archived.
+        // Live ones first: they win an article id an archived document also carries.
+        var documents = await _db.Documents.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(_user)
+            .ToListAsync(cancellationToken);
         var byHuduId = new Dictionary<string, Document>(StringComparer.OrdinalIgnoreCase);
-        foreach (var doc in documents)
+        foreach (var doc in documents.OrderBy(d => d.DeletedAt is not null))
         {
             if (TryReadHuduArticleId(doc, out var id))
                 byHuduId.TryAdd(id, doc);
@@ -260,13 +278,20 @@ public sealed class HuduMigrationService : IHuduMigrationService
                         companyByHuduId[article.CompanyExternalId] = company;
                 }
 
-                if (company is null)
+                // Unknown, or in the Museum: nothing is written into an archived company.
+                if (company is null || company.DeletedAt is not null)
                 {
                     skipped++;
                     continue;
                 }
 
                 companyId = company.Id;
+            }
+
+            if (byHuduId.TryGetValue(article.ExternalId, out var archivedDocument) && archivedDocument.DeletedAt is not null)
+            {
+                skipped++;
+                continue;
             }
 
             var folderName = string.IsNullOrWhiteSpace(article.FolderName) ? DefaultFolderName : article.FolderName.Trim();
@@ -304,10 +329,15 @@ public sealed class HuduMigrationService : IHuduMigrationService
         return (created, updated, skipped);
     }
 
+    /// <summary>
+    /// The company stamped with this Hudu id, archived ones included (the caller skips those); a
+    /// live company wins an id an archived one also carries.
+    /// </summary>
     private async Task<Company?> FindCompanyByHuduIdAsync(string huduId, CancellationToken cancellationToken)
     {
-        var companies = await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken);
-        foreach (var company in companies)
+        var companies = await _db.Companies.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(_user)
+            .ToListAsync(cancellationToken);
+        foreach (var company in companies.OrderBy(c => c.DeletedAt is not null))
         {
             if (CompanyIdentity.ReadExternalIds(company.ExternalIdsJson)
                 .TryGetValue(CompanyIdentity.HuduKey, out var id)
