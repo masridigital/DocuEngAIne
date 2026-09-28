@@ -1,4 +1,5 @@
 using DocuEngAIne.Core.Entities;
+using DocuEngAIne.Core.Enums;
 using Microsoft.EntityFrameworkCore;
 
 namespace DocuEngAIne.Infrastructure.Data;
@@ -25,6 +26,9 @@ public static class ModelBuilderExtensions
             t.Property(x => x.StatusChangedByObjectId).HasMaxLength(128);
             t.Property(x => x.DisplayName).HasMaxLength(80);
             t.Property(x => x.AccentColor).HasMaxLength(7);
+            t.Property(x => x.TimeZoneId).HasMaxLength(TenantRegional.TimeZoneMaxLength);
+            t.Property(x => x.DateFormat).HasMaxLength(16);
+            t.Property(x => x.TimeFormat).HasMaxLength(8);
             t.HasIndex(x => x.Slug).IsUnique();
             t.HasIndex(x => x.PrimaryDomain);
             t.HasMany(x => x.Users).WithOne(u => u.Tenant).HasForeignKey(u => u.TenantId).OnDelete(DeleteBehavior.Cascade);

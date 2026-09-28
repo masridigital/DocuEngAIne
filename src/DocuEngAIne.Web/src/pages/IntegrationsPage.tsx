@@ -10,6 +10,7 @@ import {
   testIntegration,
   UNLIMITED_CALL_LIMIT,
   updateIntegration,
+  useFormat,
   useIntegrationMappings,
   useIntegrations,
   useLlmConfig,
@@ -30,13 +31,6 @@ const defaultPolicy = {
   skipAssets: false,
   autoUpdateAssetNames: false,
   updateCompanyDetails: false,
-}
-
-function formatTimestamp(value?: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
 }
 
 /**
@@ -62,7 +56,7 @@ function planSummary(i: IntegrationConnection) {
   return `${plan} · ${cadence}`
 }
 
-function planTitle(i: IntegrationConnection) {
+function planTitle(i: IntegrationConnection, dateTime: (value?: string | null) => string) {
   const lines: string[] = []
   if (i.monthlyCallLimit != null) {
     lines.push(
@@ -71,9 +65,9 @@ function planTitle(i: IntegrationConnection) {
         : `Allowance: ${i.monthlyCallLimit.toLocaleString()} calls per cycle`,
     )
   }
-  if (i.planDetectedAt) lines.push(`Read from StackJack ${formatTimestamp(i.planDetectedAt)}`)
+  if (i.planDetectedAt) lines.push(`Read from StackJack ${dateTime(i.planDetectedAt)}`)
   if (i.syncIntervalMinutesOverride != null) lines.push(`Override: ${i.syncIntervalMinutesOverride} minutes`)
-  if (i.nextSyncDueAt) lines.push(`Next scheduled check ${formatTimestamp(i.nextSyncDueAt)}`)
+  if (i.nextSyncDueAt) lines.push(`Next scheduled check ${dateTime(i.nextSyncDueAt)}`)
   if (lines.length === 0) lines.push('Press Test to read the plan and allowance from StackJack.')
   return lines.join('\n')
 }
@@ -89,16 +83,17 @@ function syncStatusClass(status: string) {
 /** Last SyncRun status + time from GET /api/integrations/{id}/runs. SWR shares the cache with History. */
 function LastRunCell({ integrationId, lastSyncAt }: { integrationId: string; lastSyncAt?: string | null }) {
   const { data, isLoading } = useSyncRuns(integrationId)
+  const fmt = useFormat()
   const runs: SyncRun[] = Array.isArray(data) ? data : []
   const last = runs[0]
   if (!last) {
-    return <span>{isLoading ? '…' : formatTimestamp(lastSyncAt)}</span>
+    return <span>{isLoading ? '…' : fmt.dateTime(lastSyncAt)}</span>
   }
   return (
     <>
       <span className={`tag ${syncStatusClass(last.status)}`}>{last.status}</span>
       {' '}
-      {formatTimestamp(last.finishedAt ?? last.startedAt)}
+      {fmt.dateTime(last.finishedAt ?? last.startedAt)}
     </>
   )
 }
@@ -121,6 +116,7 @@ function mappingSummary(mappings: IntegrationMapping[]) {
 function IntegrationHistory({ integrationId }: { integrationId: string }) {
   const { data: runData, error: runError, isLoading: runsLoading } = useSyncRuns(integrationId)
   const { data: mapData, error: mapError, isLoading: mapsLoading } = useIntegrationMappings(integrationId)
+  const fmt = useFormat()
   const runs: SyncRun[] = Array.isArray(runData) ? runData : []
   const mappings: IntegrationMapping[] = Array.isArray(mapData) ? mapData : []
 
@@ -155,8 +151,8 @@ function IntegrationHistory({ integrationId }: { integrationId: string }) {
                   <span className={`tag ${syncStatusClass(r.status)}`}>{r.status}</span>
                 </td>
                 <td>{r.provider || '—'}</td>
-                <td>{formatTimestamp(r.startedAt)}</td>
-                <td>{formatTimestamp(r.finishedAt)}</td>
+                <td>{fmt.dateTime(r.startedAt)}</td>
+                <td>{fmt.dateTime(r.finishedAt)}</td>
                 <td>{r.itemsCreated ?? 0}</td>
                 <td>{r.itemsUpdated ?? 0}</td>
                 <td>{r.itemsSkipped ?? 0}</td>
@@ -237,6 +233,7 @@ function LlmSettingsReadout() {
 }
 
 export function IntegrationsPage() {
+  const fmt = useFormat()
   const { data: serverData, error: serverError, isLoading: serversLoading, mutate: mutateServers } = useMcpServers()
   const { data: intData, error: intError, isLoading: intLoading, mutate: mutateIntegrations } = useIntegrations()
   const servers = Array.isArray(serverData) ? serverData : []
@@ -490,7 +487,7 @@ export function IntegrationsPage() {
                   <tr>
                     <td>{i.provider}</td>
                     <td>{i.status || '—'}</td>
-                    <td title={planTitle(i)}>{planSummary(i)}</td>
+                    <td title={planTitle(i, fmt.dateTime)}>{planSummary(i)}</td>
                     <td><LastRunCell integrationId={i.id} lastSyncAt={i.lastSyncAt} /></td>
                     <td>{i.lastError || '—'}</td>
                     <td className="row-actions">

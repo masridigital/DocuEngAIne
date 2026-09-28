@@ -5,19 +5,14 @@ import {
   deleteIpAllowlistEntry,
   setIpAllowlistEnabled,
   updateIpAllowlistEntry,
+  useFormat,
   useIpAccess,
   useProfile,
   type IpAllowlistEntry,
 } from '../hooks/useApi'
 
-function formatTimestamp(value?: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
-}
-
 export function IpAccessPage() {
+  const fmt = useFormat()
   const { data: profile, isLoading: profileLoading } = useProfile()
   const allowed = canManageUsers(profile?.role)
   const { data, error, isLoading } = useIpAccess(allowed)
@@ -201,7 +196,7 @@ export function IpAccessPage() {
                   </td>
                   <td>{entry.label || '—'}</td>
                   <td>{entry.isActive ? 'Active' : 'Inactive'}</td>
-                  <td>{formatTimestamp(entry.createdAt)}</td>
+                  <td>{fmt.dateTime(entry.createdAt)}</td>
                   <td>
                     <div className="portal-links">
                       <button className="btn" type="button" disabled={busy} onClick={() => onToggleEntry(entry)}>

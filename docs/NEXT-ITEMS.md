@@ -70,9 +70,8 @@ Shipped:
   access reviews; all default on) gating whole route families with `403 feature_disabled`, the
   configuration routes themselves never gated; tenant names for companies / assets / documents /
   runbooks; a header name and a contrast-checked accent color. Audited, Admin-only, with a Settings
-  page in the SPA. Not carried over: Docuengine's free-form custom CSS (an exfiltration vector) and
-  its regional settings (locale, timezone, date formats) — worth doing properly across every date
-  the app shows, not half-applied. Logos wait on blob storage.
+  page in the SPA. Not carried over: Docuengine's free-form custom CSS (an exfiltration vector).
+  Logos wait on blob storage.
 - **Tenant lifecycle** — Active / Suspended / Archived, changed only by platform operators named in
   host configuration (never an app role a customer's admins could self-assign). A closed tenant is
   refused on every API route with its reason, its API tokens stop working and its sync stops; data
@@ -88,11 +87,16 @@ Shipped:
   pre-existing gaps on the way: a sync mapping left pointing at a deleted company failed the
   company pass on every run, and a new device in that company's organization failed the device
   pass.
+- **Regional settings** — an IANA time zone, a date format and a 12- or 24-hour clock, applied
+  everywhere rather than only stored as in Docuengine: every date the SPA shows, the date-time and
+  date-filter inputs (read in the tenant's zone, not the browser's), and the expiration day count
+  on the server. Docuengine's locale and week start are not ported: the app is English-only and has
+  no calendar for a week to start. Fixed on the way: the audit "to" date excluded that day, and an
+  access review's due date showed as the previous evening west of UTC.
 
-Next, in order:
-
-1. **Regional settings** — tenant timezone and date / time formats, applied to every date the SPA
-   shows and to expiration day boundaries.
+Next: the rest of Docuengine's inventory — its security-event log, resource-level restrictions
+for security groups, custom tenant roles, and the company / global workspace views — each to be
+weighed before porting.
 
 Open decision from the scoping slice: links, flag assignments and flag definitions are still
 writable by Readers (company access is checked, the tenant role is not). Decide whether flagging is

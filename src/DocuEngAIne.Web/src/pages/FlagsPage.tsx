@@ -3,17 +3,12 @@ import {
   createFlag,
   useFlagReview,
   useFlags,
+  useFormat,
   type FlagDefinition,
   type FlagReviewItem,
 } from '../hooks/useApi'
 
 const entityTypes = ['', 'Company', 'Asset', 'Document', 'Runbook', 'KeeperLink'] as const
-
-function formatWhen(iso: string) {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
-}
 
 function FlagChip({ name, color }: { name: string; color: string }) {
   return (
@@ -25,6 +20,7 @@ function FlagChip({ name, color }: { name: string; color: string }) {
 }
 
 export function FlagsPage() {
+  const fmt = useFormat()
   const { data, error, isLoading, mutate } = useFlags()
   const flags: FlagDefinition[] = Array.isArray(data) ? data : []
 
@@ -137,7 +133,7 @@ export function FlagsPage() {
                   <td>{item.entityType}</td>
                   <td>{item.entityName}</td>
                   <td>{item.companyName ?? '—'}</td>
-                  <td>{formatWhen(item.createdAt)}</td>
+                  <td>{fmt.dateTime(item.createdAt)}</td>
                 </tr>
               ))}
             </tbody>

@@ -1730,6 +1730,10 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<string>("DateFormat")
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
                     b.Property<string>("DisplayName")
                         .HasMaxLength(80)
                         .HasColumnType("nvarchar(80)");
@@ -1764,6 +1768,14 @@ namespace DocuEngAIne.Api.Data.Migrations
 
                     b.Property<string>("TerminologyJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("TimeFormat")
+                        .HasMaxLength(8)
+                        .HasColumnType("nvarchar(8)");
+
+                    b.Property<string>("TimeZoneId")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<DateTimeOffset>("UpdatedAt")
                         .HasColumnType("datetimeoffset");

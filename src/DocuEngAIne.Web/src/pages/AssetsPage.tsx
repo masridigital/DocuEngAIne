@@ -10,6 +10,7 @@ import {
   updateAssetFields,
   useAsset,
   useAssetLayouts,
+  useRegional,
   useAssets,
   useCompanies,
   useOptionLists,
@@ -92,6 +93,7 @@ function FieldForm(props: {
 function AssetPanel(props: { id: string; canEdit: boolean; onClose: () => void }) {
   const { data: asset, error, isLoading } = useAsset(props.id)
   const { data: lists } = useOptionLists()
+  const { timeZone } = useRegional()
   const lookup = optionLookup(lists)
   const [editing, setEditing] = useState(false)
   const [values, setValues] = useState<Record<string, AssetFieldInput>>({})
@@ -133,8 +135,8 @@ function AssetPanel(props: { id: string; canEdit: boolean; onClose: () => void }
     const changed: Record<string, AssetFieldInput> = {}
     for (const f of editable) {
       if (!(f.fieldId in values)) continue
-      const before = toSubmitValue(f, toFormValue(f, stored.get(f.fieldId)))
-      const after = toSubmitValue(f, values[f.fieldId])
+      const before = toSubmitValue(f, toFormValue(f, stored.get(f.fieldId), timeZone), timeZone)
+      const after = toSubmitValue(f, values[f.fieldId], timeZone)
       if (JSON.stringify(before) !== JSON.stringify(after)) changed[f.fieldId] = after
     }
     if (Object.keys(changed).length === 0) {
@@ -176,7 +178,7 @@ function AssetPanel(props: { id: string; canEdit: boolean; onClose: () => void }
             idPrefix={`asset-${current.id}`}
             fields={editable}
             values={values}
-            initial={(f) => toFormValue(f, stored.get(f.fieldId))}
+            initial={(f) => toFormValue(f, stored.get(f.fieldId), timeZone)}
             onChange={(fieldId, v) => setValues((prev) => ({ ...prev, [fieldId]: v }))}
             errors={errors}
             lists={lookup}
@@ -227,6 +229,7 @@ function NewAssetForm(props: { onCreated: (id: string) => void; onCancel: () => 
   const { data: layouts } = useAssetLayouts()
   const { data: companies } = useCompanies()
   const { data: lists } = useOptionLists()
+  const { timeZone } = useRegional()
   const lookup = optionLookup(lists)
   const [name, setName] = useState('')
   const [companyId, setCompanyId] = useState('')
@@ -249,7 +252,7 @@ function NewAssetForm(props: { onCreated: (id: string) => void; onCancel: () => 
     optionListId: f.optionListId,
   }))
   // A new checkbox starts unticked, which is a value (false), so a required one can be left unticked.
-  const initial = (f: FormField): AssetFieldInput => (f.fieldType === 'Checkbox' ? false : toFormValue(f, null))
+  const initial = (f: FormField): AssetFieldInput => (f.fieldType === 'Checkbox' ? false : toFormValue(f, null, timeZone))
 
   function chooseCompany(next: string) {
     setCompanyId(next)
@@ -265,7 +268,7 @@ function NewAssetForm(props: { onCreated: (id: string) => void; onCancel: () => 
     if (!layout || !name.trim()) return
     const submitted: Record<string, AssetFieldInput> = {}
     for (const f of fields) {
-      const value = toSubmitValue(f, f.fieldId in values ? values[f.fieldId] : initial(f))
+      const value = toSubmitValue(f, f.fieldId in values ? values[f.fieldId] : initial(f), timeZone)
       if (value !== null && !(Array.isArray(value) && value.length === 0)) submitted[f.fieldId] = value
     }
 

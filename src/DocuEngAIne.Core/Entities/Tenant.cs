@@ -45,6 +45,18 @@ public class Tenant : EntityBase
     /// </summary>
     public string? TerminologyJson { get; set; }
 
+    /// <summary>
+    /// IANA time zone (<c>Europe/London</c>); null = UTC. Decides what "today" is for expirations
+    /// and the local time every stored instant is shown in.
+    /// </summary>
+    public string? TimeZoneId { get; set; }
+
+    /// <summary>One of <see cref="Enums.TenantRegional.DateFormats"/>; null = the default.</summary>
+    public string? DateFormat { get; set; }
+
+    /// <summary><c>24h</c> or <c>12h</c>; null = 24-hour.</summary>
+    public string? TimeFormat { get; set; }
+
     public ICollection<User> Users { get; set; } = [];
     public ICollection<Company> Companies { get; set; } = [];
     public ICollection<AssetType> AssetTypes { get; set; } = [];

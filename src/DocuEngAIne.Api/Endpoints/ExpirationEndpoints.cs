@@ -1,11 +1,17 @@
 using System.Globalization;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
+using DocuEngAIne.Infrastructure.Tenancy;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace DocuEngAIne.Api.Endpoints;
 
+/// <summary>
+/// Every expiration date across a tenant's assets. Days are counted in the tenant's time zone: a
+/// Date field or the asset's expiration shortcut is a calendar day already, a date-time is the day
+/// it falls on there, and "today" is the tenant's today.
+/// </summary>
 public static class ExpirationEndpoints
 {
     public const string SourceAsset = "Asset";
@@ -38,7 +44,8 @@ public static class ExpirationEndpoints
         Guid? companyId = null,
         bool showExpired = false,
         string? q = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        DateTimeOffset? utcNow = null)
     {
         var assetsQuery = db.Assets
             .ForTenant(user)
@@ -68,7 +75,14 @@ public static class ExpirationEndpoints
                 .Where(c => companyIds.Contains(c.Id))
                 .ToDictionaryAsync(c => c.Id, c => c.Name, cancellationToken);
 
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var timeZoneId = user.TenantId is Guid tenantId
+            ? await db.Tenants.AsNoTracking()
+                .Where(t => t.Id == tenantId)
+                .Select(t => t.TimeZoneId)
+                .FirstOrDefaultAsync(cancellationToken)
+            : null;
+        var zone = TenantClock.ZoneFor(timeZoneId);
+        var today = TenantClock.Today(zone, utcNow);
         var items = new List<ExpirationItem>();
 
         foreach (var asset in assets)
@@ -79,7 +93,9 @@ public static class ExpirationEndpoints
 
             if (asset.ExpiresAt is DateTimeOffset assetExpiry)
             {
-                items.Add(ToItem(SourceAsset, asset.Id, asset.Name, asset.CompanyId, companyName, "Expiration", assetExpiry, today));
+                // A date shortcut: the day it was written for, in the offset it was written with.
+                var day = DateOnly.FromDateTime(assetExpiry.DateTime);
+                items.Add(ToItem(SourceAsset, asset.Id, asset.Name, asset.CompanyId, companyName, "Expiration", assetExpiry, day, today));
             }
 
             foreach (var value in asset.CustomFieldValues)
@@ -90,7 +106,8 @@ public static class ExpirationEndpoints
                 if (!TryParseDate(value.Value, out var when))
                     continue;
 
-                items.Add(ToItem(SourceAssetField, value.Id, asset.Name, asset.CompanyId, companyName, field.Name, when, today));
+                var day = DayOf(field.FieldType, value.Value, when, zone);
+                items.Add(ToItem(SourceAssetField, value.Id, asset.Name, asset.CompanyId, companyName, field.Name, when, day, today));
             }
         }
 
@@ -107,9 +124,25 @@ public static class ExpirationEndpoints
         }
 
         return items
-            .OrderBy(i => i.ExpiresAt)
+            .OrderBy(i => i.Day)
+            .ThenBy(i => i.ExpiresAt)
             .ThenBy(i => i.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
+    }
+
+    /// <summary>
+    /// The calendar day an expiration field falls on. A Date field stores a day (<c>yyyy-MM-dd</c>),
+    /// which no zone moves; a date-time is the day it falls on in the tenant's zone. A Date value in
+    /// some older form falls back to its UTC day, as before.
+    /// </summary>
+    internal static DateOnly DayOf(string fieldType, string? stored, DateTimeOffset when, TimeZoneInfo zone)
+    {
+        if (!fieldType.Equals("Date", StringComparison.OrdinalIgnoreCase))
+            return TenantClock.DayOf(when, zone);
+
+        return DateOnly.TryParseExact(stored?.Trim(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date)
+            ? date
+            : DateOnly.FromDateTime(when.UtcDateTime);
     }
 
     internal static bool IsDateField(string? fieldType) =>
@@ -136,14 +169,12 @@ public static class ExpirationEndpoints
         string? companyName,
         string fieldName,
         DateTimeOffset expiresAt,
+        DateOnly day,
         DateOnly today)
-    {
-        var day = DateOnly.FromDateTime(expiresAt.UtcDateTime);
-        var daysUntil = day.DayNumber - today.DayNumber;
-        return new ExpirationItem(sourceType, id, name, companyId, companyName, fieldName, expiresAt, daysUntil);
-    }
+        => new(sourceType, id, name, companyId, companyName, fieldName, expiresAt, day.DayNumber - today.DayNumber, day);
 }
 
+/// <param name="Day">The calendar day it expires on, in the tenant's time zone (see <see cref="ExpirationEndpoints"/>).</param>
 public sealed record ExpirationItem(
     string SourceType,
     Guid Id,
@@ -152,4 +183,5 @@ public sealed record ExpirationItem(
     string? CompanyName,
     string FieldName,
     DateTimeOffset ExpiresAt,
-    int DaysUntil);
+    int DaysUntil,
+    DateOnly Day = default);

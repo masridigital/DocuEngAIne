@@ -4,6 +4,7 @@ import {
   exportAuditCsv,
   useAuditActivity,
   useAuditEvents,
+  useFormat,
   useProfile,
   type AuditEvent,
   type AuditFilters,
@@ -19,13 +20,6 @@ const ACTIONS = [
 ]
 
 const CATEGORIES = ['resource', 'access', 'archive', 'export', 'system', 'security']
-
-function formatTimestamp(value?: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
-}
 
 function renderChanges(changesJson?: string | null) {
   if (!changesJson) return null
@@ -47,6 +41,7 @@ function renderChanges(changesJson?: string | null) {
 
 function ActivityTimeline(props: { entityType: string; entityId: string; onClose: () => void }) {
   const { data, error, isLoading } = useAuditActivity(props.entityType, props.entityId)
+  const fmt = useFormat()
   return (
     <div className="panel">
       <h2>
@@ -64,7 +59,7 @@ function ActivityTimeline(props: { entityType: string; entityId: string; onClose
                 {e.category ? <span className="badge">{e.category}</span> : null}
                 {i === 0 ? <span className="badge">latest</span> : null}
               </div>
-              <div>{formatTimestamp(e.occurredAt)} — {e.actorName || e.actorObjectId || 'System'}</div>
+              <div>{fmt.dateTime(e.occurredAt)} — {e.actorName || e.actorObjectId || 'System'}</div>
               {e.details ? <div>{e.details}</div> : null}
               {renderChanges(e.changesJson)}
             </li>
@@ -78,6 +73,7 @@ function ActivityTimeline(props: { entityType: string; entityId: string; onClose
 export function AuditPage() {
   const { data: profile, isLoading: profileLoading } = useProfile()
   const allowed = canManageUsers(profile?.role)
+  const fmt = useFormat()
 
   const [filters, setFilters] = useState<AuditFilters>({})
   const [page, setPage] = useState(1)
@@ -99,7 +95,7 @@ export function AuditPage() {
     setErrorMessage(null)
     setExporting(true)
     try {
-      await exportAuditCsv(filters)
+      await exportAuditCsv(filters, fmt.regional.timeZone)
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : 'Export failed.')
     } finally {
@@ -186,7 +182,7 @@ export function AuditPage() {
             <tbody>
               {events.map((e: AuditEvent) => (
                 <tr key={e.id}>
-                  <td>{formatTimestamp(e.occurredAt)}</td>
+                  <td>{fmt.dateTime(e.occurredAt)}</td>
                   <td>{e.action}</td>
                   <td>{e.category ?? '—'}</td>
                   <td>
@@ -216,7 +212,7 @@ export function AuditPage() {
               <div className="panel">
                 <h2>Event details</h2>
                 <p>
-                  {e.action} on {e.targetLabel || e.entityType} at {formatTimestamp(e.occurredAt)}
+                  {e.action} on {e.targetLabel || e.entityType} at {fmt.dateTime(e.occurredAt)}
                 </p>
                 {e.details ? <p>{e.details}</p> : null}
                 {renderChanges(e.changesJson)}
