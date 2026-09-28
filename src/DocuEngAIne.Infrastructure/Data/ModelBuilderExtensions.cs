@@ -8,6 +8,12 @@ public static class ModelBuilderExtensions
     /// <summary>Unique-slug index filter for soft-deletable rows: only live rows with a slug compete.</summary>
     public const string ActiveSlugFilter = "[Slug] IS NOT NULL AND [DeletedAt] IS NULL";
 
+    /// <summary>
+    /// Name of the soft-delete query filter. The Museum bypasses only this one
+    /// (<c>IgnoreQueryFilters([SoftDeleteFilter])</c>) so company scoping still applies to it.
+    /// </summary>
+    public const string SoftDeleteFilter = "SoftDelete";
+
     public static void ApplyDocuEngAIneConfiguration(this ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Tenant>(t =>
@@ -102,7 +108,7 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<Asset>(a =>
         {
-            a.HasQueryFilter(x => x.DeletedAt == null);
+            a.HasQueryFilter(SoftDeleteFilter, x => x.DeletedAt == null);
             a.HasIndex(x => x.AssetTypeId);
             a.HasIndex(x => new { x.TenantId, x.Name });
             a.HasIndex(x => x.ExpiresAt);
@@ -113,7 +119,7 @@ public static class ModelBuilderExtensions
         modelBuilder.Entity<CustomFieldValue>(v =>
         {
             // Vanishes with its archived asset (and keeps EF's required-navigation filter warning quiet).
-            v.HasQueryFilter(x => x.Asset.DeletedAt == null);
+            v.HasQueryFilter(SoftDeleteFilter, x => x.Asset.DeletedAt == null);
             v.HasIndex(x => new { x.AssetId, x.FieldDefinitionId }).IsUnique();
             // Restrict: Asset already cascades to CustomFieldValue via AssetType — SQL Server forbids multiple cascade paths.
             v.HasOne(x => x.FieldDefinition).WithMany().HasForeignKey(x => x.FieldDefinitionId).OnDelete(DeleteBehavior.Restrict);
@@ -131,7 +137,7 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<Document>(d =>
         {
-            d.HasQueryFilter(x => x.DeletedAt == null);
+            d.HasQueryFilter(SoftDeleteFilter, x => x.DeletedAt == null);
             // Archived rows must not hold their slug, or a new document could never reuse it. The
             // explicit filter replaces EF's implicit "[Slug] IS NOT NULL", so it restates it.
             d.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique().HasFilter(ActiveSlugFilter);
@@ -146,25 +152,25 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<DocumentVersion>(v =>
         {
-            v.HasQueryFilter(x => x.Document.DeletedAt == null);
+            v.HasQueryFilter(SoftDeleteFilter, x => x.Document.DeletedAt == null);
             v.HasIndex(x => new { x.DocumentId, x.VersionNumber });
         });
 
         modelBuilder.Entity<AssetDocumentLink>(l =>
         {
-            l.HasQueryFilter(x => x.Asset.DeletedAt == null && x.Document.DeletedAt == null);
+            l.HasQueryFilter(SoftDeleteFilter, x => x.Asset.DeletedAt == null && x.Document.DeletedAt == null);
             l.HasIndex(x => new { x.AssetId, x.DocumentId }).IsUnique();
         });
 
         modelBuilder.Entity<KeeperLink>(k =>
         {
-            k.HasQueryFilter(x => x.DeletedAt == null);
+            k.HasQueryFilter(SoftDeleteFilter, x => x.DeletedAt == null);
             k.HasIndex(x => new { x.TenantId, x.Name });
         });
 
         modelBuilder.Entity<Runbook>(r =>
         {
-            r.HasQueryFilter(x => x.DeletedAt == null);
+            r.HasQueryFilter(SoftDeleteFilter, x => x.DeletedAt == null);
             r.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique().HasFilter(ActiveSlugFilter);
             r.HasMany(x => x.Steps).WithOne(s => s.Runbook).HasForeignKey(s => s.RunbookId).OnDelete(DeleteBehavior.Cascade);
             r.HasMany(x => x.Runs).WithOne(s => s.Runbook).HasForeignKey(s => s.RunbookId).OnDelete(DeleteBehavior.Cascade);
@@ -172,13 +178,13 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<RunbookStep>(s =>
         {
-            s.HasQueryFilter(x => x.Runbook.DeletedAt == null);
+            s.HasQueryFilter(SoftDeleteFilter, x => x.Runbook.DeletedAt == null);
             s.HasIndex(x => new { x.RunbookId, x.Order }).IsUnique();
         });
 
         modelBuilder.Entity<RunbookRun>(r =>
         {
-            r.HasQueryFilter(x => x.Runbook.DeletedAt == null);
+            r.HasQueryFilter(SoftDeleteFilter, x => x.Runbook.DeletedAt == null);
             r.HasIndex(x => new { x.RunbookId, x.StartedAt });
             r.HasIndex(x => new { x.TenantId, x.StartedAt });
             // Restrict: Runbook already cascades from Tenant — SQL Server forbids multiple cascade paths.
@@ -274,6 +280,36 @@ public static class ModelBuilderExtensions
             i.HasIndex(x => new { x.TenantId, x.SubjectUserId });
             // Restrict: AccessReview already cascades from Tenant's side — SQL Server forbids a second path.
             i.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SecurityGroup>(g =>
+        {
+            g.Property(x => x.Name).HasMaxLength(100);
+            g.Property(x => x.Description).HasMaxLength(500);
+            g.Property(x => x.CreatedByObjectId).HasMaxLength(128);
+            g.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            // Restrict: members and grants already cascade from Tenant via Users and Companies —
+            // SQL Server forbids a second cascade path through the group.
+            g.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            g.HasMany(x => x.Members).WithOne(m => m.SecurityGroup).HasForeignKey(m => m.SecurityGroupId).OnDelete(DeleteBehavior.Cascade);
+            g.HasMany(x => x.CompanyGrants).WithOne(c => c.SecurityGroup).HasForeignKey(c => c.SecurityGroupId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<SecurityGroupMember>(m =>
+        {
+            m.HasIndex(x => new { x.SecurityGroupId, x.UserId }).IsUnique();
+            // Scope resolution reads a user's memberships on every restricted request.
+            m.HasIndex(x => new { x.TenantId, x.UserId });
+            m.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Cascade);
+            m.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<SecurityGroupCompanyGrant>(c =>
+        {
+            c.HasIndex(x => new { x.SecurityGroupId, x.CompanyId }).IsUnique();
+            c.HasIndex(x => new { x.TenantId, x.CompanyId });
+            c.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Cascade);
+            c.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<IpAllowlistEntry>(e =>

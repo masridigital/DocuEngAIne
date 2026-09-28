@@ -18,6 +18,12 @@ public class ArchiveEntry : EntityBase, ITenantScoped
     public required string ResourceType { get; set; }
     public Guid ResourceId { get; set; }
 
+    /// <summary>
+    /// The resource's company at archive time; null for a tenant-wide resource. Company scoping
+    /// filters the Museum on it, because the archived row itself is hidden and cannot be joined.
+    /// </summary>
+    public Guid? CompanyId { get; set; }
+
     /// <summary>Name or title at archive time.</summary>
     public required string ResourceLabel { get; set; }
     public string? Reason { get; set; }

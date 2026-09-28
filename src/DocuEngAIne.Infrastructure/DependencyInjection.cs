@@ -24,6 +24,8 @@ public static class DependencyInjection
         services.AddHttpContextAccessor();
         services.AddScoped<IBackgroundTenantContext, BackgroundTenantContext>();
         services.AddScoped<ICurrentUser, CurrentUser>();
+        services.AddScoped<ICompanyScopeAccessor, CompanyScopeAccessor>();
+        services.AddScoped<CompanyScopeResolver>();
         services.AddScoped<IResourceAuthorizationService, ResourceAuthorizationService>();
         services.AddScoped<IAuditService, AuditService>();
         services.AddHttpClient(nameof(HttpMcpClient));

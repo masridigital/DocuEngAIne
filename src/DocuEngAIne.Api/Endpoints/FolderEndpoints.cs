@@ -1,4 +1,5 @@
 using DocuEngAIne.Core.Entities;
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -39,27 +40,47 @@ public static class FolderEndpoints
             return folder is null ? Results.NotFound() : Results.Ok(Map(folder));
         });
 
+        // Folders are written like documents: Contributor or above, plus Edit (Manage to delete)
+        // on the folder's company.
         group.MapPost("", async (
             [FromBody] CreateFolderRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
-            await CreateAsync(request, db, user, cancellationToken));
+        {
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.DocumentFolder, cancellationToken) is { } denied)
+                return denied;
+
+            return await CreateAsync(request, db, user, cancellationToken);
+        });
 
         group.MapPut("/{id:guid}", async (
             Guid id,
             [FromBody] UpdateFolderRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
-            await UpdateAsync(id, request, db, user, cancellationToken));
+        {
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.DocumentFolder, cancellationToken) is { } denied)
+                return denied;
+
+            return await UpdateAsync(id, request, db, user, cancellationToken);
+        });
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
-            await DeleteAsync(id, db, user, cancellationToken));
+        {
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.DocumentFolder, cancellationToken, CompanyAccessLevel.Manage) is { } denied)
+                return denied;
+
+            return await DeleteAsync(id, db, user, cancellationToken);
+        });
 
         return app;
     }
@@ -166,13 +187,16 @@ public static class FolderEndpoints
         if (folder is null)
             return Results.NotFound();
 
-        var children = await db.DocumentFolders.ForTenant(user)
+        // Every row that points here, not only the ones the caller can see: a child folder or
+        // document in another company, or an archived document, would otherwise keep the FK and
+        // block the delete.
+        var children = await db.DocumentFolders.IgnoreQueryFilters().ForTenant(user)
             .Where(f => f.ParentId == id)
             .ToListAsync(cancellationToken);
         foreach (var child in children)
             child.ParentId = folder.ParentId;
 
-        var docs = await db.Documents.ForTenant(user)
+        var docs = await db.Documents.IgnoreQueryFilters().ForTenant(user)
             .Where(d => d.FolderId == id)
             .ToListAsync(cancellationToken);
         foreach (var doc in docs)
@@ -215,7 +239,8 @@ public static class FolderEndpoints
             if (cid == folderId)
                 return Results.BadRequest(NestedUnderDescendantMessage);
 
-            var row = await db.DocumentFolders.ForTenant(user).AsNoTracking()
+            // The whole chain, including folders the caller cannot see, or a cycle could hide behind one.
+            var row = await db.DocumentFolders.IgnoreQueryFilters([DocuEngAIneDbContext.CompanyScopeFilter]).ForTenant(user).AsNoTracking()
                 .FirstOrDefaultAsync(f => f.Id == cid, cancellationToken);
             if (row is null)
                 break;

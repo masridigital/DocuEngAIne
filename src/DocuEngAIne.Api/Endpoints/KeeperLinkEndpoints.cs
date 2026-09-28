@@ -120,7 +120,7 @@ public static class KeeperLinkEndpoints
         [FromQuery] string? reason = null,
         CancellationToken cancellationToken = default)
     {
-        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.KeeperLink, cancellationToken) is { } denied)
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.KeeperLink, cancellationToken, CompanyAccessLevel.Manage) is { } denied)
             return denied;
 
         var link = await db.KeeperLinks.ForTenant(user).FirstOrDefaultAsync(k => k.Id == id, cancellationToken);

@@ -69,4 +69,40 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
         if (role < minimumRole)
             throw new UnauthorizedAccessException($"Access denied to {resourceType} {resourceId}. Required role: {minimumRole}.");
     }
+
+    public async Task<CompanyAccessLevel> GetCompanyAccessAsync(Guid resourceId, string resourceType, CancellationToken cancellationToken = default)
+    {
+        var scope = _db.CompanyScope;
+        if (scope.IsUnrestricted)
+            return CompanyAccessLevel.Manage;
+        if (_currentUser.TenantId is not Guid tenantId)
+            return CompanyAccessLevel.None;
+
+        // Past the soft-delete filter only: the company filter still hides records in companies
+        // the caller cannot see, which then resolve to None.
+        string[] softDelete = [ModelBuilderExtensions.SoftDeleteFilter];
+        var owner = resourceType switch
+        {
+            ResourceType.Asset => await _db.Assets.IgnoreQueryFilters(softDelete)
+                .Where(x => x.TenantId == tenantId && x.Id == resourceId)
+                .Select(x => new CompanyOwner(x.CompanyId)).FirstOrDefaultAsync(cancellationToken),
+            ResourceType.Document => await _db.Documents.IgnoreQueryFilters(softDelete)
+                .Where(x => x.TenantId == tenantId && x.Id == resourceId)
+                .Select(x => new CompanyOwner(x.CompanyId)).FirstOrDefaultAsync(cancellationToken),
+            ResourceType.Runbook => await _db.Runbooks.IgnoreQueryFilters(softDelete)
+                .Where(x => x.TenantId == tenantId && x.Id == resourceId)
+                .Select(x => new CompanyOwner(x.CompanyId)).FirstOrDefaultAsync(cancellationToken),
+            ResourceType.KeeperLink => await _db.KeeperLinks.IgnoreQueryFilters(softDelete)
+                .Where(x => x.TenantId == tenantId && x.Id == resourceId)
+                .Select(x => new CompanyOwner(x.CompanyId)).FirstOrDefaultAsync(cancellationToken),
+            ResourceType.DocumentFolder => await _db.DocumentFolders
+                .Where(x => x.TenantId == tenantId && x.Id == resourceId)
+                .Select(x => new CompanyOwner(x.CompanyId)).FirstOrDefaultAsync(cancellationToken),
+            _ => null,
+        };
+
+        return owner is null ? CompanyAccessLevel.None : scope.LevelFor(owner.CompanyId);
+    }
+
+    private sealed record CompanyOwner(Guid? CompanyId);
 }

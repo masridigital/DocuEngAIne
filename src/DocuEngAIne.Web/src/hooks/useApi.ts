@@ -1030,3 +1030,108 @@ export async function deleteIpAllowlistEntry(id: string) {
   await apiFetch(`${IP_ACCESS_KEY}/entries/${id}`, { method: 'DELETE' })
   await mutate(IP_ACCESS_KEY)
 }
+
+export type CompanyAccessLevel = 'View' | 'Edit' | 'Manage'
+
+export const COMPANY_ACCESS_LEVELS: CompanyAccessLevel[] = ['View', 'Edit', 'Manage']
+
+export type SecurityGroupSummary = {
+  id: string
+  name: string
+  description?: string | null
+  includeTenantWide: boolean
+  memberCount: number
+  companyCount: number
+  createdAt: string
+}
+
+export type SecurityGroupMember = {
+  userId: string
+  email: string
+  displayName?: string | null
+  role: UserRole
+  isActive: boolean
+  /** Admin or Owner: membership never restricts them. */
+  bypasses: boolean
+}
+
+export type CompanyGrant = {
+  companyId: string
+  companyName: string
+  level: CompanyAccessLevel
+}
+
+export type SecurityGroupDetail = {
+  group: SecurityGroupSummary
+  members: SecurityGroupMember[]
+  companies: CompanyGrant[]
+}
+
+export type CompanyAccess = {
+  restricted: boolean
+  includesTenantWide: boolean
+  companies: CompanyGrant[]
+}
+
+const SECURITY_GROUPS_KEY = '/api/security-groups'
+
+export function useSecurityGroups(enabled = true) {
+  return useSWR<SecurityGroupSummary[]>(enabled ? SECURITY_GROUPS_KEY : null, fetcher)
+}
+
+export function useSecurityGroup(id: string | undefined) {
+  return useSWR<SecurityGroupDetail>(id ? `${SECURITY_GROUPS_KEY}/${id}` : null, fetcher)
+}
+
+/** What the signed-in user can reach; `restricted: false` means every company. */
+export function useMyCompanyAccess() {
+  return useSWR<CompanyAccess>('/api/me/company-access', fetcher)
+}
+
+export function useEffectiveCompanyAccess(userId: string | undefined) {
+  return useSWR<CompanyAccess>(userId ? `${SECURITY_GROUPS_KEY}/effective/${userId}` : null, fetcher)
+}
+
+function refreshSecurityGroup(id: string) {
+  return Promise.all([
+    mutate(SECURITY_GROUPS_KEY),
+    mutate(`${SECURITY_GROUPS_KEY}/${id}`),
+    mutate((key) => typeof key === 'string' && key.startsWith(`${SECURITY_GROUPS_KEY}/effective/`)),
+  ])
+}
+
+export async function createSecurityGroup(input: { name: string; description?: string; includeTenantWide?: boolean }) {
+  const created = await postJson<SecurityGroupDetail>(SECURITY_GROUPS_KEY, input)
+  await mutate(SECURITY_GROUPS_KEY)
+  return created
+}
+
+export async function updateSecurityGroup(id: string, input: { name?: string; description?: string; includeTenantWide?: boolean }) {
+  await putJson(`${SECURITY_GROUPS_KEY}/${id}`, input)
+  await refreshSecurityGroup(id)
+}
+
+export async function deleteSecurityGroup(id: string) {
+  await apiFetch(`${SECURITY_GROUPS_KEY}/${id}`, { method: 'DELETE' })
+  await mutate(SECURITY_GROUPS_KEY)
+}
+
+export async function addSecurityGroupMember(id: string, userId: string) {
+  await putJson(`${SECURITY_GROUPS_KEY}/${id}/members/${userId}`, {})
+  await refreshSecurityGroup(id)
+}
+
+export async function removeSecurityGroupMember(id: string, userId: string) {
+  await apiFetch(`${SECURITY_GROUPS_KEY}/${id}/members/${userId}`, { method: 'DELETE' })
+  await refreshSecurityGroup(id)
+}
+
+export async function setSecurityGroupCompany(id: string, companyId: string, level: CompanyAccessLevel) {
+  await putJson(`${SECURITY_GROUPS_KEY}/${id}/companies/${companyId}`, { level })
+  await refreshSecurityGroup(id)
+}
+
+export async function removeSecurityGroupCompany(id: string, companyId: string) {
+  await apiFetch(`${SECURITY_GROUPS_KEY}/${id}/companies/${companyId}`, { method: 'DELETE' })
+  await refreshSecurityGroup(id)
+}

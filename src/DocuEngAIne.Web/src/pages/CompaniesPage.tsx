@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { createCompany, createResourceLink, updateCompany, useCompanies, useCompany, useCompanyGraph, type Company, type CompanyGraph, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
+import { createCompany, createResourceLink, updateCompany, useCompanies, useCompany, useCompanyGraph, useMyCompanyAccess, type Company, type CompanyGraph, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
 
 function slugify(value: string) {
   return value
@@ -47,6 +47,7 @@ function CompanyList() {
   const [submitting, setSubmitting] = useState(false)
 
   const companies = Array.isArray(data) ? data : []
+  const { data: access } = useMyCompanyAccess()
 
   async function onCreate(e: FormEvent) {
     e.preventDefault()
@@ -94,6 +95,12 @@ function CompanyList() {
     <div className="page">
       <h1>Companies</h1>
       <p>Client spaces distinct from the Entra tenant. Halo and Ninja IDs plus portal URLs link PSA and RMM systems of record — URLs only, no secrets.</p>
+      {access?.restricted ? (
+        <p className="banner">
+          Your security groups limit you to {access.companies.length} {access.companies.length === 1 ? 'company' : 'companies'}. Ask a tenant
+          administrator if you need another.
+        </p>
+      ) : null}
 
       <div className="toolbar">
         <input
