@@ -60,19 +60,29 @@ Shipped:
   / Manage, via named EF query filters on every company-owned entity plus write guards; tenant-wide
   records are opt-in per group and read-only for confined users; Admins and Owners bypass. Closed
   two pre-existing gaps on the way: company and folder writes had no role check at all.
+- **Asset layouts** — typed fields (eleven types, sections, help text) with values checked and
+  stored in one normalized form per type; draft → validated publish → an immutable version per
+  schema change while published; shared option lists (fixed values, retire-not-delete, never left
+  empty under a published layout); layouts limited to chosen companies (enabling one needs Manage).
+  Schema changes cannot strand data: type / list changes convert every stored value or are refused.
+  The SPA gained layout and option-list admin pages and typed asset field view / edit / create.
+  Closed a pre-existing gap: asset create accepted another tenant's layout id.
 
 Next, in order:
 
-1. **Asset layouts** — versioned field layouts, option lists, per-company activation, typed field
-   values validated before publish.
-2. **Tenant configuration** — feature flags from a registered catalog, terminology map
+1. **Tenant configuration** — feature flags from a registered catalog, terminology map
    (white-label names), branding (blocked on blob storage).
-3. **Tenant status lifecycle** — suspended / archived tenants.
-4. **Company archive** — the Museum slice deferred above.
+2. **Tenant status lifecycle** — suspended / archived tenants.
+3. **Company archive** — the Museum slice deferred above.
 
 Open decision from the scoping slice: links, flag assignments and flag definitions are still
 writable by Readers (company access is checked, the tenant role is not). Decide whether flagging is
 a Reader action before tightening it.
+
+Deliberately not carried over from Docuengine's layouts: its tenant-wide "unique value" check (a
+cross-company existence oracle for restricted users), and its file and relationship field types,
+which were never finished there — files wait on blob storage, relationships already exist as
+related-item links.
 
 Not ported: MFA, password, session and invitation-token mechanics (Entra owns authentication);
 role-carrying invitations are optional later work on top of Entra.

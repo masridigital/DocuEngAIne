@@ -73,6 +73,8 @@ app.MapIntegrationEndpoints();
 app.MapItGlueMigrationEndpoints();
 app.MapHuduMigrationEndpoints();
 app.MapAssetEndpoints();
+app.MapAssetLayoutEndpoints();
+app.MapOptionListEndpoints();
 app.MapExpirationEndpoints();
 app.MapFlagEndpoints();
 app.MapLinkEndpoints();

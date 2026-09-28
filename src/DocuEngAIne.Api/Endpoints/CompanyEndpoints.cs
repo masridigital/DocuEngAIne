@@ -101,6 +101,9 @@ public static class CompanyEndpoints
             if (RequireCompanyAccess(db, id, CompanyAccessLevel.Manage) is { } deniedCompany)
                 return deniedCompany;
 
+            // Restrict FK (the rows already cascade from Tenant through their layout), so remove them here.
+            db.AssetTypeCompanyActivations.RemoveRange(await db.AssetTypeCompanyActivations.IgnoreQueryFilters().ForTenant(user)
+                .Where(a => a.CompanyId == id).ToListAsync(cancellationToken));
             db.Companies.Remove(company);
             await db.SaveChangesAsync(cancellationToken);
             return Results.NoContent();

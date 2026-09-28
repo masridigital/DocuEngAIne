@@ -71,6 +71,10 @@ public class DocuEngAIneDbContext : DbContext
     public DbSet<SecurityGroup> SecurityGroups => Set<SecurityGroup>();
     public DbSet<SecurityGroupMember> SecurityGroupMembers => Set<SecurityGroupMember>();
     public DbSet<SecurityGroupCompanyGrant> SecurityGroupCompanyGrants => Set<SecurityGroupCompanyGrant>();
+    public DbSet<AssetTypeCompanyActivation> AssetTypeCompanyActivations => Set<AssetTypeCompanyActivation>();
+    public DbSet<AssetTypeVersion> AssetTypeVersions => Set<AssetTypeVersion>();
+    public DbSet<OptionList> OptionLists => Set<OptionList>();
+    public DbSet<OptionListItem> OptionListItems => Set<OptionListItem>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -139,6 +143,8 @@ public class DocuEngAIneDbContext : DbContext
                     && ((x.Document.CompanyId == null && ScopeIncludesTenantWide)
                         || (x.Document.CompanyId != null && ScopeCompanyIds.Contains(x.Document.CompanyId.Value)))));
         modelBuilder.Entity<SecurityGroupCompanyGrant>().HasQueryFilter(CompanyScopeFilter,
+            x => ScopeUnrestricted || ScopeCompanyIds.Contains(x.CompanyId));
+        modelBuilder.Entity<AssetTypeCompanyActivation>().HasQueryFilter(CompanyScopeFilter,
             x => ScopeUnrestricted || ScopeCompanyIds.Contains(x.CompanyId));
     }
 
