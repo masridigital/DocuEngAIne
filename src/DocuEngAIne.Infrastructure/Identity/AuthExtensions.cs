@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 
 namespace DocuEngAIne.Infrastructure.Identity;
@@ -19,6 +20,12 @@ public static class AuthExtensions
     /// to it by symbol rather than by a string literal that can silently drift out of sync with this file.
     /// </summary>
     public const string AdminPolicy = "RequireAdmin";
+
+    /// <summary>
+    /// The policy for the cross-tenant platform console: only the operators configured in
+    /// <see cref="PlatformOptions"/>, never anything a tenant can grant itself.
+    /// </summary>
+    public const string PlatformOperatorPolicy = "RequirePlatformOperator";
 
     public static IServiceCollection AddDocuEngAIneAuthentication(this IServiceCollection services, IConfiguration configuration)
     {
@@ -75,11 +82,19 @@ public static class AuthExtensions
                 // outliving a deactivated row: the admin handler accepts that claim without the DB.
                 policy.AddRequirements(new ActiveUserRequirement(), new TenantAdminRequirement());
             });
+            options.AddPolicy(PlatformOperatorPolicy, policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.AddRequirements(new ActiveUserRequirement(), new PlatformOperatorRequirement());
+            });
         });
+
+        services.Configure<PlatformOptions>(configuration.GetSection(PlatformOptions.SectionName));
 
         // Scoped, not singleton: the handlers read the Users table through the request-scoped DbContext.
         services.AddScoped<IAuthorizationHandler, TenantAdminAuthorizationHandler>();
         services.AddScoped<IAuthorizationHandler, ActiveUserAuthorizationHandler>();
+        services.AddScoped<IAuthorizationHandler, PlatformOperatorAuthorizationHandler>();
 
         services.AddHttpContextAccessor();
 
@@ -195,5 +210,34 @@ public sealed class ActiveUserAuthorizationHandler : AuthorizationHandler<Active
 
         if (!deactivated)
             context.Succeed(requirement);
+    }
+}
+
+/// <summary>Requirement behind <see cref="AuthExtensions.PlatformOperatorPolicy"/>.</summary>
+public sealed class PlatformOperatorRequirement : IAuthorizationRequirement
+{
+}
+
+/// <summary>Grants <see cref="PlatformOperatorRequirement"/> to the callers listed in <see cref="PlatformOptions"/>, and to no one else.</summary>
+public sealed class PlatformOperatorAuthorizationHandler : AuthorizationHandler<PlatformOperatorRequirement>
+{
+    private readonly ICurrentUser _currentUser;
+    private readonly IOptions<PlatformOptions> _options;
+
+    public PlatformOperatorAuthorizationHandler(ICurrentUser currentUser, IOptions<PlatformOptions> options)
+    {
+        _currentUser = currentUser;
+        _options = options;
+    }
+
+    protected override Task HandleRequirementAsync(AuthorizationHandlerContext context, PlatformOperatorRequirement requirement)
+    {
+        if (context.User?.Identity?.IsAuthenticated == true
+            && _options.Value.IsOperator(_currentUser.TenantId, _currentUser.ObjectId))
+        {
+            context.Succeed(requirement);
+        }
+
+        return Task.CompletedTask;
     }
 }

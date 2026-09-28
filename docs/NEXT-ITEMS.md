@@ -74,12 +74,17 @@ Shipped:
   page in the SPA. Not carried over: Docuengine's free-form custom CSS (an exfiltration vector) and
   its regional settings (locale, timezone, date formats) — worth doing properly across every date
   the app shows, not half-applied. Logos wait on blob storage.
+- **Tenant lifecycle** — Active / Suspended / Archived, changed only by platform operators named in
+  host configuration (never an app role a customer's admins could self-assign). A closed tenant is
+  refused on every API route with its reason, its API tokens stop working and its sync stops; data
+  is kept and reactivation restores it. Audited in both the operator's and the tenant's trail.
+  Docuengine's separate "inactive" state is folded into Suspended; hard tenant deletion is not
+  ported (decide retention and export first).
 
 Next, in order:
 
-1. **Tenant status lifecycle** — suspended / archived tenants.
-2. **Company archive** — the Museum slice deferred above.
-3. **Regional settings** — tenant timezone and date / time formats, applied to every date the SPA
+1. **Company archive** — the Museum slice deferred above.
+2. **Regional settings** — tenant timezone and date / time formats, applied to every date the SPA
    shows and to expiration day boundaries.
 
 Open decision from the scoping slice: links, flag assignments and flag definitions are still

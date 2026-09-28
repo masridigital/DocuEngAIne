@@ -1728,9 +1728,6 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<bool>("IpAllowlistEnabled")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -1741,6 +1738,20 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset?>("StatusChangedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("StatusChangedByObjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("StatusReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("TerminologyJson")
                         .HasColumnType("nvarchar(max)");

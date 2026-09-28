@@ -1,3 +1,4 @@
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -37,7 +38,7 @@ public static class ApiTokenAuthenticator
             return null;
 
         var tenantActive = await db.Tenants.AsNoTracking()
-            .AnyAsync(t => t.Id == token.TenantId && t.IsActive, cancellationToken);
+            .AnyAsync(t => t.Id == token.TenantId && t.Status == TenantStatus.Active, cancellationToken);
         if (!tenantActive)
             return null;
 

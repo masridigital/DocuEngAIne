@@ -48,6 +48,24 @@ export function ipBlockedAddress(error: unknown): string | null {
   return typeof data.ip === 'string' && data.ip ? data.ip : 'unknown'
 }
 
+export const TENANT_SUSPENDED = 'tenant_suspended'
+export const TENANT_ARCHIVED = 'tenant_archived'
+
+export type TenantClosed = { status: 'Suspended' | 'Archived'; reason?: string | null; message: string }
+
+/** Why the whole tenant is refused (suspended or archived by the platform), or null for any other error. */
+export function tenantClosed(error: unknown): TenantClosed | null {
+  if (!(error instanceof ApiError) || error.status !== 403) return null
+  const data = error.data as { error?: unknown; reason?: unknown; message?: unknown } | undefined
+  if (!data || typeof data !== 'object') return null
+  if (data.error !== TENANT_SUSPENDED && data.error !== TENANT_ARCHIVED) return null
+  return {
+    status: data.error === TENANT_SUSPENDED ? 'Suspended' : 'Archived',
+    reason: typeof data.reason === 'string' && data.reason ? data.reason : null,
+    message: typeof data.message === 'string' ? data.message : 'This tenant is closed.',
+  }
+}
+
 /**
  * Single entry point for every API call: acquires an Entra access token, attaches
  * it as a bearer token and turns any non-2xx response into an ApiError.
@@ -269,6 +287,8 @@ export type Profile = {
   lastSeenAt?: string
   onboardingRequired?: boolean
   tenant?: { id: string; name: string; slug: string; primaryDomain?: string } | null
+  /** Runs this deployment (host configuration): sees the platform console. */
+  isPlatformOperator?: boolean
 }
 
 export type TenantUser = {
@@ -1553,4 +1573,40 @@ export async function setTenantTerminology(terms: Record<string, { singular: str
 export async function setTenantBranding(input: { displayName: string | null; accentColor: string | null }) {
   await putJson('/api/tenant/branding', input)
   await mutate(TENANT_CONFIGURATION_KEY)
+}
+
+export type TenantLifecycleStatus = 'Active' | 'Suspended' | 'Archived'
+
+export type PlatformTenant = {
+  id: string
+  name: string
+  slug: string
+  primaryDomain?: string | null
+  status: TenantLifecycleStatus
+  statusReason?: string | null
+  statusChangedAt?: string | null
+  createdAt: string
+  activeUsers: number
+  companies: number
+}
+
+const PLATFORM_TENANTS_KEY = '/api/platform/tenants'
+
+export function usePlatformTenants(enabled = true) {
+  return useSWR<PlatformTenant[]>(enabled ? PLATFORM_TENANTS_KEY : null, fetcher)
+}
+
+export async function suspendTenant(id: string, reason: string) {
+  await postJson<PlatformTenant>(`${PLATFORM_TENANTS_KEY}/${id}/suspend`, { reason })
+  await mutate(PLATFORM_TENANTS_KEY)
+}
+
+export async function archiveTenant(id: string, reason?: string) {
+  await postJson<PlatformTenant>(`${PLATFORM_TENANTS_KEY}/${id}/archive`, { reason: reason || null })
+  await mutate(PLATFORM_TENANTS_KEY)
+}
+
+export async function reactivateTenant(id: string) {
+  await postJson<PlatformTenant>(`${PLATFORM_TENANTS_KEY}/${id}/reactivate`)
+  await mutate(PLATFORM_TENANTS_KEY)
 }

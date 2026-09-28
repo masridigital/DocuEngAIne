@@ -15,6 +15,7 @@ import { IpAccessPage } from './pages/IpAccessPage'
 import { KeeperPage } from './pages/KeeperPage'
 import { MuseumPage } from './pages/MuseumPage'
 import { OptionListsPage } from './pages/OptionListsPage'
+import { PlatformPage } from './pages/PlatformPage'
 import { RunbooksPage } from './pages/RunbooksPage'
 import { SecurityGroupsPage } from './pages/SecurityGroupsPage'
 import { SettingsPage } from './pages/SettingsPage'
@@ -46,6 +47,7 @@ function App() {
           <Route path="ip-access" element={<IpAccessPage />} />
           <Route path="security-groups" element={<SecurityGroupsPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="platform" element={<PlatformPage />} />
           <Route path="museum" element={<MuseumPage />} />
           <Route path="portal" element={<PortalPage />} />
           <Route path="portal/:companyId" element={<PortalPage />} />

@@ -19,6 +19,10 @@ public static class ModelBuilderExtensions
         modelBuilder.Entity<Tenant>(t =>
         {
             t.Property(x => x.Id).ValueGeneratedNever();
+            // Derived from Status; queries compare Status.
+            t.Ignore(x => x.IsActive);
+            t.Property(x => x.StatusReason).HasMaxLength(500);
+            t.Property(x => x.StatusChangedByObjectId).HasMaxLength(128);
             t.Property(x => x.DisplayName).HasMaxLength(80);
             t.Property(x => x.AccentColor).HasMaxLength(7);
             t.HasIndex(x => x.Slug).IsUnique();

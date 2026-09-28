@@ -66,8 +66,10 @@ public sealed class IntegrationSyncRunner
     {
         using var scope = _scopes.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<DocuEngAIneDbContext>();
+        // A suspended or archived tenant's connections stay configured but are never pulled.
         return await db.IntegrationConnections.AsNoTracking()
-            .Where(c => c.IsEnabled && c.McpServerId != null)
+            .Where(c => c.IsEnabled && c.McpServerId != null
+                && !db.Tenants.Any(t => t.Id == c.TenantId && t.Status != TenantStatus.Active))
             .Select(c => c.TenantId)
             .Distinct()
             .OrderBy(id => id)
