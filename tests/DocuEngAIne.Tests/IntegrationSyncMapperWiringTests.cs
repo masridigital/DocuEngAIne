@@ -539,6 +539,27 @@ public class IntegrationSyncMapperWiringTests
     }
 
     [Fact]
+    public async Task Datto_SyncAsync_Creates_Companies_From_Sites_Keyed_By_Uid()
+    {
+        var mcp = new RecordingDattoMcp { SitesJson = DattoSiteMapperTests.LiveShapeFixture };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedAsync(db, user, IntegrationProvider.Datto);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        var call = Assert.Single(mcp.Calls);
+        Assert.Equal(DattoSiteMapper.ToolName, call.Tool);
+        Assert.Equal(server.Id, call.ServerId);
+        Assert.Contains("\"pageNo\":0", call.Args, StringComparison.Ordinal);
+
+        var adroc = await db.Companies.SingleAsync(c => c.Name == "Adroc Capital");
+        Assert.Equal("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", CompanyIdentity.ReadExternalIds(adroc.ExternalIdsJson)["datto"]);
+        Assert.Equal(2, await db.IntegrationMappings.CountAsync(m => m.ExternalType == "company"));
+        Assert.Equal(2, run.ItemsCreated);
+    }
+
+    [Fact]
     public async Task Meraki_SyncAsync_Creates_Networks_After_Orgs()
     {
         var mcp = new RecordingMerakiMcp
@@ -786,6 +807,21 @@ public class IntegrationSyncMapperWiringTests
                 _ => TenantsJson,
             };
             return Task.FromResult(WrapRpc(inner));
+        }
+    }
+
+    private sealed class RecordingDattoMcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public string SitesJson { get; init; } = "[]";
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            return Task.FromResult(WrapRpc(SitesJson));
         }
     }
 

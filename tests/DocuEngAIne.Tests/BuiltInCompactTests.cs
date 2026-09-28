@@ -138,6 +138,7 @@ public class BuiltInCompactTests
     [InlineData(IntegrationProvider.DefensX)]
     [InlineData(IntegrationProvider.Pax8)]
     [InlineData(IntegrationProvider.Slide)]
+    [InlineData(IntegrationProvider.Datto)]
     public async Task Every_Compact_Backed_Provider_Adopts_The_Tenants_One_Compact_Server(IntegrationProvider provider)
     {
         var (db, user) = Create();

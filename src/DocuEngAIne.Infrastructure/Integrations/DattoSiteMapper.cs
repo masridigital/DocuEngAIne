@@ -9,8 +9,9 @@ namespace DocuEngAIne.Infrastructure.Integrations;
 /// <c>{ "sites": [ ... ] }</c> wrapper. Each site uses <c>uid</c> (string) and <c>name</c>.
 /// Skip rows missing <c>uid</c> or <c>name</c>. Catalog also mentions device counts and status;
 /// there is no matching DTO field and no inactive flag in the Compact input schema — do not
-/// invent <c>IsInactive</c>. Compact schema <c>pageNo</c> is 1-based (default 1);
-/// <c>pageSize</c> defaults to 50 (max 250). Omit <c>siteName</c> to list every site.
+/// invent <c>IsInactive</c>. Compact schema <c>pageNo</c> is 0-based (the first page is 0, as the
+/// live schema and the vendor's <c>nextPageUrl</c> both say — starting at 1 silently skips the first
+/// page); <c>pageSize</c> defaults to 50 (max 250). Omit <c>siteName</c> to list every site.
 /// Page on raw site count, never mapped count.
 /// </summary>
 public static class DattoSiteMapper
@@ -47,7 +48,7 @@ public static class DattoSiteMapper
         var size = Math.Clamp(pageSize, 1, MaxPageSize);
         return JsonSerializer.Serialize(new Dictionary<string, object?>
         {
-            ["pageNo"] = pageNo < 1 ? 1 : pageNo,
+            ["pageNo"] = pageNo < 0 ? 0 : pageNo,
             ["pageSize"] = size,
         });
     }
@@ -60,7 +61,7 @@ public static class DattoSiteMapper
     {
         var size = Math.Clamp(pageSize, 1, MaxPageSize);
         var companies = new List<ExternalCompanyDto>();
-        var pageNo = 1;
+        var pageNo = 0;
         const int maxPages = 500;
         for (var i = 1; i <= maxPages; i++)
         {

@@ -57,6 +57,7 @@ public class StackJackPlanTests
         Assert.Equal("DefensX", StackJackPlanDetector.ConnectorName(IntegrationProvider.DefensX));
         Assert.Equal("Pax8", StackJackPlanDetector.ConnectorName(IntegrationProvider.Pax8));
         Assert.Equal("Slide", StackJackPlanDetector.ConnectorName(IntegrationProvider.Slide));
+        Assert.Equal("DattoRMM", StackJackPlanDetector.ConnectorName(IntegrationProvider.Datto));
 
         var ninja = StackJackPlanDetector.FindConnector(LiveSessionInfoFixture, IntegrationProvider.NinjaOne);
         Assert.NotNull(ninja);

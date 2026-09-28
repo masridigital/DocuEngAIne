@@ -7,7 +7,7 @@ namespace DocuEngAIne.Infrastructure.Integrations;
 
 /// <summary>
 /// Converges companies pulled from different providers onto one local <see cref="Company"/>.
-/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8 and Slide each own their own <see cref="IntegrationMapping"/> rows,
+/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8, Slide and Datto each own their own <see cref="IntegrationMapping"/> rows,
 /// so without a match step the same client is created once per connection. Provider identity is
 /// recorded in the typed Halo/Ninja columns where they exist and in
 /// <see cref="Company.ExternalIdsJson"/> for every provider, which is also what later runs match on.
@@ -45,6 +45,7 @@ public static class CompanyIdentity
         IntegrationProvider.DefensX => "defensx",
         IntegrationProvider.Pax8 => "pax8",
         IntegrationProvider.Slide => "slide",
+        IntegrationProvider.Datto => "datto",
         IntegrationProvider.Composio => "composio",
         _ => "custom",
     };
