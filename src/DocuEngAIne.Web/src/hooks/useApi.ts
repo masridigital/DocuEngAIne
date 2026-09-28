@@ -787,3 +787,68 @@ export async function exportAuditCsv(filters: AuditFilters) {
     URL.revokeObjectURL(url)
   }
 }
+
+export type ArchiveResourceType = 'Asset' | 'Document' | 'Runbook' | 'KeeperLink'
+
+const ARCHIVE_ROUTES: Record<ArchiveResourceType, string> = {
+  Asset: '/api/assets',
+  Document: '/api/documents',
+  Runbook: '/api/runbooks',
+  KeeperLink: '/api/keeper',
+}
+
+/** Revalidates every cached list for the archivable resource types (all query-string variants). */
+function revalidateResourceLists() {
+  const prefixes = Object.values(ARCHIVE_ROUTES)
+  return mutate((key) => typeof key === 'string' && prefixes.some((p) => key.startsWith(p)))
+}
+
+/** DELETE archives to the Museum (restorable). The reason is optional and lands on the entry + audit row. */
+export async function archiveResource(type: ArchiveResourceType, id: string, reason?: string) {
+  const trimmed = reason?.trim()
+  const qs = trimmed ? `?reason=${encodeURIComponent(trimmed)}` : ''
+  await apiFetch(`${ARCHIVE_ROUTES[type]}/${id}${qs}`, { method: 'DELETE' })
+  await Promise.all([revalidateResourceLists(), mutate((key) => typeof key === 'string' && key.startsWith('/api/archive'))])
+}
+
+export type ArchiveState = 'archived' | 'restored' | 'deleted' | 'all'
+
+export type ArchiveEntry = {
+  id: string
+  resourceType: ArchiveResourceType
+  resourceId: string
+  resourceLabel: string
+  reason?: string | null
+  state: 'archived' | 'restored' | 'deleted'
+  archivedAt: string
+  archivedByName?: string | null
+  archivedByObjectId?: string | null
+  restoredAt?: string | null
+  permanentlyDeletedAt?: string | null
+}
+
+export type ArchivePage = {
+  total: number
+  page: number
+  pageSize: number
+  items: ArchiveEntry[]
+}
+
+export function useArchive(opts: { state: ArchiveState; resourceType?: ArchiveResourceType; page?: number }) {
+  const params = new URLSearchParams()
+  params.set('state', opts.state)
+  if (opts.resourceType) params.set('resourceType', opts.resourceType)
+  if (opts.page && opts.page > 1) params.set('page', String(opts.page))
+  return useSWR<ArchivePage>(`/api/archive?${params.toString()}`, fetcher)
+}
+
+export async function restoreArchiveEntry(id: string) {
+  const entry = await postJson<ArchiveEntry>(`/api/archive/${id}/restore`)
+  await revalidateResourceLists()
+  return entry
+}
+
+/** Admin only. Irreversible: the row is destroyed; the Museum entry stays as a tombstone. */
+export async function permanentlyDeleteArchiveEntry(id: string) {
+  await apiFetch(`/api/archive/${id}`, { method: 'DELETE' })
+}

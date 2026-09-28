@@ -688,6 +688,7 @@ public class IntegrationSyncService : IIntegrationSyncService
                 .Where(a => mappedAssetIds.Contains(a.Id))
                 .ToListAsync(cancellationToken))
                 .ToDictionary(a => a.Id);
+            var archivedAssetIds = await ArchivedAssetIdsAsync(mappedAssetIds, cancellationToken);
 
             Guid? computerAssetTypeId = null;
 
@@ -698,6 +699,13 @@ public class IntegrationSyncService : IIntegrationSyncService
                     // Organization never mapped to a company on this connection (skipped as inactive,
                     // or created in Ninja after the org page was read). Skip rather than leave an
                     // orphan asset nobody can find from a company page.
+                    run.ItemsSkipped++;
+                    continue;
+                }
+
+                if (mappingByDevice.TryGetValue(dto.ExternalId, out var archivedMapping)
+                    && archivedAssetIds.Contains(archivedMapping.LocalEntityId))
+                {
                     run.ItemsSkipped++;
                     continue;
                 }
@@ -913,12 +921,20 @@ public class IntegrationSyncService : IIntegrationSyncService
                 .Where(a => mappedAssetIds.Contains(a.Id))
                 .ToListAsync(cancellationToken))
                 .ToDictionary(a => a.Id);
+            var archivedAssetIds = await ArchivedAssetIdsAsync(mappedAssetIds, cancellationToken);
 
             Guid? assetTypeId = null;
 
             foreach (var dto in items)
             {
                 if (!companyByOrganization.TryGetValue(dto.OrganizationExternalId, out var companyId))
+                {
+                    run.ItemsSkipped++;
+                    continue;
+                }
+
+                if (mappingByExternal.TryGetValue(dto.ExternalId, out var archivedMapping)
+                    && archivedAssetIds.Contains(archivedMapping.LocalEntityId))
                 {
                     run.ItemsSkipped++;
                     continue;
@@ -1392,6 +1408,18 @@ public class IntegrationSyncService : IIntegrationSyncService
         await _db.SaveChangesAsync(cancellationToken);
         return run;
     }
+
+    /// <summary>
+    /// Mapped assets a technician archived to the Museum. The soft-delete filter hides them from
+    /// the normal load, which would read as "mapping outlived its asset" and re-create a duplicate
+    /// on every sync. Archiving is the technician's decision, so the pull skips these instead;
+    /// restoring brings the asset back into the next sync.
+    /// </summary>
+    private async Task<HashSet<Guid>> ArchivedAssetIdsAsync(List<Guid> mappedAssetIds, CancellationToken cancellationToken)
+        => (await _db.Assets.IgnoreQueryFilters().ForTenant(_user)
+            .Where(a => mappedAssetIds.Contains(a.Id) && a.DeletedAt != null)
+            .Select(a => a.Id)
+            .ToListAsync(cancellationToken)).ToHashSet();
 
     private async Task<SyncRun> StartRunAsync(IntegrationConnection connection, CancellationToken cancellationToken)
     {

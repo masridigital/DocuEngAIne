@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
+import { ArchiveButton } from '../components/ArchiveButton'
 import { startRunbookRun, useRunbooks, type Runbook } from '../hooks/useApi'
 
 function runsLabel(count: number) {
@@ -51,6 +52,7 @@ export function RunbooksPage() {
                 >
                   {startingId === r.id ? 'Starting…' : 'Start run'}
                 </button>
+                <ArchiveButton type="Runbook" id={r.id} label={r.title} onError={setActionError} />
               </div>
             </article>
           ))}

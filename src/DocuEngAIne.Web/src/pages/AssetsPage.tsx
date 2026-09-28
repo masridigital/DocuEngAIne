@@ -1,3 +1,5 @@
+import { useState } from 'react'
+import { ArchiveButton } from '../components/ArchiveButton'
 import { useAssets, type Asset } from '../hooks/useApi'
 
 function isHttpUrl(value?: string | null): value is string {
@@ -29,6 +31,7 @@ function DeepLinks({ asset }: { asset: Asset }) {
 export function AssetsPage() {
   const { data, error, isLoading } = useAssets()
   const assets = Array.isArray(data) ? data : []
+  const [actionError, setActionError] = useState<string | null>(null)
 
   return (
     <div className="page">
@@ -36,6 +39,7 @@ export function AssetsPage() {
       <p className="muted">Open in Halo / Open in Ninja when a device or asset portal URL is stored. URLs only — no secrets.</p>
       {isLoading && <p>Loading…</p>}
       {error && <p className="error">Failed to load assets.</p>}
+      {actionError && <p className="error">{actionError}</p>}
       {!isLoading && !error && (
         <table className="data-table">
           <thead>
@@ -45,12 +49,13 @@ export function AssetsPage() {
               <th>Location</th>
               <th>Status</th>
               <th>Links</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {assets.length === 0 && (
               <tr>
-                <td colSpan={5}>No assets match.</td>
+                <td colSpan={6}>No assets match.</td>
               </tr>
             )}
             {assets.map((a) => (
@@ -61,6 +66,9 @@ export function AssetsPage() {
                 <td>{a.status}</td>
                 <td>
                   <DeepLinks asset={a} />
+                </td>
+                <td>
+                  <ArchiveButton type="Asset" id={a.id} label={a.name} onError={setActionError} />
                 </td>
               </tr>
             ))}

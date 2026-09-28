@@ -3,9 +3,12 @@ using DocuEngAIne.Core.Interfaces;
 
 namespace DocuEngAIne.Core.Entities;
 
-public class Asset : EntityBase, ITenantScoped
+public class Asset : EntityBase, ITenantScoped, ISoftDeletable
 {
     public Guid TenantId { get; set; }
+
+    /// <summary>Archived when set. See <see cref="ISoftDeletable"/>.</summary>
+    public DateTimeOffset? DeletedAt { get; set; }
     public Tenant Tenant { get; set; } = null!;
 
     public required string Name { get; set; }

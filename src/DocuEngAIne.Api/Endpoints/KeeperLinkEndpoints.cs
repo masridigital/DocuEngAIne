@@ -110,11 +110,14 @@ public static class KeeperLinkEndpoints
         return await UpdateAsync(id, request, db, user, cancellationToken);
     }
 
+    /// <summary>Archives to the Museum (restorable); permanent deletion is <c>DELETE /api/archive/{entryId}</c>.</summary>
     public static async Task<IResult> DeleteAsync(
         Guid id,
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        IAuditService? audit = null,
+        [FromQuery] string? reason = null,
         CancellationToken cancellationToken = default)
     {
         if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.KeeperLink, cancellationToken) is { } denied)
@@ -124,8 +127,7 @@ public static class KeeperLinkEndpoints
         if (link is null)
             return Results.NotFound();
 
-        db.KeeperLinks.Remove(link);
-        await db.SaveChangesAsync(cancellationToken);
+        await ArchiveEndpoints.ArchiveAsync(db, user, audit, link, ResourceType.KeeperLink, link.Id, link.Name, reason, cancellationToken);
         return Results.NoContent();
     }
 

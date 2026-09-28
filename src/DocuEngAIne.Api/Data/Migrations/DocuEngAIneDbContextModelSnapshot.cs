@@ -75,6 +75,72 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.ToTable("ApiTokens");
                 });
 
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.ArchiveEntry", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("ArchivedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("ArchivedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ArchivedByObjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("PermanentlyDeletedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("PermanentlyDeletedByObjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("Reason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid>("ResourceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ResourceLabel")
+                        .IsRequired()
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
+                    b.Property<string>("ResourceType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTimeOffset?>("RestoredAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("RestoredByObjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ArchivedAt");
+
+                    b.HasIndex("TenantId", "ResourceType", "ResourceId");
+
+                    b.ToTable("ArchiveEntries");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Asset", b =>
                 {
                     b.Property<Guid>("Id")
@@ -88,6 +154,9 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("DeletedAt")
                         .HasColumnType("datetimeoffset");
 
                     b.Property<DateTimeOffset?>("ExpiresAt")
@@ -424,6 +493,9 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<Guid?>("FolderId")
                         .HasColumnType("uniqueidentifier");
 
@@ -459,7 +531,7 @@ namespace DocuEngAIne.Api.Data.Migrations
 
                     b.HasIndex("TenantId", "Slug")
                         .IsUnique()
-                        .HasFilter("[Slug] IS NOT NULL");
+                        .HasFilter("[Slug] IS NOT NULL AND [DeletedAt] IS NULL");
 
                     b.ToTable("Documents");
                 });
@@ -829,6 +901,9 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<string>("KeeperRecordUid")
                         .HasColumnType("nvarchar(max)");
 
@@ -1008,6 +1083,9 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
 
+                    b.Property<DateTimeOffset?>("DeletedAt")
+                        .HasColumnType("datetimeoffset");
+
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
@@ -1036,7 +1114,7 @@ namespace DocuEngAIne.Api.Data.Migrations
 
                     b.HasIndex("TenantId", "Slug")
                         .IsUnique()
-                        .HasFilter("[Slug] IS NOT NULL");
+                        .HasFilter("[Slug] IS NOT NULL AND [DeletedAt] IS NULL");
 
                     b.ToTable("Runbooks");
                 });
@@ -1259,6 +1337,17 @@ namespace DocuEngAIne.Api.Data.Migrations
                 {
                     b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
                         .WithMany("ApiTokens")
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.ArchiveEntry", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
