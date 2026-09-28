@@ -860,3 +860,109 @@ export async function restoreArchiveEntry(id: string) {
 export async function permanentlyDeleteArchiveEntry(id: string) {
   await apiFetch(`/api/archive/${id}`, { method: 'DELETE' })
 }
+
+export type AccessReviewStatus = 'Draft' | 'InProgress' | 'Completed' | 'Cancelled'
+export type AccessReviewDecision = 'Pending' | 'Retain' | 'Revoke' | 'ChangeRole'
+
+export type AccessReviewSummary = {
+  id: string
+  name: string
+  status: AccessReviewStatus
+  reviewerUserId?: string | null
+  dueAt?: string | null
+  startedAt?: string | null
+  completedAt?: string | null
+  cancelledAt?: string | null
+  itemCount: number
+  pendingCount: number
+  createdAt: string
+}
+
+export type AccessReviewItem = {
+  id: string
+  subjectUserId: string
+  subjectEmail: string
+  subjectName?: string | null
+  roleAtSnapshot: UserRole
+  grantCount: number
+  decision: AccessReviewDecision
+  requestedRole?: UserRole | null
+  decidedByName?: string | null
+  decidedAt?: string | null
+  decisionNotes?: string | null
+}
+
+export type AccessReviewDetail = {
+  review: AccessReviewSummary
+  notes?: string | null
+  items: AccessReviewItem[]
+}
+
+const ACCESS_REVIEWS_KEY = '/api/access-reviews'
+
+export function useAccessReviews(enabled = true) {
+  return useSWR<AccessReviewSummary[]>(enabled ? ACCESS_REVIEWS_KEY : null, fetcher)
+}
+
+export function useAccessReview(id: string | undefined) {
+  return useSWR<AccessReviewDetail>(id ? `${ACCESS_REVIEWS_KEY}/${id}` : null, fetcher)
+}
+
+function refreshAccessReview(id: string) {
+  return Promise.all([mutate(ACCESS_REVIEWS_KEY), mutate(`${ACCESS_REVIEWS_KEY}/${id}`)])
+}
+
+export async function createAccessReview(input: { name: string; dueAt?: string; notes?: string }) {
+  const created = await postJson<AccessReviewSummary>(ACCESS_REVIEWS_KEY, {
+    name: input.name,
+    dueAt: input.dueAt ? new Date(input.dueAt).toISOString() : undefined,
+    notes: input.notes || undefined,
+  })
+  await mutate(ACCESS_REVIEWS_KEY)
+  return created
+}
+
+export async function startAccessReview(id: string) {
+  await postJson(`${ACCESS_REVIEWS_KEY}/${id}/start`)
+  await refreshAccessReview(id)
+}
+
+export async function completeAccessReview(id: string) {
+  await postJson(`${ACCESS_REVIEWS_KEY}/${id}/complete`)
+  await refreshAccessReview(id)
+}
+
+export async function cancelAccessReview(id: string) {
+  await postJson(`${ACCESS_REVIEWS_KEY}/${id}/cancel`)
+  await refreshAccessReview(id)
+}
+
+/** Applies immediately: Revoke suspends the user, ChangeRole changes their tenant role. */
+export async function decideAccessReviewItem(
+  id: string,
+  itemId: string,
+  input: { decision: Exclude<AccessReviewDecision, 'Pending'>; requestedRole?: UserRole; notes?: string },
+) {
+  await apiFetch(`${ACCESS_REVIEWS_KEY}/${id}/items/${itemId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  })
+  await Promise.all([refreshAccessReview(id), mutate('/api/users')])
+}
+
+export async function exportAccessReviewCsv(id: string) {
+  const res = await apiFetch(`${ACCESS_REVIEWS_KEY}/${id}/export`)
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  try {
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `access-review-${id}.csv`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}

@@ -84,6 +84,7 @@ app.MapResourceAccessEndpoints();
 app.MapApiTokenEndpoints();
 app.MapAuditEndpoints();
 app.MapArchiveEndpoints();
+app.MapAccessReviewEndpoints();
 app.MapPortalEndpoints();
 app.MapOutboundMcpEndpoints();
 app.MapLlmEndpoints();
