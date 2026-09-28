@@ -14,4 +14,5 @@ public enum IntegrationProvider
     Autotask = 9,
     DefensX = 10,
     Pax8 = 11,
+    Slide = 12,
 }

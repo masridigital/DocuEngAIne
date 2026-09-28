@@ -1,8 +1,9 @@
 # DocuEngAIne — Next Items
 
-Working plan as of 2026-08-31, at `e03ad39` plus the review-fix branch. Previous revision of this
-document described the repo at `be7465b` (2026-08-28) and had drifted badly — most of its "next"
-items have since shipped. History is in git; this file describes now.
+Working plan as of 2026-08-31, at `8c03d4e` (all ten reviewed PRs merged) plus the review-fix
+branch. Previous revision of this document described the repo at `be7465b` (2026-08-28) and had
+drifted badly — most of its "next" items have since shipped. History is in git; this file
+describes now.
 
 This is a build-stage plan, not a launch checklist. It supplements
 [`MASRI-NATIVE-PLAN.md`](MASRI-NATIVE-PLAN.md) §8 rather than replacing it — that document still
@@ -12,15 +13,15 @@ owns the product direction.
 
 Since `be7465b`, roughly fifty PRs landed in two days. The wave was wide and mostly good:
 
-- **Ten providers pull companies through StackJack Compact end to end** — Halo, NinjaOne, CIPP,
-  Meraki, UniFi, Action1, Autotask, Blackpoint (CompassOne), DefensX, and Pax8 are dispatched by
-  `IntegrationSyncService.SyncAsync`, converge through `CompanyIdentity` / `CompanyMatchIndex`, and
-  stamp `ExternalIdsJson`.
-- **~14 more mappers exist but nothing calls them** (Halo sites/users/assets, Ninja locations,
-  Meraki networks, UniFi sites/devices, CIPP devices/users, Keeper MSP/SCIM, Slide, Datto,
-  Huntress, ImmyBot, Liongard, Azure subscriptions/resource groups, Graph partner/delegated-admin,
-  DNSFilter, ThreatLocker). They are tested dead code until a sync pass dispatches them — see
-  "Decide the mapper backlog" below.
+- **Eleven providers pull companies through StackJack Compact end to end** — Halo, NinjaOne,
+  CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint (CompassOne), DefensX, Pax8, and Slide are
+  dispatched by `IntegrationSyncService.SyncAsync`, converge through `CompanyIdentity` /
+  `CompanyMatchIndex`, and stamp `ExternalIdsJson`. PR #66 additionally wired Halo sites/users,
+  Action1 endpoints, CIPP devices, Meraki networks, and UniFi sites/devices into child passes.
+- **A dozen mappers still have no caller** (Halo assets, Ninja locations, CIPP users, Keeper
+  MSP/SCIM, Datto, Huntress, ImmyBot, Liongard, Azure subscriptions/resource groups, Graph
+  partner/delegated-admin, DNSFilter, ThreatLocker). They are tested dead code until a sync pass
+  dispatches them — see "Decide the mapper backlog" below.
 - **The scheduler is real**: `IntegrationSyncHostedService` polls every minute;
   `SyncCadencePolicy` budgets 20% of the detected StackJack allowance (plan auto-detected from
   `stackjack_session_info`; reported limit beats tier; unknown plan = manual-only; overrides can
@@ -47,26 +48,36 @@ unverified by any compiler; there is no .NET SDK in the dev container to compens
 
 ## Sequence
 
-### 1. Restore CI, then merge the open PR set in order
+### 1. Restore CI, then clean up after the batch-merge
 
-Verdicts from the 2026-08-31 review (details in the review report):
+All ten open PRs were merged on 2026-08-31 before CI was restored, so none of them ever compiled
+in CI, and the known issues they carried are now on `main`. The review-fix branch (PR #68)
+addresses the code-level ones:
 
-1. **#66** (Compact mapper wiring) — fix the per-pass status re-check first (contacts pass runs
-   after a failed locations pass), then merge, then retitle.
-2. **#61, #59, #53, #52** — merge as-is (#52 needs a retitle; it is not a duplicate).
-3. **#65** (LLM providers) — fix the retired Anthropic model id default and the two blocking-wait
-   test asserts, then merge. **#67** (document assist) is stacked on #65 and merges after it.
-4. **#49** (Azure AI Search scaffolding) — merge with notes; rebase after #67.
-5. **#33** (Hudu import) — merge as-is; rebase README/DI after #49.
-6. **#45** (Composio harness) — merge as-is, any time.
-7. **#50** (client portal) — **hold**: it has no portal identity (any tenant user sees every
-   portal-enabled company; the flag isolates nothing). Decide the portal auth story first.
+- **#66's per-pass status re-check** — a child pass ran after an earlier failed pass and could
+  stamp `LastSyncAt` on a Failed run.
+- **#65's retired Anthropic model default** (`claude-sonnet-4-20250514`) and its two blocking
+  `GetAwaiter().GetResult()` test asserts (xUnit1031 — CI enforces 0 warnings).
+- **#50's dead portal expirations widget** — `[FromQuery] bool showExpired` with no default is a
+  required parameter in minimal APIs, and the SPA never sends it (same latent bug on
+  `/api/expirations`).
+
+Two things remain decisions, not fixes:
+
+- **#50 shipped without a portal identity.** `/api/portal` is plain `RequireAuthorization()` —
+  any tenant user sees every portal-enabled company, and a client onboarded as a Reader "to try
+  the portal" can call every other authenticated GET in the tenant. Fine while no external user
+  can authenticate; decide the portal auth story (Entra External ID / magic links / portal
+  tokens) before onboarding any client.
+- **#49's in-memory search index** is a singleton fed by document writes — unbounded, per-process,
+  lost on restart, and unpublished docs are searchable by any tenant user. Acceptable as
+  scaffolding; revisit when Azure AI Search is provisioned.
 
 Stale branches safe to delete: `feature/integrations-mcp`, `cursor/unifi-host-pull-8cbd`.
 
 ### 2. Decide the mapper backlog: wire or stop building
 
-~14 mappers are dead code. Each is well-tested against fixtures, but no sync pass dispatches them,
+A dozen mappers are dead code. Each is well-tested against fixtures, but no sync pass dispatches them,
 and each unwired provider that later gets wired without an `IntegrationProvider` enum value would
 fall through to the `"custom"` provider key and collide in `ExternalIdsJson`. Either schedule the
 site/user/device passes that consume them (the Ninja device pass is the template) or stop merging
@@ -82,8 +93,9 @@ credential plumbing and vendor quirks, not protocol basics.
 
 ### 4. Resume the feature chain
 
-Back to `MASRI-NATIVE-PLAN.md` §8: SyncRun UI in the SPA, the LLM/document-assist and search PRs
-above, then the portal once its identity story is decided.
+Back to `MASRI-NATIVE-PLAN.md` §8: SyncRun history is now in the API and SPA (#52); LLM chat +
+document assist (#65) and search scaffolding (#49) shipped; the portal skeleton (#50) waits on its
+identity story; Hudu one-shot import (#33) and the Composio harness (#45) shipped.
 
 ## Azure deploy: intentionally not started
 
@@ -97,12 +109,12 @@ apply via the `migrate` job's EF bundle.
 
 1. **Expose DocuEngAIne's own MCP server** — done. `POST /mcp` (Streamable HTTP), per-tenant API
    tokens with optional expiry, `TokenCurrentUser` via `CurrentUserScope`. Read-only tools:
-   `list_companies`, `get_company`, `list_assets`, `list_documents`, `list_runbooks`,
-   `list_expirations`, `list_keeper_links` (titles + ids only), and the audited
+   `list_companies`, `get_company`, `list_assets`, `get_asset`, `list_documents`,
+   `list_runbooks`, `list_expirations`, `list_keeper_links` (titles + ids only), and the audited
    `reveal_keeper_link`.
 2. **Promote content into documentation** — shipped as one-click promote (runbook run → Document,
-   with versioning). An AI drafting step over the source material is the natural next increment —
-   PR #65/#67 provide the LLM plumbing.
+   with versioning), and document assist (`/api/documents/{id}/assist`, preview by default) now
+   provides the AI summarize/rewrite step on top of it.
 3. **Screen-recording capture** — unchanged: a later phase, lands on `Runbook`/`RunbookStep`,
    blocked on blob storage (Phase 3), plan together with photos.
 
@@ -113,5 +125,7 @@ apply via the `migrate` job's EF bundle.
   layer.
 - No mapper has ever been run against live Compact output that wasn't first pasted into a fixture
   — that is item 3, not more unit tests.
-- The 21 unwired mappers carry full test suites that will silently rot if item 2 lands on
+- The unwired mappers carry full test suites that will silently rot if item 2 lands on
   "stop building".
+- #67's document-assist apply path (`Apply=true`: version snapshot + write) has no test — preview,
+  403, and cross-tenant cases are covered.

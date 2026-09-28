@@ -37,6 +37,7 @@ public static class StackJackPlanDetector
         IntegrationProvider.Blackpoint => "CompassOne",
         IntegrationProvider.DefensX => "DefensX",
         IntegrationProvider.Pax8 => "Pax8",
+        IntegrationProvider.Slide => "Slide",
         _ => null,
     };
 

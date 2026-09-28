@@ -12,6 +12,7 @@ import {
   updateIntegration,
   useIntegrationMappings,
   useIntegrations,
+  useLlmConfig,
   useMcpServers,
   useSyncRuns,
   type IntegrationConnection,
@@ -42,7 +43,7 @@ function formatTimestamp(value?: string | null) {
  * Providers the API resolves — or registers once — StackJack Compact for, so creating one needs
  * nothing but a Key Vault secret name. Mirrors McpServerDefaults.IsCompactBacked on the server.
  */
-const builtInCompactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Action1', 'Autotask', 'Blackpoint', 'DefensX', 'Pax8']
+const builtInCompactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Action1', 'Autotask', 'Blackpoint', 'DefensX', 'Pax8', 'Slide']
 
 /** "44m", "12h", "30d" — short enough for a table cell. */
 function formatInterval(minutes: number) {
@@ -138,6 +139,7 @@ function IntegrationHistory({ integrationId }: { integrationId: string }) {
           <thead>
             <tr>
               <th>Status</th>
+              <th>Provider</th>
               <th>Started</th>
               <th>Finished</th>
               <th>Created</th>
@@ -152,6 +154,7 @@ function IntegrationHistory({ integrationId }: { integrationId: string }) {
                 <td>
                   <span className={`tag ${syncStatusClass(r.status)}`}>{r.status}</span>
                 </td>
+                <td>{r.provider || '—'}</td>
                 <td>{formatTimestamp(r.startedAt)}</td>
                 <td>{formatTimestamp(r.finishedAt)}</td>
                 <td>{r.itemsCreated ?? 0}</td>
@@ -208,6 +211,28 @@ function IntegrationHistory({ integrationId }: { integrationId: string }) {
         </>
       )}
     </div>
+  )
+}
+
+function LlmSettingsReadout() {
+  const { data, error, isLoading } = useLlmConfig()
+
+  return (
+    <section className="panel">
+      <h2>LLM</h2>
+      <p className="muted">
+        Provider and model come from app settings and Key Vault. They cannot be changed here.
+      </p>
+      {isLoading && <p>Loading…</p>}
+      {error && <p className="error">Failed to load LLM config.</p>}
+      {data && (
+        <p>
+          Provider: <strong>{data.provider}</strong>
+          {' · '}
+          Model: <strong>{data.model}</strong>
+        </p>
+      )}
+    </section>
   )
 }
 
@@ -423,7 +448,7 @@ export function IntegrationsPage() {
     <div className="page">
       <h1>Integrations</h1>
       <p>
-        StackJack Compact is built in. Pick a provider — Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX or Pax8 — and give the
+        StackJack Compact is built in. Pick a provider — Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8 or Slide — and give the
         Key Vault secret name holding this tenant&rsquo;s Compact API key; the Compact MCP server is registered
         the first time and reused after that. A secret name is never a secret value: nothing but the name is stored.
         Composio and CustomMcp still need a server registered under Advanced.
@@ -435,6 +460,8 @@ export function IntegrationsPage() {
       </p>
       {message && <p className="banner">{message}</p>}
       {errorMessage && <p className="error">{errorMessage}</p>}
+
+      <LlmSettingsReadout />
 
       <section className="panel">
         <h2>Integrations</h2>
@@ -498,7 +525,7 @@ export function IntegrationsPage() {
           </table>
         )}
 
-        <p>Halo company pull uses Compact <code>halo_list_clients</code>. NinjaOne company pull uses Compact <code>ninja_list_organizations</code>. CIPP tenant pull uses Compact <code>cipp_list_tenants</code>. Meraki organization pull uses Compact <code>meraki_get_organizations</code> (orgs → companies; networks later). UniFi console pull uses Compact <code>unifi_sm_list_hosts</code> (hosts → companies; not sites). Action1 organization pull uses Compact <code>action1_list_organizations</code> (skips the MSP default organization). Autotask company pull uses Compact <code>at_list_companies</code> (not the active/customer pre-filters; <code>SkipInactive</code> drops <code>isActive</code> false). Blackpoint tenant pull uses Compact <code>compassone_list_tenants</code> (id/name/domain; installer URLs are not stored). DefensX customer pull uses Compact <code>dfx_list_customers</code> (id/name/<code>domains[0]</code>; <code>SkipInactive</code> drops <code>enabled</code> false). Pax8 company pull uses Compact <code>pax8_list_companies</code> (id/name/website/city/state; <code>SkipInactive</code> drops <code>status</code> Inactive and Deleted). Sync policy defaults skip inactive accounts and refuse overwriting company details.</p>
+        <p>Halo company pull uses Compact <code>halo_list_clients</code>. NinjaOne company pull uses Compact <code>ninja_list_organizations</code>. CIPP tenant pull uses Compact <code>cipp_list_tenants</code>. Meraki organization pull uses Compact <code>meraki_get_organizations</code> (orgs → companies; networks later). UniFi console pull uses Compact <code>unifi_sm_list_hosts</code> (hosts → companies; not sites). Action1 organization pull uses Compact <code>action1_list_organizations</code> (skips the MSP default organization). Autotask company pull uses Compact <code>at_list_companies</code> (not the active/customer pre-filters; <code>SkipInactive</code> drops <code>isActive</code> false). Blackpoint tenant pull uses Compact <code>compassone_list_tenants</code> (id/name/domain; installer URLs are not stored). DefensX customer pull uses Compact <code>dfx_list_customers</code> (id/name/<code>domains[0]</code>; <code>SkipInactive</code> drops <code>enabled</code> false). Pax8 company pull uses Compact <code>pax8_list_companies</code> (id/name/website/city/state; <code>SkipInactive</code> drops <code>status</code> Inactive and Deleted). Slide client pull uses Compact <code>slide_list_clients</code> (<code>client_id</code>/<code>name</code>; no inactive flag, so <code>SkipInactive</code> does not invent a drop). Sync policy defaults skip inactive accounts and refuse overwriting company details.</p>
         <form onSubmit={onCreateIntegration}>
           <div className="form-grid">
             <label>
@@ -522,6 +549,7 @@ export function IntegrationsPage() {
                 <option value="Blackpoint">Blackpoint</option>
                 <option value="DefensX">DefensX</option>
                 <option value="Pax8">Pax8</option>
+                <option value="Slide">Slide</option>
                 <option value="Composio">Composio</option>
                 <option value="CustomMcp">CustomMcp</option>
               </select>

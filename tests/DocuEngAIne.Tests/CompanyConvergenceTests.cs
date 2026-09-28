@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 namespace DocuEngAIne.Tests;
 
 /// <summary>
-/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX and Pax8 each own their own mapping rows. Without a match step
+/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8 and Slide each own their own mapping rows. Without a match step
 /// the same client is created once per connection. These cover the convergence path.
 /// </summary>
 public class CompanyConvergenceTests
@@ -354,6 +354,39 @@ public class CompanyConvergenceTests
         Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
         var pax8Mapping = Assert.Single(mappings, m => m.ExternalId == "11111111-1111-1111-1111-111111111111");
         Assert.Contains(CompanyMatchIndex.MatchedByName, pax8Mapping.MetadataJson!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Slide_Adopts_The_Company_Already_Created_And_Records_ExternalId()
+    {
+        var (db, user, sync) = Create();
+        var halo = await AddConnectionAsync(db, user, IntegrationProvider.Halo);
+        await sync.SyncFromPayloadAsync(halo.Id, [
+            new ExternalCompanyDto("halo-100", "ExampleCo")
+        ]);
+
+        var slide = await AddConnectionAsync(db, user, IntegrationProvider.Slide);
+        var slideRun = await sync.SyncFromPayloadAsync(slide.Id, [
+            new ExternalCompanyDto("c_0123456789ab", "ExampleCo")
+        ]);
+
+        Assert.Equal(SyncRunStatus.Succeeded, slideRun.Status);
+        Assert.Equal(0, slideRun.ItemsCreated);
+        Assert.Equal(1, slideRun.ItemsUpdated);
+
+        var company = await db.Companies.SingleAsync();
+        Assert.Equal("halo-100", company.HaloClientId);
+        Assert.Null(company.NinjaOrganizationId);
+
+        var ids = CompanyIdentity.ReadExternalIds(company.ExternalIdsJson);
+        Assert.Equal("halo-100", ids["halo"]);
+        Assert.Equal("c_0123456789ab", ids["slide"]);
+
+        var mappings = await db.IntegrationMappings.ToListAsync();
+        Assert.Equal(2, mappings.Count);
+        Assert.All(mappings, m => Assert.Equal(company.Id, m.LocalEntityId));
+        var slideMapping = Assert.Single(mappings, m => m.ExternalId == "c_0123456789ab");
+        Assert.Contains(CompanyMatchIndex.MatchedByName, slideMapping.MetadataJson!, StringComparison.Ordinal);
     }
 
     [Fact]

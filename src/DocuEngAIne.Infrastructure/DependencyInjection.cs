@@ -1,8 +1,11 @@
 using DocuEngAIne.Core.Interfaces;
+using DocuEngAIne.Infrastructure.Configuration;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
 using DocuEngAIne.Infrastructure.Integrations;
 using DocuEngAIne.Infrastructure.Integrations.Migration;
+using DocuEngAIne.Infrastructure.Llm;
+using DocuEngAIne.Infrastructure.Search;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,8 +26,12 @@ public static class DependencyInjection
         services.AddScoped<IAuditService, AuditService>();
         services.AddHttpClient(nameof(HttpMcpClient));
         services.AddScoped<IMcpClient, HttpMcpClient>();
+        services.AddLlmClients(configuration);
         services.AddScoped<IIntegrationSyncService, IntegrationSyncService>();
         services.AddScoped<IItGlueMigrationService, ItGlueMigrationService>();
+        services.AddScoped<IHuduMigrationService, HuduMigrationService>();
+        services.Configure<AzureSearchOptions>(configuration.GetSection(AzureSearchOptions.SectionName));
+        services.AddSingleton<ISearchService, InMemorySearchService>();
         services.AddSingleton<IntegrationSyncRunner>();
         services.AddHostedService<IntegrationSyncHostedService>();
 

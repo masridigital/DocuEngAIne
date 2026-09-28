@@ -7,12 +7,12 @@ namespace DocuEngAIne.Infrastructure.Integrations;
 
 /// <summary>
 /// Converges companies pulled from different providers onto one local <see cref="Company"/>.
-/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX and Pax8 each own their own <see cref="IntegrationMapping"/> rows,
+/// Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8 and Slide each own their own <see cref="IntegrationMapping"/> rows,
 /// so without a match step the same client is created once per connection. Provider identity is
 /// recorded in the typed Halo/Ninja columns where they exist and in
 /// <see cref="Company.ExternalIdsJson"/> for every provider, which is also what later runs match on.
-/// IT Glue is migrate-only: one-shot import stamps <see cref="ItGlueKey"/> and is not an
-/// <see cref="IntegrationProvider"/>.
+/// IT Glue and Hudu are migrate-only: one-shot imports stamp <see cref="ItGlueKey"/> /
+/// <see cref="HuduKey"/> and are not <see cref="IntegrationProvider"/>s.
 /// </summary>
 public static class CompanyIdentity
 {
@@ -24,6 +24,12 @@ public static class CompanyIdentity
     /// Not an <see cref="IntegrationProvider"/> — IT Glue is not a live company-sync system of record.
     /// </summary>
     public const string ItGlueKey = "itglue";
+
+    /// <summary>
+    /// Stable <see cref="Company.ExternalIdsJson"/> key for the one-shot Hudu import.
+    /// Not an <see cref="IntegrationProvider"/> — Hudu is not a live company-sync system of record.
+    /// </summary>
+    public const string HuduKey = "hudu";
 
     /// <summary>Stable key used inside <see cref="Company.ExternalIdsJson"/>. Never renamed once shipped.</summary>
     public static string ProviderKey(IntegrationProvider provider) => provider switch
@@ -38,6 +44,7 @@ public static class CompanyIdentity
         IntegrationProvider.Blackpoint => "blackpoint",
         IntegrationProvider.DefensX => "defensx",
         IntegrationProvider.Pax8 => "pax8",
+        IntegrationProvider.Slide => "slide",
         IntegrationProvider.Composio => "composio",
         _ => "custom",
     };

@@ -93,6 +93,18 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
           value: 'true'
         }
         {
+          name: 'Azure__Search__IndexName'
+          value: ''
+        }
+        {
+          name: 'Azure__Search__Endpoint'
+          value: ''
+        }
+        {
+          name: 'Azure__Search__ApiKeySecretName'
+          value: ''
+        }
+        {
           name: 'ASPNETCORE_ENVIRONMENT'
           value: 'Production'
         }

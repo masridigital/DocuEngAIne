@@ -96,6 +96,7 @@ public static class DocumentEndpoints
         });
 
         group.MapPost("/{id:guid}/restore", RestoreAsync);
+        group.MapPost("/{id:guid}/assist", AssistAsync);
 
         return app;
     }
@@ -144,6 +145,7 @@ public static class DocumentEndpoints
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        ISearchService? search = null,
         CancellationToken cancellationToken = default)
     {
         // The document does not exist yet, so no grant can name it: creation gates on the
@@ -151,7 +153,7 @@ public static class DocumentEndpoints
         if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Document, cancellationToken) is { } denied)
             return denied;
 
-        return await CreateAsync(request, db, user, cancellationToken);
+        return await CreateAsync(request, db, user, cancellationToken, search);
     }
 
     public static async Task<IResult> PutAsync(
@@ -160,12 +162,13 @@ public static class DocumentEndpoints
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        ISearchService? search = null,
         CancellationToken cancellationToken = default)
     {
         if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
             return denied;
 
-        return await UpdateAsync(id, request, db, user, cancellationToken);
+        return await UpdateAsync(id, request, db, user, cancellationToken, search);
     }
 
     public static async Task<IResult> DeleteAsync(
@@ -173,6 +176,7 @@ public static class DocumentEndpoints
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        ISearchService? search = null,
         CancellationToken cancellationToken = default)
     {
         if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
@@ -185,8 +189,11 @@ public static class DocumentEndpoints
         if (doc is null)
             return Results.NotFound();
 
+        var tenantId = doc.TenantId;
         db.Documents.Remove(doc);
         await db.SaveChangesAsync(cancellationToken);
+        if (search is not null)
+            await search.RemoveDocumentAsync(id, tenantId, cancellationToken);
         return Results.NoContent();
     }
 
@@ -196,6 +203,7 @@ public static class DocumentEndpoints
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        ISearchService? search = null,
         CancellationToken cancellationToken = default)
     {
         // Restoring rewrites the document's current content, so it is a write on the document
@@ -234,6 +242,7 @@ public static class DocumentEndpoints
         doc.Tags = version.Tags;
 
         await db.SaveChangesAsync(cancellationToken);
+        await IndexDocumentAsync(search, doc, cancellationToken);
         return Results.NoContent();
     }
 
@@ -241,7 +250,8 @@ public static class DocumentEndpoints
         CreateDocumentRequest request,
         DocuEngAIneDbContext db,
         ICurrentUser user,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ISearchService? search = null)
     {
         if (user.TenantId is null)
             return Results.Unauthorized();
@@ -266,6 +276,7 @@ public static class DocumentEndpoints
 
         db.Documents.Add(doc);
         await db.SaveChangesAsync(cancellationToken);
+        await IndexDocumentAsync(search, doc, cancellationToken);
         return Results.Created($"/api/documents/{doc.Id}", new { doc.Id, doc.Title, doc.Slug, doc.FolderId });
     }
 
@@ -274,7 +285,8 @@ public static class DocumentEndpoints
         UpdateDocumentRequest request,
         DocuEngAIneDbContext db,
         ICurrentUser user,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ISearchService? search = null)
     {
         var doc = await db.Documents
             .ForTenant(user)
@@ -316,7 +328,129 @@ public static class DocumentEndpoints
         doc.IsPublished = request.IsPublished ?? doc.IsPublished;
 
         await db.SaveChangesAsync(cancellationToken);
+        await IndexDocumentAsync(search, doc, cancellationToken);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Technician-only LLM preview (and optional apply) for one tenant document.
+    /// Default is preview: the model output is not written as a <see cref="DocumentVersion"/>.
+    /// </summary>
+    public static async Task<IResult> AssistAsync(
+        Guid id,
+        [FromBody] DocumentAssistRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        ILlmClient llm,
+        IAuditService audit,
+        ISearchService? search = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
+            return denied;
+
+        if (request.Action is not DocumentAssistAction.Summarize and not DocumentAssistAction.Rewrite)
+            return Results.BadRequest("action must be summarize or rewrite.");
+
+        var query = db.Documents.ForTenant(user);
+        if (request.Apply)
+            query = query.Include(d => d.Versions.OrderByDescending(v => v.VersionNumber).Take(1));
+
+        var doc = await query.FirstOrDefaultAsync(d => d.Id == id, cancellationToken);
+        if (doc is null)
+            return Results.NotFound();
+
+        var messages = BuildAssistMessages(doc, request);
+
+        try
+        {
+            var result = await llm.ChatAsync(messages, options: null, cancellationToken);
+
+            await audit.LogAsync(
+                "Document.Assist",
+                nameof(Document),
+                doc.Id,
+                $"action={request.Action} provider={result.Provider} model={result.Model} apply={request.Apply}",
+                cancellationToken);
+
+            if (request.Apply)
+            {
+                ApplyAssistResult(db, doc, request.Action.Value, result.Content);
+                await db.SaveChangesAsync(cancellationToken);
+                await IndexDocumentAsync(search, doc, cancellationToken);
+            }
+
+            return Results.Ok(new DocumentAssistResponse(result.Content, result.Model, result.Provider.ToString()));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.BadRequest(ex.Message);
+        }
+    }
+
+    internal const string AssistSystemPrompt =
+        "You are assisting a technician with MSP documentation. Use only the document they provide. "
+        + "Do not invent credentials, secrets, passwords, API keys, or other sensitive values. "
+        + "Do not include secrets in your reply.";
+
+    internal static IReadOnlyList<LlmMessage> BuildAssistMessages(Document doc, DocumentAssistRequest request)
+    {
+        var actionLine = request.Action == DocumentAssistAction.Rewrite
+            ? "Rewrite the document. Follow any additional instruction from the technician."
+            : "Summarize the document clearly and concisely.";
+
+        var messages = new List<LlmMessage>
+        {
+            new("system", $"{AssistSystemPrompt} {actionLine}"),
+            new("user", doc.Content ?? string.Empty),
+        };
+
+        if (request.Action == DocumentAssistAction.Rewrite
+            && !string.IsNullOrWhiteSpace(request.Instruction))
+        {
+            messages.Add(new LlmMessage("user", request.Instruction.Trim()));
+        }
+
+        return messages;
+    }
+
+    private static void ApplyAssistResult(
+        DocuEngAIneDbContext db,
+        Document doc,
+        DocumentAssistAction action,
+        string content)
+    {
+        var nextVersionNumber = (doc.Versions.Max(v => (int?)v.VersionNumber) ?? 0) + 1;
+        db.DocumentVersions.Add(new DocumentVersion
+        {
+            DocumentId = doc.Id,
+            VersionNumber = nextVersionNumber,
+            Title = doc.Title,
+            Slug = doc.Slug,
+            Summary = doc.Summary,
+            Content = doc.Content,
+            Tags = doc.Tags,
+            ChangeNote = $"LLM {action.ToString().ToLowerInvariant()}",
+        });
+
+        if (action == DocumentAssistAction.Summarize)
+            doc.Summary = content;
+        else
+            doc.Content = content;
+    }
+
+    private static Task IndexDocumentAsync(
+        ISearchService? search,
+        Document doc,
+        CancellationToken cancellationToken)
+    {
+        if (search is null)
+            return Task.CompletedTask;
+
+        return search.IndexDocumentAsync(
+            new SearchDocument(doc.Id, doc.Title, doc.Content, doc.CompanyId, doc.TenantId),
+            cancellationToken);
     }
 }
 
@@ -353,3 +487,16 @@ public record UpdateDocumentRequest(
     bool CompanyIdClear = false);
 
 public record RestoreVersionRequest(Guid VersionId);
+
+public enum DocumentAssistAction
+{
+    Summarize,
+    Rewrite,
+}
+
+public sealed record DocumentAssistRequest(
+    DocumentAssistAction? Action,
+    string? Instruction = null,
+    bool Apply = false);
+
+public sealed record DocumentAssistResponse(string Content, string Model, string Provider);

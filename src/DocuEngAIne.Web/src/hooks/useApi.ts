@@ -125,6 +125,7 @@ export type CreateCompanyInput = {
   ninjaOrganizationId?: string | null
   haloPortalUrl?: string | null
   ninjaPortalUrl?: string | null
+  portalEnabled?: boolean
 }
 
 export type UpdateCompanyInput = {
@@ -134,6 +135,7 @@ export type UpdateCompanyInput = {
   ninjaOrganizationId?: string | null
   haloPortalUrl?: string | null
   ninjaPortalUrl?: string | null
+  portalEnabled?: boolean
 }
 
 export type McpTransport = 'Http' | 'Sse' | 'Stdio'
@@ -199,9 +201,9 @@ export type IntegrationConnection = {
   nextSyncDueAt?: string | null
 } & Partial<SyncPolicy>
 
-export type IntegrationProvider = 'Halo' | 'NinjaOne' | 'UniFi' | 'Blackpoint' | 'CustomMcp' | 'Cipp' | 'Meraki' | 'Composio' | 'Action1' | 'Autotask' | 'DefensX' | 'Pax8'
+export type IntegrationProvider = 'Halo' | 'NinjaOne' | 'UniFi' | 'Blackpoint' | 'CustomMcp' | 'Cipp' | 'Meraki' | 'Composio' | 'Action1' | 'Autotask' | 'DefensX' | 'Pax8' | 'Slide'
 
-const compactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Blackpoint', 'Action1', 'Autotask', 'DefensX', 'Pax8']
+const compactProviders: IntegrationProvider[] = ['Halo', 'NinjaOne', 'Cipp', 'Meraki', 'UniFi', 'Blackpoint', 'Action1', 'Autotask', 'DefensX', 'Pax8', 'Slide']
 
 export function mcpKindForProvider(provider: IntegrationProvider): McpServerKind | null {
   if (provider === 'Composio') return 'Composio'
@@ -343,8 +345,21 @@ export function createFlag(input: { name: string; color: string; isActive?: bool
   return postJson<FlagDefinition>('/api/flags', input)
 }
 
+export type Asset = {
+  id: string
+  name: string
+  location?: string | null
+  status?: string | null
+  companyId?: string | null
+  expiresAt?: string | null
+  haloAssetUrl?: string | null
+  ninjaDeviceUrl?: string | null
+  externalIdsJson?: string | null
+  assetType?: string | null
+}
+
 export function useAssets() {
-  return useSWR('/api/assets', fetcher)
+  return useSWR<Asset[]>('/api/assets', fetcher)
 }
 
 export type DocumentFolder = {
@@ -385,6 +400,25 @@ export function useDocuments(opts?: { search?: string; folderId?: string }) {
 
 export function createFolder(input: { name: string; parentId?: string | null; companyId?: string | null }) {
   return postJson<DocumentFolder>('/api/folders', input)
+}
+
+export type DocumentAssistAction = 'summarize' | 'rewrite'
+
+export type DocumentAssistRequest = {
+  action: DocumentAssistAction
+  instruction?: string
+  apply?: boolean
+}
+
+export type DocumentAssistResponse = {
+  content: string
+  model: string
+  provider: string
+}
+
+/** Preview (default) or apply an LLM summarize/rewrite for one document. */
+export function assistDocument(id: string, input: DocumentAssistRequest) {
+  return postJson<DocumentAssistResponse>(`/api/documents/${id}/assist`, input)
 }
 
 export type Runbook = {
@@ -486,11 +520,22 @@ export function useIntegrations() {
   return useSWR<IntegrationConnection[]>('/api/integrations', fetcher)
 }
 
+export type LlmConfig = {
+  provider: string
+  model: string
+}
+
+/** Current LLM provider and model from appsettings / Key Vault. Never includes API keys. */
+export function useLlmConfig() {
+  return useSWR<LlmConfig>('/api/llm/config', fetcher)
+}
+
 export type SyncRunStatus = 'Running' | 'Succeeded' | 'Failed' | 'Partial'
 
 export type SyncRun = {
   id: string
   integrationConnectionId: string
+  provider?: string | null
   startedAt: string
   finishedAt?: string | null
   status: SyncRunStatus | string
@@ -539,6 +584,67 @@ async function postJson<T>(url: string, body?: unknown): Promise<T> {
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   return readJson<T>(res)
+}
+
+export type PortalCompanyListItem = {
+  id: string
+  name: string
+  slug: string
+  website?: string | null
+}
+
+export type PortalCounts = {
+  documents: number
+  expirations: number
+  keeperLinks: number
+}
+
+export type PortalCompanyDetail = {
+  id: string
+  name: string
+  slug: string
+  website?: string | null
+  phone?: string | null
+  hoursOfOperation?: string | null
+  counts: PortalCounts
+}
+
+export type PortalDocument = {
+  id: string
+  title: string
+  slug?: string | null
+  summary?: string | null
+  content?: string | null
+  tags?: string | null
+  updatedAt: string
+}
+
+export type PortalKeeperLink = {
+  id: string
+  title: string
+  companyId?: string | null
+  updatedAt: string
+  hasRecordUrl: boolean
+}
+
+export function usePortalCompanies() {
+  return useSWR<PortalCompanyListItem[]>('/api/portal/companies', fetcher)
+}
+
+export function usePortalCompany(id: string | undefined) {
+  return useSWR<PortalCompanyDetail>(id ? `/api/portal/companies/${id}` : null, fetcher)
+}
+
+export function usePortalDocuments(companyId: string | undefined) {
+  return useSWR<PortalDocument[]>(companyId ? `/api/portal/companies/${companyId}/documents` : null, fetcher)
+}
+
+export function usePortalExpirations(companyId: string | undefined) {
+  return useSWR<ExpirationItem[]>(companyId ? `/api/portal/companies/${companyId}/expirations` : null, fetcher)
+}
+
+export function usePortalKeeperLinks(companyId: string | undefined) {
+  return useSWR<PortalKeeperLink[]>(companyId ? `/api/portal/companies/${companyId}/keeper-links` : null, fetcher)
 }
 
 export function createCompany(input: CreateCompanyInput) {

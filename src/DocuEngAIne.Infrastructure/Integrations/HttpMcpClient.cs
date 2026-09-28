@@ -4,6 +4,7 @@ using System.Text.Json;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
+using DocuEngAIne.Core.Mcp;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -66,13 +67,19 @@ public class HttpMcpClient : IMcpClient
             mcpServerId,
             "tools/call",
             new { name = toolName, arguments = args },
-            cancellationToken);
+            cancellationToken,
+            toolName);
 
         await _audit.LogAsync("Mcp.CallTool", nameof(Core.Entities.McpServer), mcpServerId, $"tool={toolName}", cancellationToken);
         return result;
     }
 
-    private async Task<string> CallJsonRpcAsync(Guid mcpServerId, string method, object paramsObj, CancellationToken cancellationToken)
+    private async Task<string> CallJsonRpcAsync(
+        Guid mcpServerId,
+        string method,
+        object paramsObj,
+        CancellationToken cancellationToken,
+        string? toolName = null)
     {
         var server = await _db.McpServers.ForTenant(_user).FirstOrDefaultAsync(s => s.Id == mcpServerId, cancellationToken)
             ?? throw new InvalidOperationException("MCP server not found.");
@@ -85,6 +92,16 @@ public class HttpMcpClient : IMcpClient
 
         if (string.IsNullOrWhiteSpace(server.EndpointUrl))
             throw new InvalidOperationException("MCP server EndpointUrl is required.");
+
+        // Composio is the second harness, not a Compact PSA/RMM stand-in. Refuse ads/social and
+        // anything outside the allowlist before a token is resolved or a request is sent.
+        if (server.Kind == McpServerKind.Composio
+            && method == "tools/call"
+            && !McpServerDefaults.IsAllowedComposioTool(toolName))
+        {
+            throw new InvalidOperationException(
+                $"Composio tool '{toolName}' is outside the allowed toolkits (github, cloudflare, outlook, notion). Ads and social toolkits are skipped.");
+        }
 
         // Resolve the secret before any network call: a misconfigured secret must not reach the vendor as a 401.
         var token = ResolveAuthToken(server);
@@ -111,6 +128,10 @@ public class HttpMcpClient : IMcpClient
         // HTTP 200 still carries JSON-RPC errors and MCP tool isError payloads. Surface those here
         // so callers (and the mappers) do not treat a failed tool as an empty success.
         EnsureNoRpcFailure(body, "MCP call failed");
+
+        if (server.Kind == McpServerKind.Composio && method == "tools/list")
+            return McpServerDefaults.FilterComposioToolsList(body);
+
         return body;
     }
 

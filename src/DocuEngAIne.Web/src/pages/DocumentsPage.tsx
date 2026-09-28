@@ -1,8 +1,11 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import {
+  assistDocument,
   createFolder,
   useDocuments,
   useFolders,
+  type DocumentAssistAction,
+  type DocumentAssistResponse,
   type DocumentFolder,
   type KbDocument,
 } from '../hooks/useApi'
@@ -55,9 +58,29 @@ export function DocumentsPage() {
   const [name, setName] = useState('')
   const [formError, setFormError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  const [rewriteInstruction, setRewriteInstruction] = useState('')
+  const [assistBusyId, setAssistBusyId] = useState<string | null>(null)
+  const [assistError, setAssistError] = useState<string | null>(null)
+  const [preview, setPreview] = useState<(DocumentAssistResponse & { documentId: string; action: DocumentAssistAction }) | null>(null)
 
   const selected = folders.find((f) => f.id === selectedFolderId)
   const articleHeading = selected ? selected.name : 'All articles'
+
+  async function onAssist(id: string, action: DocumentAssistAction) {
+    setAssistError(null)
+    setAssistBusyId(id)
+    try {
+      const result = await assistDocument(id, {
+        action,
+        instruction: action === 'rewrite' ? rewriteInstruction.trim() || undefined : undefined,
+      })
+      setPreview({ ...result, documentId: id, action })
+    } catch (err) {
+      setAssistError(err instanceof Error ? err.message : 'Failed to assist document.')
+    } finally {
+      setAssistBusyId(null)
+    }
+  }
 
   async function onCreate(e: FormEvent) {
     e.preventDefault()
@@ -133,8 +156,17 @@ export function DocumentsPage() {
 
         <section>
           <h2>{articleHeading}</h2>
+          {docs.length > 0 && (
+            <input
+              className="input"
+              value={rewriteInstruction}
+              onChange={(e) => setRewriteInstruction(e.target.value)}
+              placeholder="Optional rewrite instruction"
+            />
+          )}
           {isLoading && <p>Loading…</p>}
           {error && <p className="error">Failed to load documents.</p>}
+          {assistError && <p className="error">{assistError}</p>}
           {docs.length > 0 && (
             <div className="list">
               {docs.map((d) => (
@@ -142,6 +174,32 @@ export function DocumentsPage() {
                   <h3>{d.title}</h3>
                   <p>{d.summary}</p>
                   {d.tags && <span className="tag">{d.tags}</span>}
+                  <div className="list-item-meta">
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      disabled={assistBusyId === d.id}
+                      onClick={() => onAssist(d.id, 'summarize')}
+                    >
+                      {assistBusyId === d.id ? 'Working…' : 'Summarize'}
+                    </button>
+                    <button
+                      className="btn"
+                      type="button"
+                      disabled={assistBusyId === d.id}
+                      onClick={() => onAssist(d.id, 'rewrite')}
+                    >
+                      {assistBusyId === d.id ? 'Working…' : 'Rewrite'}
+                    </button>
+                  </div>
+                  {preview?.documentId === d.id && (
+                    <div className="assist-preview">
+                      <p className="muted">
+                        {preview.action} preview · {preview.provider} / {preview.model}
+                      </p>
+                      <pre>{preview.content}</pre>
+                    </div>
+                  )}
                 </article>
               ))}
             </div>

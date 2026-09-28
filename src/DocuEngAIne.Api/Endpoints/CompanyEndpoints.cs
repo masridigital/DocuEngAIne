@@ -249,6 +249,7 @@ public static class CompanyEndpoints
             HaloPortalUrl = NullIfEmpty(request.HaloPortalUrl),
             NinjaPortalUrl = NullIfEmpty(request.NinjaPortalUrl),
             IsActive = request.IsActive ?? true,
+            PortalEnabled = request.PortalEnabled ?? false,
         };
 
         db.Companies.Add(company);
@@ -296,6 +297,8 @@ public static class CompanyEndpoints
             company.NinjaPortalUrl = NullIfEmpty(request.NinjaPortalUrl);
         if (request.IsActive.HasValue)
             company.IsActive = request.IsActive.Value;
+        if (request.PortalEnabled.HasValue)
+            company.PortalEnabled = request.PortalEnabled.Value;
 
         await db.SaveChangesAsync(cancellationToken);
         return Results.NoContent();
@@ -506,7 +509,8 @@ public record CreateCompanyRequest(
     string? NinjaOrganizationId = null,
     string? HaloPortalUrl = null,
     string? NinjaPortalUrl = null,
-    bool? IsActive = null);
+    bool? IsActive = null,
+    bool? PortalEnabled = null);
 
 public record UpdateCompanyRequest(
     string? Name = null,
@@ -530,4 +534,5 @@ public record UpdateCompanyRequest(
     string? NinjaOrganizationId = null,
     string? HaloPortalUrl = null,
     string? NinjaPortalUrl = null,
-    bool? IsActive = null);
+    bool? IsActive = null,
+    bool? PortalEnabled = null);

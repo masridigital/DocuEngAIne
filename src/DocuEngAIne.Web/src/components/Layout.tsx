@@ -22,6 +22,7 @@ export function Layout() {
           <NavLink to="/expirations">Expirations</NavLink>
           <NavLink to="/flags">Flags</NavLink>
           <NavLink to="/keeper">Keeper</NavLink>
+          <NavLink to="/portal">Portal</NavLink>
           <NavLink to="/integrations">Integrations</NavLink>
           {showUsers ? <NavLink to="/users">Users</NavLink> : null}
         </nav>

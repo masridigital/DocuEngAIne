@@ -31,11 +31,11 @@ tests/                      # xUnit + EF InMemory tests
 ## Domain Model
 
 - **Tenant** — isolation boundary; seeded from the Entra `tid` claim on first login.
-- **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets. Every provider's external id is also recorded in `ExternalIdsJson`, which is how sync converges Halo/Ninja/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint/DefensX/Pax8 onto one company instead of one per connection. One-shot IT Glue import stamps `ExternalIdsJson` key `itglue` the same way; IT Glue is **not** a live `IntegrationProvider`.
+- **Company** — client space (distinct from Entra tenant). Optional Halo/Ninja IDs and portal URLs (Open in Halo / Open in Ninja). URLs only; no secrets. Every provider's external id is also recorded in `ExternalIdsJson`, which is how sync converges Halo/Ninja/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint/DefensX/Pax8/Slide onto one company instead of one per connection. One-shot IT Glue / Hudu imports stamp `ExternalIdsJson` keys `itglue` and `hudu` the same way; neither is a live `IntegrationProvider`.
 - **McpServer / IntegrationConnection / IntegrationMapping / SyncRun** — MCP registry (StackJack Compact or Composio) and PSA/RMM sync. Secrets live in Key Vault names only.
 - **User** — mapped to Entra object ID, email, and tenant-wide role.
-- **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields.
-- **Document** — KB articles with full-text search and **versioning**. Optional `FolderId`.
+- **Asset / AssetType / FieldDefinition / CustomFieldValue** — flexible assets with custom fields. Optional Halo asset / Ninja device portal URLs (Open in Halo / Open in Ninja) and `ExternalIdsJson` (same shape as Company). URLs only; no secrets. Sync does not stamp these yet.
+- **Document** — KB articles with **versioning** and Azure AI Search scaffolding (`ISearchService`; title / body / companyId / tenantId). Optional `FolderId`.
 - **DocumentFolder** — nested KB folders (`ParentId`). Optional `CompanyId` (null = central KB; set = company KB). Tenant-scoped.
 - **Runbook / RunbookStep / RunbookRun** — ordered SOPs and checklists with start/complete/cancel run history. A completed run can be promoted into a Document (one-click, not AI). Tenant-wide books are templates; optional `CompanyId` is the per-client instance. Not a second process product. No local secrets.
 - **KeeperLink** — links to credentials in **Keeper**; no secrets are stored locally.
@@ -44,6 +44,7 @@ tests/                      # xUnit + EF InMemory tests
 - **ApiToken** — per-tenant outbound MCP credential. SHA-256 hash stored; plaintext shown once at create. Restrict tenant FK.
 - **FlagDefinition / FlagAssignment** — named color labels on companies, assets, documents, runbooks, and Keeper links. Drive the review queue. No local secrets.
 - **ResourceLink** — directed related-item links between Company, Asset, Document, Runbook, and KeeperLink. Optional label. `GET /api/companies/{id}/graph` returns nodes + edges for that company (`ForTenant`). Not a Hudu visualization. `AssetDocumentLink` remains the asset↔document convenience. No local secrets.
+- **LLM** — tenant-scoped chat completion (`ILlmClient`) and document assist (`POST /api/documents/{id}/assist`). Providers: Ollama (self-hosted default), Together AI, Anthropic. Config / Key Vault only; chat bodies are not persisted. Assist defaults to preview. See [`docs/LLM.md`](docs/LLM.md).
 
 All tenant-scoped queries use `ForTenant(currentUser)`; `SaveChangesAsync` stamps `TenantId` and audit timestamps automatically.
 
@@ -241,17 +242,26 @@ Per-tenant credentials for the outbound MCP server. Not a browser JWT. Hash stor
 | DELETE | `/api/mcp/servers/{id}` | Delete MCP server |
 | GET | `/api/integrations` | List connections (includes sync-policy bools) |
 | GET | `/api/integrations/{id}` | Connection detail (includes sync-policy bools) |
-| POST | `/api/integrations` | Create connection (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8, Composio, CustomMcp) plus sync-policy bools |
+| POST | `/api/integrations` | Create connection (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8, Slide, Composio, CustomMcp) plus sync-policy bools |
 | PUT | `/api/integrations/{id}` | Update connection and sync-policy bools |
 | DELETE | `/api/integrations/{id}` | Delete connection |
 | POST | `/api/integrations/{id}/test` | Test MCP/config |
-| POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, or Pax8 live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` / `action1_list_organizations` / `at_list_companies` / `compassone_list_tenants` / `dfx_list_customers` / `pax8_list_companies`), or payload upsert. NinjaOne additionally pulls `ninja_list_devices` into Computer Assets unless `SkipAssets`. Other-tenant → 404 |
+| POST | `/api/integrations/{id}/sync` | Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8, or Slide live pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` / `action1_list_organizations` / `at_list_companies` / `compassone_list_tenants` / `dfx_list_customers` / `pax8_list_companies` / `slide_list_clients`), or payload upsert. NinjaOne additionally pulls `ninja_list_devices` into Computer Assets unless `SkipAssets`. Other-tenant → 404. IT Glue and Hudu are **not** live providers — use `POST /api/migrations/itglue` and `POST /api/migrations/hudu`. |
 | GET | `/api/integrations/{id}/runs` | Recent sync runs |
 | GET | `/api/integrations/{id}/mappings` | External→local mappings |
 
 The MCP client speaks Streamable HTTP: it runs the `initialize` handshake, echoes `Mcp-Session-Id` and `MCP-Protocol-Version`, sends `Accept: application/json, text/event-stream`, and unwraps `text/event-stream` replies. A configured `AuthSecretName` that cannot be resolved throws rather than sending an unauthenticated request.
 
-**Admin only.** `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, and `/api/tokens` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
+### LLM
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/llm/config` | Current provider + model (no secrets). Authenticated. |
+| POST | `/api/llm/chat` | Stateless chat `{ messages, model? }` → `{ content, model, provider }`. Audit-logs that a chat happened; does not store the prompt. Authenticated. |
+
+See [`docs/LLM.md`](docs/LLM.md) for `LLM__Provider`, `LLM__Ollama__BaseUrl`, `TogetherApiKey`, and `AnthropicApiKey`.
+
+**Admin only.** `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, `/api/migrations/hudu`, and `/api/tokens` require the `RequireAdmin` policy: an Entra `Admin`/`Owner` app role, or a `User` row with `Role >= Admin`. `POST /api/tenant/onboard` grants the onboarding caller `Owner`; every later sign-in provisions `Reader`. Tenants created before that grant recover through `POST /api/tenant/claim-owner` (not admin-gated: the tenant has no Admin to satisfy the policy).
 
 ### Outbound MCP (`/mcp`)
 
@@ -264,11 +274,11 @@ DocuEngAIne also *publishes* a read-only Streamable HTTP MCP server so other har
 
 Auth is `Authorization: Bearer <api-token>` (or `X-Api-Token`). MCP is **not** a browser JWT. The token hashes to an `ApiToken` row and is mapped onto `ICurrentUser` (`TokenCurrentUser` / `CurrentUserScope`) so every query is `ForTenant`. A missing, revoked, or unknown token is 401.
 
-Read-only tools: `list_companies`, `get_company`, `list_assets`, `list_documents`, `list_runbooks`, `list_expirations`, `list_keeper_links` (titles and record URLs only). **Keeper reveal is not a tool.** `POST /api/keeper/{id}/reveal` remains the only reveal path and still audit-logs `KeeperLink.Reveal`.
+Read-only tools: `list_companies`, `get_company`, `list_assets`, `get_asset`, `list_documents`, `list_runbooks`, `list_expirations`, `list_keeper_links` (titles and record URLs only). **Keeper reveal is not a tool.** `POST /api/keeper/{id}/reveal` remains the only reveal path and still audit-logs `KeeperLink.Reveal`.
 
 `Accept: application/json, text/event-stream` returns JSON. An event-stream-only Accept wraps the same JSON-RPC result as one `message` SSE event.
 
-MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8). **Composio** (`https://connect.composio.dev/mcp`) is the 1000+ app Connect MCP. Auth is `McpServer.AuthSecretName` (Key Vault name only).
+MCP kinds: **StackJack Compact** (`https://compact.stackjack.io/mcp` — `/mcp` required) is the only StackJack endpoint (Halo, NinjaOne, CIPP, Meraki, UniFi, Action1, Autotask, Blackpoint, DefensX, Pax8, Slide). **Composio** (`https://connect.composio.dev/mcp`) is the second harness — the 1000+ app Connect MCP, allowlisted to `github`, `cloudflare`, `outlook`, and `notion`. Ads and social toolkits (`googleads`, `facebook`, `instagram`, `linkedin`, `reddit`) are skipped and never invoked. Auth is `McpServer.AuthSecretName` (Key Vault name only).
 
 Sync policy (typed columns, not ConfigJson): `SkipInactive` default true, `SkipContacts` false, `SkipLocations` false, `SkipAssets` false (Ninja skip-devices), `AutoUpdateAssetNames` false, `UpdateCompanyDetails` false (refuse overwrite).
 
@@ -276,11 +286,12 @@ Company matching (`CompanyIdentity` / `CompanyMatchIndex`): before creating a co
 
 ### One-time migrations
 
-IT Glue is **not** a live company-sync system of record. There is no `IntegrationProvider.ITGlue` and no recurring Compact pull. The endpoint exists only to migrate into DocuEngAIne. Passwords are never stored (Keeper remains the vault). Files live under `Integrations/Migration/` and are named `ItGlue*` so a later Hudu importer can sit beside them.
+IT Glue and Hudu are **not** live company-sync systems of record. There is no `IntegrationProvider` for either and no recurring Compact pull. The endpoints exist only to migrate into DocuEngAIne. Passwords are never stored (Keeper remains the vault). Files live under `Integrations/Migration/` and are named `ItGlue*` and `Hudu*` so the two importers sit beside each other.
 
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/migrations/itglue` | Admin one-shot import. Body: `{ mcpServerId }` (Compact `itg_list_organizations`) **or** a JSON:API `payload` / raw `{ data: [{ id, type: organizations, attributes: { name } }] }` fixture. Organizations → `Company` via `CompanyIdentity` (`ExternalIdsJson` key `itglue`). Documents / flexible assets → `Document` / `Asset` with secret traits stripped. Idempotent on IT Glue ids. Other-tenant `mcpServerId` → 404. |
+| POST | `/api/migrations/hudu` | **One-shot admin mapper.** Body: tenant Compact `mcpServerId` plus Compact-shaped `companies` / `articles` JSON (`hudu_list_companies` / `hudu_list_articles` catalog schema, sanitized fixtures). Companies converge on `ExternalIdsJson` key `hudu`. Articles become Documents in a company folder named from Hudu. Password entities are skipped (Keeper is the vault). Other-tenant or non-Compact server → 404. Not an `IntegrationProvider` and not on SyncAsync. Tests never call Compact Hudu tools. |
 
 ### Assets
 
@@ -289,10 +300,10 @@ IT Glue is **not** a live company-sync system of record. There is no `Integratio
 | GET | `/api/assets/types` | List asset types (fields include `isExpiration`) |
 | POST | `/api/assets/types` | Create asset type (fields accept `isExpiration`) |
 | PUT | `/api/assets/fields/{id}` | Update field definition (`isExpiration`, type, name) |
-| GET | `/api/assets` | List assets |
-| GET | `/api/assets/{id}` | Asset detail |
-| POST | `/api/assets` | Create asset (`expiresAt` optional) |
-| PUT | `/api/assets/{id}` | Update asset (`expiresAt` optional). `companyId` null = leave unchanged; detach with `companyIdClear: true` or empty GUID. Other-tenant company → 400. |
+| GET | `/api/assets` | List assets (includes `haloAssetUrl` / `ninjaDeviceUrl` when set) |
+| GET | `/api/assets/{id}` | Asset detail (URLs + `externalIdsJson`) |
+| POST | `/api/assets` | Create asset (`expiresAt`, `haloAssetUrl`, `ninjaDeviceUrl`, `externalIdsJson` optional) |
+| PUT | `/api/assets/{id}` | Update asset (`expiresAt`, portal URLs, `externalIdsJson` optional). `companyId` null = leave unchanged; detach with `companyIdClear: true` or empty GUID. Empty URL clears. Other-tenant company → 400. |
 | DELETE | `/api/assets/{id}` | Delete asset |
 
 ### Expirations
@@ -323,6 +334,12 @@ IT Glue is **not** a live company-sync system of record. There is no `Integratio
 
 Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (other-end type + name). `GET /api/companies/{id}/graph` returns the company-centered ResourceLink graph (`nodes`: id/type/name, `edges`: from/to/label). Other-tenant company is 404. Not Hudu tabs.
 
+### Search
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/search?q=` | Tenant-scoped document search via `ISearchService` (title + body). In-memory stub until Azure AI Search is provisioned; config placeholders are `Azure:Search:IndexName`, `Endpoint`, `ApiKeySecretName` (Key Vault secret name, never the key). Empty `q` → empty. Other-tenant hits never leak. |
+
 ### Documents
 
 | Method | Path | Description |
@@ -335,6 +352,7 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 | GET | `/api/documents/{id}/versions` | List versions |
 | GET | `/api/documents/{id}/versions/{versionId}` | Version detail |
 | POST | `/api/documents/{id}/restore` | Restore a version |
+| POST | `/api/documents/{id}/assist` | Summarize or rewrite via `ILlmClient`. Preview by default; `apply: true` snapshots a `DocumentVersion`. |
 
 ### Folders
 
@@ -373,12 +391,28 @@ Company GET includes `counts.relatedLinks` plus a short `relatedLinks` list (oth
 | DELETE | `/api/keeper/{id}` | Delete Keeper link |
 | POST | `/api/keeper/{id}/reveal` | Audit-log and return Keeper URL |
 
+### Client portal (read-only)
+
+Company-scoped client view. Companies must have `PortalEnabled`. Every query is `ForTenant`. Other-tenant or portal-disabled companies are 404. **No password vault. Keeper reveal is not a portal path.**
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/portal` | Surface card (`readOnly`, `passwordVault: false`, `keeper.reveal: false`) |
+| GET | `/api/portal/companies` | Portal-enabled companies in the caller's tenant |
+| GET | `/api/portal/companies/{id}` | Company overview + counts (docs / expirations / Keeper links) |
+| GET | `/api/portal/companies/{id}/documents` | Published company documents. Unpublished / other-company / other-tenant → absent or 404 |
+| GET | `/api/portal/companies/{id}/documents/{docId}` | One published company document |
+| GET | `/api/portal/companies/{id}/expirations` | Company expirations (`showExpired`, `q`). Same rollup as `/api/expirations` |
+| GET | `/api/portal/companies/{id}/keeper-links` | Keeper **metadata only** (title, `hasRecordUrl`). No URL, UID, username hint, notes, or reveal audit |
+
+SPA stub: `/portal` and `/portal/:companyId`. Enable a company with `portalEnabled` on create/update.
+
 ## Security Notes
 
 - Tenant isolation is enforced at the API/query layer.
-- Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, and `/api/tokens` require Admin/Owner.
+- Tenant-wide roles are enforced on the admin surface: `/api/mcp/servers`, `/api/integrations`, `/api/migrations/itglue`, `/api/migrations/hudu`, and `/api/tokens` require Admin/Owner.
 - `ResourceRoleAssignment` is enforced on asset, document, runbook and Keeper write routes (`POST`/`PUT`/`DELETE`) via `IResourceAuthorizationService`. A Contributor grant on one resource lets a Reader write that resource; without a grant they get 403. Tenant-wide Admin/Owner write without a grant. Creates still require a tenant-wide Contributor-or-above role.
-- **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every HTTP reveal is audit-logged. The outbound MCP surface does not expose reveal.
+- **No passwords or secrets are stored in DocuEngAIne.** Keeper is the vault; we only store a title, optional username hint, and a link to the Keeper record. Every HTTP reveal is audit-logged. The outbound MCP surface and the client portal do not expose reveal. The portal returns Keeper titles only.
 - Outbound MCP tokens are stored as SHA-256 hashes. The plaintext is shown once at create.
 - Production Azure SQL uses **Active Directory Default** (DefaultAzureCredential / App Service managed identity). SQL auth remains the local-dev fallback via connection string / user-secrets. After deploy, run `infra/grant-sql-contained-user.sh` to create the contained database user for the App Service identity.
 - HTTPS only, TLS 1.2+, FTPS disabled, health checks exposed.
@@ -403,21 +437,24 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Company (client space) distinct from Entra tenant
 - [x] MCP server registry + IntegrationConnection (Key Vault secrets)
 - [x] First-class MCP kinds: StackJack Compact (`https://compact.stackjack.io/mcp`) and Composio (`https://connect.composio.dev/mcp`)
-- [x] HaloPSA + NinjaOne + CIPP + Meraki + UniFi + Action1 + Autotask + Blackpoint + DefensX + Pax8 company pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` / `action1_list_organizations` / `at_list_companies` / `compassone_list_tenants` / `dfx_list_customers` / `pax8_list_companies` → `SyncFromPayload`)
-- [x] SPA: Companies + Integrations (Compact vs Composio; Halo/Ninja/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint/DefensX/Pax8 point at Compact)
+- [x] HaloPSA + NinjaOne + CIPP + Meraki + UniFi + Action1 + Autotask + Blackpoint + DefensX + Pax8 + Slide company pull via Compact (`halo_list_clients` / `ninja_list_organizations` / `cipp_list_tenants` / `meraki_get_organizations` / `unifi_sm_list_hosts` / `action1_list_organizations` / `at_list_companies` / `compassone_list_tenants` / `dfx_list_customers` / `pax8_list_companies` / `slide_list_clients` → `SyncFromPayload`)
+- [x] SPA: Companies + Integrations (Compact vs Composio; Halo/Ninja/CIPP/Meraki/UniFi/Action1/Autotask/Blackpoint/DefensX/Pax8/Slide point at Compact)
 - [x] Company overview related lists (assets/docs/runbooks/Keeper)
 - [x] GET MCP server and integration by id; SQL cascade fix
 - [x] Sync-policy toggles on IntegrationConnection (SkipInactive default on; UpdateCompanyDetails default off)
 - [x] Optional `Company.HaloPortalUrl` / `Company.NinjaPortalUrl` (Open in Halo / Open in Ninja)
+- [x] Optional `Asset.HaloAssetUrl` / `Asset.NinjaDeviceUrl` / `Asset.ExternalIdsJson` (Open in Halo / Open in Ninja on Assets)
 - [x] Cross-provider company convergence (`ExternalIdsJson` for every provider; match on provider id → domain → exact name; ambiguous keys refuse to merge)
 - [x] Outbound read-only MCP server (`/mcp`) + per-tenant API tokens (`/api/tokens`, optional `ExpiresInDays`). `list_keeper_links` returns titles and ids only; `reveal_keeper_link` disclosed one URL at a time and writes the same `KeeperLink.Reveal` audit row as the HTTP reveal endpoint.
 
-> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`), `20260828044000_Phase2ParentCompany` (`Companies.ParentCompanyId`, `CompanyType`, `Nickname`, `Fax`, `Country`, `PostalCode`), `20260828045000_Phase2DocumentFolders` (`DocumentFolders`; `Documents.FolderId` Restrict; Parent Restrict; Company Restrict), `20260828050000_Phase2McpServerKind` (`McpServers.Kind`: StackJackCompact=0, Composio=1), `20260828060000_Phase2StackJackPlan` (`IntegrationConnections.StackJackPlan`, `MonthlyCallLimit`, `PlanDetectedAt`, `SyncIntervalMinutesOverride`), empty `20260830181353_Phase2IntegrationsReconcile` (snapshot catch-up), `20260830190000_Phase2ApiTokens` (`ApiTokens`; unique `TokenHash`; Tenant FK Restrict), and `20260831093000_SyncBackoffTokenExpiryAuditActor` (`IntegrationConnections.LastAttemptAt` — failed syncs back off for their full interval; `ApiTokens.ExpiresAt`; `AuditLogs.ActorObjectId`).
+> Hand-written migrations `20260827214500_Phase2Integrations`, `20260827220000_Phase2IntegrationsCascadeFix` (Tenant FKs on Mapping/SyncRun are Restrict), `20260827223000_Phase2SyncPolicy`, `20260828010000_Phase2Expirations` (`FieldDefinition.IsExpiration`, `Asset.ExpiresAt`), `20260828020000_Phase2Flags` (`FlagDefinitions`, `FlagAssignments`; Tenant FK on assignments is Restrict), `20260828030000_Phase2RunbookRuns` (`RunbookRuns`; Tenant and Company FKs are Restrict; Runbook FK Cascades), `20260828040000_Phase2ResourceLinks` (`ResourceLinks`; unique `(TenantId, FromType, FromId, ToType, ToId)`; Tenant FK Cascades), `20260828043000_Phase2PsaDeepLinks` (`Companies.HaloPortalUrl`, `Companies.NinjaPortalUrl`), `20260828044000_Phase2ParentCompany` (`Companies.ParentCompanyId`, `CompanyType`, `Nickname`, `Fax`, `Country`, `PostalCode`), `20260828045000_Phase2DocumentFolders` (`DocumentFolders`; `Documents.FolderId` Restrict; Parent Restrict; Company Restrict), `20260828050000_Phase2McpServerKind` (`McpServers.Kind`: StackJackCompact=0, Composio=1), `20260828060000_Phase2StackJackPlan` (`IntegrationConnections.StackJackPlan`, `MonthlyCallLimit`, `PlanDetectedAt`, `SyncIntervalMinutesOverride`), empty `20260830181353_Phase2IntegrationsReconcile` (snapshot catch-up), `20260830190000_Phase2ApiTokens` (`ApiTokens`; unique `TokenHash`; Tenant FK Restrict), `20260830210000_Phase2AssetDeepLinks` (`Assets.ExternalIdsJson`, `Assets.HaloAssetUrl`, `Assets.NinjaDeviceUrl`), and `20260831093000_SyncBackoffTokenExpiryAuditActor` (`IntegrationConnections.LastAttemptAt` — failed syncs back off for their full interval; `ApiTokens.ExpiresAt`; `AuditLogs.ActorObjectId`).
 
 
 ### Later
 - [x] Company relationship graph (`GET /api/companies/{id}/graph` nodes+edges from ResourceLink; Companies page Relationships section)
-- [ ] Azure AI Search + Azure OpenAI RAG
+- [x] LLM providers (Ollama default, Together, Anthropic) — `ILlmClient`, `/api/llm/chat`, `/api/llm/config`
+- [x] Document assist (`POST /api/documents/{id}/assist` summarize/rewrite via `ILlmClient`; preview by default)
+- [x] Azure AI Search scaffolding (`ISearchService`, in-memory stub, `GET /api/search?q=`; live Azure Search + OpenAI RAG later)
 - [x] UniFi / Blackpoint as MCP connectors (both pull companies via Compact — see Phase 2A above)
 - [x] Expirations rollup (`GET /api/expirations`, `/expirations`)
 - [x] Flags (`GET/POST /api/flags`, assign, `/flags` review queue)
@@ -425,7 +462,7 @@ See the Masri-native plan: [`docs/MASRI-NATIVE-PLAN.md`](docs/MASRI-NATIVE-PLAN.
 - [x] Process completion rollup (`GET /api/runbooks/runs?status=&companyId=`, `/runs`)
 - [x] Related items (`ResourceLink`, `GET/POST/DELETE /api/links`, company `relatedLinks`, `GET /api/companies/{id}/graph`).
 - [x] Document folders (`CRUD /api/folders`, `folderId` on documents, `/documents` folder list). Other-tenant folder attach → 400.
-- [ ] Client portal
+- [x] Client portal skeleton (`GET /api/portal`, `/portal`) — documents, expirations, Keeper metadata; no reveal; `ForTenant`; `PortalEnabled`
 - [x] Switch SQL auth to managed identity (production AD Default; local SQL auth / user-secrets unchanged; contained user via `infra/grant-sql-contained-user.sh`)
 - [x] One-time IT Glue migrate-only import (`POST /api/migrations/itglue`; Compact or JSON:API fixture; passwords never stored)
-- [ ] One-time Hudu export migration (passwords → Keeper only)
+- [x] One-time Hudu mapper (`POST /api/migrations/hudu`, Compact-shaped `hudu_list_companies` / `hudu_list_articles` JSON from catalog schema and sanitized fixtures; passwords skipped — Keeper only; tests never call Compact)
