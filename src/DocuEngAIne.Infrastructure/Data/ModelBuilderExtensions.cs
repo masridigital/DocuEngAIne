@@ -276,6 +276,16 @@ public static class ModelBuilderExtensions
             i.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<IpAllowlistEntry>(e =>
+        {
+            e.Property(x => x.Label).HasMaxLength(100);
+            // Longest normalized form is a full IPv6 address plus "/128".
+            e.Property(x => x.Cidr).HasMaxLength(64);
+            e.Property(x => x.CreatedByObjectId).HasMaxLength(128);
+            e.HasIndex(x => new { x.TenantId, x.Cidr }).IsUnique();
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<ApiToken>(a =>
         {
             a.Property(x => x.Name).HasMaxLength(200);

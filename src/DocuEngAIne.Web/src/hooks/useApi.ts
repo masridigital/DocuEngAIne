@@ -5,27 +5,47 @@ import { acquireApiToken } from '../auth/msalConfig'
 export class ApiError extends Error {
   readonly status: number
   readonly body: string
+  /** The parsed JSON body, when there was one, for callers that branch on a structured error. */
+  readonly data: unknown
 
-  constructor(status: number, statusText: string, body: string) {
+  constructor(status: number, statusText: string, body: string, data?: unknown) {
     super(body ? `Request failed (${status}): ${body}` : `Request failed (${status}${statusText ? ` ${statusText}` : ''})`)
     this.name = 'ApiError'
     this.status = status
     this.body = body
+    this.data = data
   }
 }
 
-function describeBody(contentType: string | null, text: string) {
+function parseJsonBody(contentType: string | null, text: string): unknown {
+  if (!text || !contentType?.includes('json')) return undefined
+  try {
+    return JSON.parse(text) as unknown
+  } catch {
+    return undefined
+  }
+}
+
+function describeBody(parsed: unknown, text: string) {
   if (!text) return ''
-  if (contentType?.includes('json')) {
-    try {
-      const parsed = JSON.parse(text) as string | { detail?: string; title?: string; message?: string }
-      if (typeof parsed === 'string') return parsed
-      return parsed.detail ?? parsed.title ?? parsed.message ?? text
-    } catch {
-      return text
+  if (typeof parsed === 'string') return parsed
+  if (parsed && typeof parsed === 'object') {
+    const { detail, title, message, error } = parsed as Record<string, unknown>
+    for (const candidate of [detail, title, message, error]) {
+      if (typeof candidate === 'string' && candidate) return candidate
     }
   }
   return text
+}
+
+export const IP_NOT_ALLOWED = 'ip_not_allowed'
+
+/** The address the API saw when the tenant IP allowlist refused a request; null for any other error. */
+export function ipBlockedAddress(error: unknown): string | null {
+  if (!(error instanceof ApiError) || error.status !== 403) return null
+  const data = error.data as { error?: unknown; ip?: unknown } | undefined
+  if (!data || typeof data !== 'object' || data.error !== IP_NOT_ALLOWED) return null
+  return typeof data.ip === 'string' && data.ip ? data.ip : 'unknown'
 }
 
 /**
@@ -44,7 +64,8 @@ async function apiFetch(url: string, init?: RequestInit): Promise<Response> {
     } catch {
       text = ''
     }
-    throw new ApiError(res.status, res.statusText, describeBody(res.headers.get('content-type'), text).trim())
+    const data = parseJsonBody(res.headers.get('content-type'), text)
+    throw new ApiError(res.status, res.statusText, describeBody(data, text).trim(), data)
   }
   return res
 }
@@ -965,4 +986,47 @@ export async function exportAccessReviewCsv(id: string) {
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+export type IpAllowlistEntry = {
+  id: string
+  cidr: string
+  label?: string | null
+  isActive: boolean
+  createdAt: string
+}
+
+export type IpAccessState = {
+  enabled: boolean
+  /** Enforcement is switched off at the host (Security:DisableIpAllowlist) regardless of the toggle. */
+  breakGlass: boolean
+  currentIp?: string | null
+  currentIpCovered: boolean
+  entries: IpAllowlistEntry[]
+}
+
+const IP_ACCESS_KEY = '/api/tenant/ip-access'
+
+export function useIpAccess(enabled = true) {
+  return useSWR<IpAccessState>(enabled ? IP_ACCESS_KEY : null, fetcher)
+}
+
+export async function setIpAllowlistEnabled(enabled: boolean) {
+  await putJson(`${IP_ACCESS_KEY}/policy`, { enabled })
+  await mutate(IP_ACCESS_KEY)
+}
+
+export async function addIpAllowlistEntry(input: { cidr: string; label?: string; isActive?: boolean }) {
+  await postJson<IpAllowlistEntry>(`${IP_ACCESS_KEY}/entries`, input)
+  await mutate(IP_ACCESS_KEY)
+}
+
+export async function updateIpAllowlistEntry(id: string, input: { cidr?: string; label?: string; isActive?: boolean }) {
+  await putJson(`${IP_ACCESS_KEY}/entries/${id}`, input)
+  await mutate(IP_ACCESS_KEY)
+}
+
+export async function deleteIpAllowlistEntry(id: string) {
+  await apiFetch(`${IP_ACCESS_KEY}/entries/${id}`, { method: 'DELETE' })
+  await mutate(IP_ACCESS_KEY)
 }
