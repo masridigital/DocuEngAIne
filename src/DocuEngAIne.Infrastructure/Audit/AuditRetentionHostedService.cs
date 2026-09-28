@@ -40,6 +40,9 @@ public sealed class AuditRetentionHostedService : BackgroundService
                 var removed = await retention.PurgeAsync(cancellationToken: stoppingToken);
                 if (removed > 0)
                     _logger.LogInformation("Audit retention purged {Count} event(s) older than {Days} days.", removed, retention.RetentionDays);
+                var security = await retention.PurgeSecurityEventsAsync(cancellationToken: stoppingToken);
+                if (security > 0)
+                    _logger.LogInformation("Audit retention purged {Count} security event(s) older than {Days} days.", security, retention.RetentionDays);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

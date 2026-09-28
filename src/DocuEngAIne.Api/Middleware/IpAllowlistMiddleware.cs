@@ -1,3 +1,4 @@
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Security;
 
@@ -22,6 +23,7 @@ public sealed class IpAllowlistMiddleware
         HttpContext context,
         ICurrentUser user,
         IpAllowlistService allowlist,
+        SecurityEventRecorder events,
         ILogger<IpAllowlistMiddleware> logger)
     {
         if (context.Request.Path.StartsWithSegments("/api")
@@ -30,6 +32,15 @@ public sealed class IpAllowlistMiddleware
         {
             var ip = IpAllowlist.Normalize(context.Connection.RemoteIpAddress)?.ToString();
             logger.LogWarning("IP allowlist blocked {Ip} for tenant {TenantId} on {Path}.", ip ?? "(unknown)", tenantId, context.Request.Path);
+            await events.RecordAsync(
+                tenantId,
+                SecurityEventTypes.IpBlocked,
+                $"{user.DisplayName ?? user.Email ?? "A signed-in user"} refused from {ip ?? "an unknown address"}: not on the IP allowlist.",
+                ip,
+                user.ObjectId,
+                user.DisplayName ?? user.Email,
+                context.Request.Path,
+                cancellationToken: context.RequestAborted);
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsJsonAsync(new { error = BlockedError, ip }, context.RequestAborted);
             return;

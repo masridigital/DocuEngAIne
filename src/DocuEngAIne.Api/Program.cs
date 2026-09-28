@@ -91,6 +91,7 @@ app.MapUserEndpoints();
 app.MapResourceAccessEndpoints();
 app.MapApiTokenEndpoints();
 app.MapAuditEndpoints();
+app.MapSecurityEventEndpoints();
 app.MapArchiveEndpoints();
 app.MapAccessReviewEndpoints();
 app.MapIpAccessEndpoints();

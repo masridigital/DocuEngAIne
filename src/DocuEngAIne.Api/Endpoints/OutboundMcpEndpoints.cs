@@ -63,22 +63,47 @@ public static class OutboundMcpEndpoints
         IAuditService audit,
         IpAllowlistService allowlist,
         CancellationToken cancellationToken,
-        TenantFeatureService? features = null)
+        TenantFeatureService? features = null,
+        SecurityEventRecorder? events = null)
     {
         var presented = ApiTokenAuthenticator.ReadPresentedToken(
             http.Request.Headers.Authorization,
             http.Request.Headers["X-Api-Token"]);
 
-        var user = await ApiTokenAuthenticator.AuthenticateAsync(presented, db, cancellationToken);
-        if (user is null)
+        var resolved = await ApiTokenAuthenticator.ResolveAsync(presented, db, cancellationToken);
+        var ip = IpAllowlist.Normalize(http.Connection.RemoteIpAddress)?.ToString();
+        if (resolved.User is not { } user)
+        {
+            // A token the tenant knows, refused: the tenant should hear of it. An unknown token has no tenant.
+            if (events is not null && resolved.Rejected is { } rejected)
+            {
+                var (eventType, description) = rejected.Reason switch
+                {
+                    ApiTokenAuthenticator.RejectionReason.Revoked => (SecurityEventTypes.TokenRevoked, $"The revoked API token '{rejected.TokenName}' was used."),
+                    ApiTokenAuthenticator.RejectionReason.Expired => (SecurityEventTypes.TokenExpired, $"The expired API token '{rejected.TokenName}' was used."),
+                    _ => (SecurityEventTypes.TenantClosedAccess, $"The API token '{rejected.TokenName}' was used while the tenant is closed."),
+                };
+                await events.RecordAsync(
+                    rejected.TenantId, eventType, description, ip, $"apitoken:{rejected.TokenId:D}", rejected.TokenName, http.Request.Path,
+                    cancellationToken: cancellationToken);
+            }
+
             return Results.Unauthorized();
+        }
 
         // The allowlist middleware only sees /api; this endpoint authenticates here, so it checks here.
         if (user.TenantId is Guid tenantId
             && !await allowlist.IsAllowedAsync(tenantId, http.Connection.RemoteIpAddress, cancellationToken))
         {
+            if (events is not null)
+            {
+                await events.RecordAsync(
+                    tenantId, SecurityEventTypes.IpBlocked, $"API token '{user.DisplayName}' refused from {ip ?? "an unknown address"}: not on the IP allowlist.",
+                    ip, user.ObjectId, user.DisplayName, http.Request.Path, cancellationToken: cancellationToken);
+            }
+
             return Results.Json(
-                new { error = IpAllowlistMiddleware.BlockedError, ip = IpAllowlist.Normalize(http.Connection.RemoteIpAddress)?.ToString() },
+                new { error = IpAllowlistMiddleware.BlockedError, ip },
                 statusCode: StatusCodes.Status403Forbidden);
         }
 

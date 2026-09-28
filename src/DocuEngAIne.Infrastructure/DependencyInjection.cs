@@ -43,6 +43,7 @@ public static class DependencyInjection
         services.AddHostedService<AuditRetentionHostedService>();
         services.AddMemoryCache();
         services.AddScoped<IpAllowlistService>();
+        services.AddScoped<SecurityEventRecorder>();
         services.AddScoped<TenantFeatureService>();
         services.AddScoped<TenantStatusService>();
 

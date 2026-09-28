@@ -60,6 +60,7 @@ export function Layout() {
           <NavLink to="/integrations">Integrations</NavLink>
           {showUsers ? <NavLink to="/users">Users</NavLink> : null}
           {showUsers ? <NavLink to="/audit">Audit</NavLink> : null}
+          {showUsers ? <NavLink to="/security-events">Security events</NavLink> : null}
           {showUsers && featureEnabled(configuration, 'access_reviews') ? <NavLink to="/access-reviews">Access reviews</NavLink> : null}
           {showUsers ? <NavLink to="/security-groups">Security groups</NavLink> : null}
           {showUsers ? <NavLink to="/ip-access">IP access</NavLink> : null}

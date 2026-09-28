@@ -1562,6 +1562,70 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.ToTable("RunbookSteps");
                 });
 
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.SecurityEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ActorName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ActorObjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<int>("Count")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTimeOffset>("FirstSeenAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("IpAddress")
+                        .HasMaxLength(45)
+                        .HasColumnType("nvarchar(45)");
+
+                    b.Property<DateTimeOffset>("LastSeenAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Path")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("nvarchar(16)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "LastSeenAt");
+
+                    b.HasIndex("TenantId", "EventType", "IpAddress", "ActorObjectId");
+
+                    b.ToTable("SecurityEvents");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.SecurityGroup", b =>
                 {
                     b.Property<Guid>("Id")
@@ -2352,6 +2416,17 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Runbook");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.SecurityEvent", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.SecurityGroup", b =>

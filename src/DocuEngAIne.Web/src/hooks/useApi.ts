@@ -1138,6 +1138,41 @@ export type AuditEventPage = {
   items: AuditEvent[]
 }
 
+export type SecurityEventSeverity = 'info' | 'warning' | 'critical'
+
+export type SecurityEvent = {
+  id: string
+  eventType: string
+  name: string
+  severity: SecurityEventSeverity
+  description: string
+  ipAddress?: string | null
+  actorObjectId?: string | null
+  actorName?: string | null
+  path?: string | null
+  count: number
+  firstSeenAt: string
+  lastSeenAt: string
+}
+
+export type SecurityEventType = { type: string; name: string; severity: SecurityEventSeverity }
+
+export type SecurityEventPage = { total: number; page: number; pageSize: number; items: SecurityEvent[] }
+
+/** Admin-gated. `enabled=false` skips the request. */
+export function useSecurityEvents(filters: { type?: string; severity?: string; page?: number }, enabled = true) {
+  const params = new URLSearchParams()
+  if (filters.type) params.set('type', filters.type)
+  if (filters.severity) params.set('severity', filters.severity)
+  if (filters.page && filters.page > 1) params.set('page', String(filters.page))
+  const qs = params.toString()
+  return useSWR<SecurityEventPage>(enabled ? `/api/security-events${qs ? `?${qs}` : ''}` : null, fetcher)
+}
+
+export function useSecurityEventTypes(enabled = true) {
+  return useSWR<SecurityEventType[]>(enabled ? '/api/security-events/types' : null, fetcher)
+}
+
 export type AuditFilters = {
   action?: string
   category?: string

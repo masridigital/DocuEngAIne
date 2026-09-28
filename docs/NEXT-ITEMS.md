@@ -94,9 +94,19 @@ Shipped:
   no calendar for a week to start. Fixed on the way: the audit "to" date excluded that day, and an
   access review's due date showed as the previous evening west of UTC.
 
-Next: the rest of Docuengine's inventory — its security-event log, resource-level restrictions
-for security groups, custom tenant roles, and the company / global workspace views — each to be
-weighed before porting.
+- **Security events** — a tenant's log of refusals that say someone is trying to get in: an IP
+  allowlist block (API and outbound MCP), a request to a suspended or archived tenant, a
+  deactivated user, and a revoked or expired API token. Each lands in the tenant it concerns, with
+  address, caller and route; repeats within ten minutes are one row with a count, so a script
+  cannot flood it, and recording never fails the refusal. Admin page with type and severity
+  filters; purged with the audit log. Docuengine's failed-login, MFA and password events are not
+  ported (Entra owns sign-in), nor its free-form event types: only registered kinds are recorded.
+
+The Docuengine inventory is done. Weighed and not ported: resource-level restrictions for security
+groups (company grants already confine a member, at View / Edit / Admin), custom tenant roles
+(roles come from Entra app roles with fixed ranks; a second role system in the database would
+split who decides access), and the company / global workspace views (the company page and the
+dashboard already are those views).
 
 Open decision from the scoping slice: links, flag assignments and flag definitions are still
 writable by Readers (company access is checked, the tenant role is not). Decide whether flagging is

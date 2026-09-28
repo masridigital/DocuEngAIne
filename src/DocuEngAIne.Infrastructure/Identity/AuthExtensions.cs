@@ -1,9 +1,11 @@
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
+using DocuEngAIne.Infrastructure.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -185,11 +187,13 @@ public sealed class ActiveUserAuthorizationHandler : AuthorizationHandler<Active
 {
     private readonly DocuEngAIneDbContext _db;
     private readonly ICurrentUser _currentUser;
+    private readonly SecurityEventRecorder? _events;
 
-    public ActiveUserAuthorizationHandler(DocuEngAIneDbContext db, ICurrentUser currentUser)
+    public ActiveUserAuthorizationHandler(DocuEngAIneDbContext db, ICurrentUser currentUser, SecurityEventRecorder? events = null)
     {
         _db = db;
         _currentUser = currentUser;
+        _events = events;
     }
 
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, ActiveUserRequirement requirement)
@@ -209,7 +213,24 @@ public sealed class ActiveUserAuthorizationHandler : AuthorizationHandler<Active
             .AnyAsync(u => u.TenantId == tenantId && u.EntraObjectId == objectId && !u.IsActive);
 
         if (!deactivated)
+        {
             context.Succeed(requirement);
+            return;
+        }
+
+        if (_events is not null)
+        {
+            var http = context.Resource as HttpContext;
+            await _events.RecordAsync(
+                tenantId,
+                SecurityEventTypes.DeactivatedUserAccess,
+                $"{_currentUser.DisplayName ?? _currentUser.Email ?? "A deactivated user"} was refused: their account is deactivated.",
+                IpAllowlist.Normalize(http?.Connection.RemoteIpAddress)?.ToString(),
+                objectId,
+                _currentUser.DisplayName ?? _currentUser.Email,
+                http?.Request.Path,
+                cancellationToken: http?.RequestAborted ?? default);
+        }
     }
 }
 

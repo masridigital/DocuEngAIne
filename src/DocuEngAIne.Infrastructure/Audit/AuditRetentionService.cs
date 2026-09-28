@@ -60,4 +60,37 @@ public sealed class AuditRetentionService
 
         return removed;
     }
+
+    /// <summary>
+    /// Deletes security events last seen before the same retention window. Returns rows removed; 0
+    /// with retention disabled.
+    /// </summary>
+    public async Task<int> PurgeSecurityEventsAsync(DateTimeOffset? utcNow = null, CancellationToken cancellationToken = default)
+    {
+        var days = RetentionDays;
+        if (days <= 0)
+            return 0;
+
+        var cutoff = (utcNow ?? DateTimeOffset.UtcNow).AddDays(-days);
+        var chunk = ChunkSize;
+        var removed = 0;
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            var batch = await _db.SecurityEvents
+                .Where(e => e.LastSeenAt < cutoff)
+                .OrderBy(e => e.LastSeenAt)
+                .Take(chunk)
+                .ToListAsync(cancellationToken);
+            if (batch.Count == 0)
+                break;
+
+            _db.SecurityEvents.RemoveRange(batch);
+            await _db.SaveChangesAsync(cancellationToken);
+            removed += batch.Count;
+            if (batch.Count < chunk)
+                break;
+        }
+
+        return removed;
+    }
 }
