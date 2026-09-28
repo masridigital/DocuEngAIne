@@ -207,6 +207,7 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<AuditLog>(a =>
         {
+            a.Property(x => x.ActorObjectId).HasMaxLength(128);
             a.HasIndex(x => x.TenantId);
             a.HasIndex(x => x.Action);
             a.HasIndex(x => x.CreatedAt);

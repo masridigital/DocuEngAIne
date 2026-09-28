@@ -17,13 +17,15 @@ public static class ExpirationEndpoints
 
         group.MapGet("", async (
             [FromQuery] Guid? companyId,
-            [FromQuery] bool showExpired,
+            // Nullable: a non-nullable value-type query param without a default is REQUIRED in
+            // minimal APIs, and the SPA omits it when false — those calls were 400s.
+            [FromQuery] bool? showExpired,
             [FromQuery] string? q,
             DocuEngAIneDbContext db,
             ICurrentUser user,
             CancellationToken cancellationToken) =>
         {
-            var items = await QueryAsync(db, user, companyId, showExpired, q, cancellationToken);
+            var items = await QueryAsync(db, user, companyId, showExpired ?? false, q, cancellationToken);
             return Results.Ok(items);
         });
 

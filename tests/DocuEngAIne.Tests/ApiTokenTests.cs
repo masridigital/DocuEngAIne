@@ -216,6 +216,109 @@ public class ApiTokenTests
     }
 
     [Fact]
+    public async Task Create_With_Expiry_Sets_ExpiresAt_And_Expired_Token_Fails_Authentication()
+    {
+        var tenantId = Guid.NewGuid();
+        var (db, user, audit) = Open(tenantId);
+        await using (db)
+        {
+            await SeedTenantAsync(db, tenantId, "acme");
+
+            var invalid = await ApiTokenEndpoints.CreateAsync(new CreateApiTokenRequest("bad", ExpiresInDays: 0), db, user, audit);
+            Assert.Equal(StatusCodes.Status400BadRequest, StatusOf(invalid));
+
+            var created = await ApiTokenEndpoints.CreateAsync(new CreateApiTokenRequest("expiring", ExpiresInDays: 30), db, user, audit);
+            var body = ValueOf<CreatedApiTokenResponse>(created);
+            Assert.NotNull(body.ExpiresAt);
+            Assert.Equal(DateTimeOffset.UtcNow.AddDays(30), body.ExpiresAt.Value, TimeSpan.FromMinutes(5));
+
+            var listed = await ApiTokenEndpoints.ListAsync(db, user);
+            Assert.Equal(body.ExpiresAt, Assert.Single(listed).ExpiresAt);
+
+            // Live until the expiry passes, dead after it.
+            Assert.NotNull(await ApiTokenAuthenticator.AuthenticateAsync(body.Token, db));
+
+            var stored = await db.ApiTokens.SingleAsync(t => t.Id == body.Id);
+            stored.ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(-1);
+            await db.SaveChangesAsync();
+
+            Assert.Null(await ApiTokenAuthenticator.AuthenticateAsync(body.Token, db));
+        }
+    }
+
+    [Fact]
+    public async Task Authenticate_Throttles_LastUsedAt_Writes()
+    {
+        var tenantId = Guid.NewGuid();
+        var (db, user, audit) = Open(tenantId);
+        await using (db)
+        {
+            await SeedTenantAsync(db, tenantId, "acme");
+            var created = await ApiTokenEndpoints.CreateAsync(new CreateApiTokenRequest("busy"), db, user, audit);
+            var body = ValueOf<CreatedApiTokenResponse>(created);
+
+            Assert.NotNull(await ApiTokenAuthenticator.AuthenticateAsync(body.Token, db));
+            var firstSeen = (await db.ApiTokens.AsNoTracking().SingleAsync(t => t.Id == body.Id)).LastUsedAt;
+            Assert.NotNull(firstSeen);
+
+            // A fresh LastUsedAt is not rewritten on every call — MCP clients authenticate many
+            // times a minute and last-used is an audit hint, not a metric.
+            Assert.NotNull(await ApiTokenAuthenticator.AuthenticateAsync(body.Token, db));
+            Assert.Equal(firstSeen, (await db.ApiTokens.AsNoTracking().SingleAsync(t => t.Id == body.Id)).LastUsedAt);
+
+            var stored = await db.ApiTokens.SingleAsync(t => t.Id == body.Id);
+            stored.LastUsedAt = DateTimeOffset.UtcNow - ApiTokenAuthenticator.LastUsedWriteInterval - TimeSpan.FromMinutes(1);
+            await db.SaveChangesAsync();
+            db.ChangeTracker.Clear();
+
+            Assert.NotNull(await ApiTokenAuthenticator.AuthenticateAsync(body.Token, db));
+            var refreshed = (await db.ApiTokens.AsNoTracking().SingleAsync(t => t.Id == body.Id)).LastUsedAt;
+            Assert.True(refreshed > firstSeen);
+        }
+    }
+
+    [Fact]
+    public async Task AuditService_Persists_Token_And_System_Actor_Identity()
+    {
+        var tenantId = Guid.NewGuid();
+        var dbName = Guid.NewGuid().ToString();
+        var (db, _, _) = Open(tenantId, dbName);
+        await using (db)
+        {
+            await SeedTenantAsync(db, tenantId, "acme");
+
+            // Token and scheduler identities have no Users row, so UserId stays null — before
+            // ActorObjectId, their audit rows were completely anonymous.
+            var tokenUser = new TokenCurrentUser(tenantId, Guid.NewGuid(), "mcp");
+            var tokenDb = new DocuEngAIneDbContext(
+                new DbContextOptionsBuilder<DocuEngAIneDbContext>().UseInMemoryDatabase(dbName).Options,
+                tokenUser);
+            await using (tokenDb)
+            {
+                var audit = new AuditService(tokenDb, tokenUser, new HttpContextAccessor());
+                await audit.LogAsync("KeeperLink.Reveal", nameof(KeeperLink), Guid.NewGuid());
+            }
+
+            var background = BackgroundCurrentUser.ForTenant(tenantId);
+            var backgroundDb = new DocuEngAIneDbContext(
+                new DbContextOptionsBuilder<DocuEngAIneDbContext>().UseInMemoryDatabase(dbName).Options,
+                background);
+            await using (backgroundDb)
+            {
+                var audit = new AuditService(backgroundDb, background, new HttpContextAccessor());
+                await audit.LogAsync("Integration.Sync", nameof(IntegrationConnection), Guid.NewGuid());
+            }
+
+            var rows = await db.AuditLogs.AsNoTracking().OrderBy(a => a.Action).ToListAsync();
+            Assert.Equal(2, rows.Count);
+            Assert.Equal(BackgroundCurrentUser.SystemObjectId, rows[0].ActorObjectId);
+            Assert.StartsWith("apitoken:", rows[1].ActorObjectId);
+            Assert.All(rows, r => Assert.Null(r.UserId));
+            Assert.All(rows, r => Assert.Equal(tenantId, r.TenantId));
+        }
+    }
+
+    [Fact]
     public void CurrentUser_Ambient_Scope_Supplies_Tenant_Without_Http_Jwt()
     {
         var tokenUser = new TokenCurrentUser(Guid.NewGuid(), Guid.NewGuid(), "scope-test");

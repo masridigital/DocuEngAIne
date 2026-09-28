@@ -8,7 +8,7 @@ Tenant-scoped chat completion and document assist. Chat bodies are **not** store
 |---|---|---|---|
 | **Ollama** (default) | `llama3.1` | `{Llm:Ollama:BaseUrl}/v1/chat/completions` | None (self-hosted) |
 | **Together** | `meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo` | `https://api.together.xyz/v1/chat/completions` | `Authorization: Bearer` |
-| **Anthropic** | `claude-sonnet-4-20250514` | `https://api.anthropic.com/v1/messages` | `x-api-key` + `anthropic-version: 2023-06-01` |
+| **Anthropic** | `claude-opus-5` | `https://api.anthropic.com/v1/messages` | `x-api-key` + `anthropic-version: 2023-06-01` |
 
 Ollama and Together speak the OpenAI chat-completions JSON shape. Anthropic uses the Messages API: `system` is a top-level field; `user` / `assistant` turns go in `messages`.
 

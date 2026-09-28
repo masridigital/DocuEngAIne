@@ -23,6 +23,13 @@ public class ApiToken : EntityBase, ITenantScoped
     public DateTimeOffset? LastUsedAt { get; set; }
     public DateTimeOffset? RevokedAt { get; set; }
 
+    /// <summary>
+    /// Hard expiry, checked at authentication. Null means the token does not expire — allowed,
+    /// because a token dying silently mid-integration is its own outage, but the admin list shows
+    /// the expiry so a non-expiring token is a visible choice rather than the invisible default.
+    /// </summary>
+    public DateTimeOffset? ExpiresAt { get; set; }
+
     /// <summary>Optional Entra object id of the admin who minted the token. No FK — avoids a second cascade path off Users.</summary>
     public string? CreatedByObjectId { get; set; }
 }

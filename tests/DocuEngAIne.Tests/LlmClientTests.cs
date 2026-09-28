@@ -172,7 +172,7 @@ public class LlmClientTests
     }
 
     [Fact]
-    public void Factory_Registers_Together_Without_Key_And_Chat_Throws()
+    public async Task Factory_Registers_Together_Without_Key_And_Chat_Throws()
     {
         var services = new ServiceCollection();
         var configuration = Config(("Llm:Provider", "Together"));
@@ -185,13 +185,13 @@ public class LlmClientTests
         var client = scope.ServiceProvider.GetRequiredService<ILlmClient>();
         Assert.IsType<TogetherLlmClient>(client);
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => client.ChatAsync([new LlmMessage("user", "hi")]).GetAwaiter().GetResult());
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => client.ChatAsync([new LlmMessage("user", "hi")]));
         Assert.Contains("TogetherApiKey", ex.Message);
     }
 
     [Fact]
-    public void Factory_Registers_Anthropic_Without_Key_And_Chat_Throws()
+    public async Task Factory_Registers_Anthropic_Without_Key_And_Chat_Throws()
     {
         var services = new ServiceCollection();
         var configuration = Config(("Llm:Provider", "Anthropic"));
@@ -204,8 +204,8 @@ public class LlmClientTests
         var client = scope.ServiceProvider.GetRequiredService<ILlmClient>();
         Assert.IsType<AnthropicLlmClient>(client);
 
-        var ex = Assert.Throws<InvalidOperationException>(
-            () => client.ChatAsync([new LlmMessage("user", "hi")]).GetAwaiter().GetResult());
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(
+            () => client.ChatAsync([new LlmMessage("user", "hi")]));
         Assert.Contains("AnthropicApiKey", ex.Message);
     }
 

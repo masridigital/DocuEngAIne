@@ -15,6 +15,7 @@ namespace DocuEngAIne.Api.Endpoints;
 public static class ApiTokenEndpoints
 {
     public const string NameRequiredMessage = "Name is required.";
+    public const string ExpiryInPastMessage = "ExpiresInDays must be at least 1.";
 
     public static IEndpointRouteBuilder MapApiTokenEndpoints(this IEndpointRouteBuilder app)
     {
@@ -75,6 +76,9 @@ public static class ApiTokenEndpoints
         if (string.IsNullOrWhiteSpace(name))
             return Results.BadRequest(NameRequiredMessage);
 
+        if (request?.ExpiresInDays is int days && days < 1)
+            return Results.BadRequest(ExpiryInPastMessage);
+
         var plaintext = ApiTokenHasher.GeneratePlaintext();
         var token = new ApiToken
         {
@@ -83,6 +87,7 @@ public static class ApiTokenEndpoints
             TokenHash = ApiTokenHasher.Hash(plaintext),
             TokenPrefix = ApiTokenHasher.PublicPrefix(plaintext),
             CreatedByObjectId = user.ObjectId,
+            ExpiresAt = request?.ExpiresInDays is int d ? DateTimeOffset.UtcNow.AddDays(d) : null,
         };
 
         db.ApiTokens.Add(token);
@@ -100,7 +105,8 @@ public static class ApiTokenEndpoints
             token.Name,
             token.TokenPrefix,
             plaintext,
-            token.CreatedAt));
+            token.CreatedAt,
+            token.ExpiresAt));
     }
 
     public static async Task<IResult> RevokeAsync(
@@ -134,17 +140,19 @@ public static class ApiTokenEndpoints
     }
 
     private static ApiTokenListItem MapList(ApiToken t) =>
-        new(t.Id, t.Name, t.TokenPrefix, t.CreatedAt, t.LastUsedAt, t.RevokedAt);
+        new(t.Id, t.Name, t.TokenPrefix, t.CreatedAt, t.LastUsedAt, t.RevokedAt, t.ExpiresAt);
 }
 
-public record CreateApiTokenRequest(string? Name = null);
+/// <summary>Null <paramref name="ExpiresInDays"/> mints a non-expiring token — visible as such in the list.</summary>
+public record CreateApiTokenRequest(string? Name = null, int? ExpiresInDays = null);
 
 public sealed record CreatedApiTokenResponse(
     Guid Id,
     string Name,
     string Prefix,
     string Token,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? ExpiresAt = null);
 
 public sealed record ApiTokenListItem(
     Guid Id,
@@ -152,4 +160,5 @@ public sealed record ApiTokenListItem(
     string Prefix,
     DateTimeOffset CreatedAt,
     DateTimeOffset? LastUsedAt,
-    DateTimeOffset? RevokedAt);
+    DateTimeOffset? RevokedAt,
+    DateTimeOffset? ExpiresAt = null);

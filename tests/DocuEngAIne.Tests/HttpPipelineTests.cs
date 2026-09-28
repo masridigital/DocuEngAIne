@@ -218,7 +218,7 @@ public class HttpPipelineTests : IClassFixture<TestHost>
         Assert.Contains("list_assets", body);
         Assert.Contains("get_asset", body);
         Assert.Contains("list_expirations", body);
-        Assert.DoesNotContain("\"reveal\"", body, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("reveal_keeper_link", body);
     }
 
     [Fact]

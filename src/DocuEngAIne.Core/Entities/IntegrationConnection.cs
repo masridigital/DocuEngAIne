@@ -18,6 +18,15 @@ public class IntegrationConnection : EntityBase, ITenantScoped
     public Guid? McpServerId { get; set; }
     public McpServer? McpServer { get; set; }
     public DateTimeOffset? LastSyncAt { get; set; }
+
+    /// <summary>
+    /// When a sync run last <em>started</em>, success or failure. Cadence is derived from this as
+    /// well as <see cref="LastSyncAt"/>: a connection whose runs keep failing must wait out its
+    /// interval like everyone else, otherwise the scheduler retries every poll tick and a broken
+    /// Free-tier connector burns its whole monthly allowance in hours.
+    /// </summary>
+    public DateTimeOffset? LastAttemptAt { get; set; }
+
     public string? LastError { get; set; }
     public bool IsEnabled { get; set; } = true;
 

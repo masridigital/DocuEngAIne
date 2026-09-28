@@ -114,7 +114,9 @@ public static class PortalEndpoints
 
     public static async Task<IResult> ListExpirationsAsync(
         Guid companyId,
-        [FromQuery] bool showExpired,
+        // Nullable: a non-nullable value-type query param without a default is REQUIRED in minimal
+        // APIs, and the SPA never sends it — every widget call was a 400.
+        [FromQuery] bool? showExpired,
         [FromQuery] string? q,
         DocuEngAIneDbContext db,
         ICurrentUser user,
@@ -123,7 +125,7 @@ public static class PortalEndpoints
         if (await FindPortalCompanyAsync(db, user, companyId, cancellationToken) is null)
             return Results.NotFound(CompanyNotFoundMessage);
 
-        var items = await ExpirationEndpoints.QueryAsync(db, user, companyId, showExpired, q, cancellationToken);
+        var items = await ExpirationEndpoints.QueryAsync(db, user, companyId, showExpired ?? false, q, cancellationToken);
         return Results.Ok(items);
     }
 

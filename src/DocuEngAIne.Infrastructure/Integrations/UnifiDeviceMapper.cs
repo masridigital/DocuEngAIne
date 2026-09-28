@@ -147,14 +147,19 @@ public static class UnifiDeviceMapper
 
     private static bool TryGetProperty(JsonElement obj, out JsonElement value, params string[] names)
     {
-        foreach (var prop in obj.EnumerateObject())
+        // Guarded like the other mappers: a non-object element in the vendor array (a bare string
+        // or number row) must read as "property absent", not throw and abort the whole pull.
+        if (obj.ValueKind == JsonValueKind.Object)
         {
-            foreach (var name in names)
+            foreach (var prop in obj.EnumerateObject())
             {
-                if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+                foreach (var name in names)
                 {
-                    value = prop.Value;
-                    return true;
+                    if (string.Equals(prop.Name, name, StringComparison.OrdinalIgnoreCase))
+                    {
+                        value = prop.Value;
+                        return true;
+                    }
                 }
             }
         }

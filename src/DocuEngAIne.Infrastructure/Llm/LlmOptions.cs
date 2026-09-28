@@ -23,7 +23,9 @@ public static class LlmDefaults
 {
     public const string OllamaModel = "llama3.1";
     public const string TogetherModel = "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo";
-    public const string AnthropicModel = "claude-sonnet-4-20250514";
+    // Current-generation ids are undated; the dated Sonnet-4 snapshot this shipped with is retired
+    // and every default-config Anthropic chat failed with model-not-found.
+    public const string AnthropicModel = "claude-opus-5";
     public const string OllamaBaseUrl = "http://127.0.0.1:11434";
     public const string TogetherEndpoint = "https://api.together.xyz/v1/chat/completions";
     public const string AnthropicEndpoint = "https://api.anthropic.com/v1/messages";
