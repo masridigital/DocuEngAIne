@@ -32,7 +32,9 @@ public static class AccessReviewEndpoints
 
     public static IEndpointRouteBuilder MapAccessReviewEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/access-reviews").RequireAuthorization(AuthExtensions.AdminPolicy);
+        var group = app.MapGroup("/api/access-reviews")
+            .RequireAuthorization(AuthExtensions.AdminPolicy)
+            .RequireTenantFeature(TenantFeatures.AccessReviews);
 
         group.MapGet("", ListAsync);
         group.MapPost("", CreateAsync);

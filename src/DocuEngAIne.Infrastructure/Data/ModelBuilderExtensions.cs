@@ -19,6 +19,8 @@ public static class ModelBuilderExtensions
         modelBuilder.Entity<Tenant>(t =>
         {
             t.Property(x => x.Id).ValueGeneratedNever();
+            t.Property(x => x.DisplayName).HasMaxLength(80);
+            t.Property(x => x.AccentColor).HasMaxLength(7);
             t.HasIndex(x => x.Slug).IsUnique();
             t.HasIndex(x => x.PrimaryDomain);
             t.HasMany(x => x.Users).WithOne(u => u.Tenant).HasForeignKey(u => u.TenantId).OnDelete(DeleteBehavior.Cascade);
@@ -352,6 +354,14 @@ public static class ModelBuilderExtensions
             c.HasIndex(x => new { x.TenantId, x.CompanyId });
             c.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Cascade);
             c.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<TenantFeatureSetting>(f =>
+        {
+            f.Property(x => x.Key).HasMaxLength(64);
+            f.Property(x => x.UpdatedByObjectId).HasMaxLength(128);
+            f.HasIndex(x => new { x.TenantId, x.Key }).IsUnique();
+            f.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<IpAllowlistEntry>(e =>

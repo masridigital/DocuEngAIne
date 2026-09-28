@@ -1,6 +1,6 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { createCompany, createResourceLink, updateCompany, useCompanies, useCompany, useCompanyGraph, useMyCompanyAccess, type Company, type CompanyGraph, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
+import { createCompany, createResourceLink, updateCompany, useCompanies, useCompany, useCompanyGraph, useMyCompanyAccess, useTerms, type Company, type CompanyGraph, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
 
 function slugify(value: string) {
   return value
@@ -31,6 +31,7 @@ export function CompaniesPage() {
 }
 
 function CompanyList() {
+  const term = useTerms()
   const [query, setQuery] = useState('')
   const { data, error, isLoading, mutate } = useCompanies(query)
   const [name, setName] = useState('')
@@ -93,7 +94,7 @@ function CompanyList() {
 
   return (
     <div className="page">
-      <h1>Companies</h1>
+      <h1>{term('company')}</h1>
       <p>Client spaces distinct from the Entra tenant. Halo and Ninja IDs plus portal URLs link PSA and RMM systems of record — URLs only, no secrets.</p>
       {access?.restricted ? (
         <p className="banner">
@@ -148,7 +149,7 @@ function CompanyList() {
       )}
 
       <form className="panel" onSubmit={onCreate}>
-        <h2>New company</h2>
+        <h2>New {term('company', 'singular')}</h2>
         {formError && <p className="error">{formError}</p>}
         <div className="form-grid">
           <label>
@@ -225,7 +226,7 @@ function CompanyList() {
           </label>
         </div>
         <button className="btn" type="submit" disabled={submitting}>
-          {submitting ? 'Creating…' : 'Create company'}
+          {submitting ? 'Creating…' : `Create ${term('company', 'singular')}`}
         </button>
       </form>
     </div>
@@ -468,6 +469,7 @@ function RelatedLinksSection({
 }
 
 function CompanyDetail({ id }: { id: string }) {
+  const term = useTerms()
   const { data: company, error, isLoading, mutate } = useCompany(id)
   const { mutate: mutateGraph } = useCompanyGraph(id)
   const [haloPortalUrl, setHaloPortalUrl] = useState('')
@@ -505,9 +507,9 @@ function CompanyDetail({ id }: { id: string }) {
   return (
     <div className="page">
       <p>
-        <Link to="/companies">← Companies</Link>
+        <Link to="/companies">← {term('company')}</Link>
       </p>
-      <h1>{company?.name ?? 'Company'}</h1>
+      <h1>{company?.name ?? term('company', 'singular')}</h1>
       {company && (
         <div className="portal-links">
           {isHttpUrl(company.haloPortalUrl) && (

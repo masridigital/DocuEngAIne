@@ -1477,3 +1477,80 @@ export async function removeSecurityGroupCompany(id: string, companyId: string) 
   await apiFetch(`${SECURITY_GROUPS_KEY}/${id}/companies/${companyId}`, { method: 'DELETE' })
   await refreshSecurityGroup(id)
 }
+
+export type TenantFeatureKey = 'client_portal' | 'ai_assistant' | 'mcp_server' | 'access_reviews'
+
+export type TenantFeature = {
+  key: string
+  name: string
+  description: string
+  enabled: boolean
+  enabledByDefault: boolean
+}
+
+export type TenantTermKey = 'company' | 'asset' | 'document' | 'runbook'
+
+export type TenantTerm = {
+  key: string
+  /** What the term names, for the settings page. */
+  describes: string
+  singular: string
+  plural: string
+  defaultSingular: string
+  defaultPlural: string
+}
+
+export type TenantBranding = { displayName?: string | null; accentColor?: string | null }
+
+export type TenantConfiguration = {
+  features: TenantFeature[]
+  terminology: TenantTerm[]
+  branding: TenantBranding
+}
+
+export const TENANT_CONFIGURATION_KEY = '/api/tenant/configuration'
+
+export const DEFAULT_TERMS: Record<TenantTermKey, { singular: string; plural: string }> = {
+  company: { singular: 'Company', plural: 'Companies' },
+  asset: { singular: 'Asset', plural: 'Assets' },
+  document: { singular: 'Document', plural: 'Documents' },
+  runbook: { singular: 'Runbook', plural: 'Runbooks' },
+}
+
+export const DEFAULT_PRODUCT_NAME = 'DocuEngAIne'
+
+export function useTenantConfiguration() {
+  return useSWR<TenantConfiguration>(TENANT_CONFIGURATION_KEY, fetcher)
+}
+
+/** Every feature defaults on, so an unknown state (still loading, or a failed read) counts as on. */
+export function featureEnabled(config: TenantConfiguration | undefined, key: TenantFeatureKey): boolean {
+  const feature = config?.features.find((f) => f.key === key)
+  return feature ? feature.enabled : true
+}
+
+/** What this tenant calls a thing: `term('company')` → "Companies", `term('company', 'singular')` → "Company". */
+export function useTerms() {
+  const { data } = useTenantConfiguration()
+  return (key: TenantTermKey, form: 'singular' | 'plural' = 'plural') => {
+    const term = data?.terminology.find((t) => t.key === key)
+    return term ? term[form] : DEFAULT_TERMS[key][form]
+  }
+}
+
+export async function setTenantFeature(key: string, enabled: boolean) {
+  await putJson(`/api/tenant/features/${key}`, { enabled })
+  await mutate(TENANT_CONFIGURATION_KEY)
+}
+
+/** A null entry restores that term's default. */
+export async function setTenantTerminology(terms: Record<string, { singular: string; plural: string } | null>) {
+  await putJson('/api/tenant/terminology', { terms })
+  await mutate(TENANT_CONFIGURATION_KEY)
+}
+
+/** Replaces both values; null clears one back to the default. */
+export async function setTenantBranding(input: { displayName: string | null; accentColor: string | null }) {
+  await putJson('/api/tenant/branding', input)
+  await mutate(TENANT_CONFIGURATION_KEY)
+}

@@ -21,6 +21,7 @@ import {
   useOptionLists,
   useProfile,
   usesOptions,
+  useTerms,
   type AssetFieldType,
   type AssetLayoutField,
   type AssetLayoutProblem,
@@ -590,6 +591,7 @@ function LayoutDetail(props: { id: string; canEdit: boolean; onClose: () => void
 }
 
 export function AssetLayoutsPage() {
+  const term = useTerms()
   const { data: profile } = useProfile()
   const canEdit = canEditContent(profile?.role)
   const { data, error, isLoading } = useAssetLayouts()
@@ -626,7 +628,7 @@ export function AssetLayoutsPage() {
 
   return (
     <div className="page">
-      <h1>Asset layouts</h1>
+      <h1>{term('asset', 'singular')} layouts</h1>
       <p>
         A layout is the set of fields an asset of one kind carries — typed, grouped into sections, with choices drawn
         from option lists. New layouts start as drafts; publish one to offer it for new assets. While a layout is

@@ -1,10 +1,13 @@
 import { Link, useParams } from 'react-router-dom'
+import { FeatureOff } from '../components/FeatureOff'
 import {
+  featureEnabled,
   usePortalCompanies,
   usePortalCompany,
   usePortalDocuments,
   usePortalExpirations,
   usePortalKeeperLinks,
+  useTenantConfiguration,
   type ExpirationItem,
   type PortalDocument,
   type PortalKeeperLink,
@@ -18,6 +21,16 @@ function formatDate(iso: string) {
 
 export function PortalPage() {
   const { companyId } = useParams()
+  const { data: configuration, isLoading } = useTenantConfiguration()
+  if (isLoading) {
+    return (
+      <div className="page">
+        <h1>Client portal</h1>
+        <p>Loading…</p>
+      </div>
+    )
+  }
+  if (!featureEnabled(configuration, 'client_portal')) return <FeatureOff title="Client portal" name="The client portal" />
   if (companyId) return <PortalCompany companyId={companyId} />
   return <PortalHome />
 }

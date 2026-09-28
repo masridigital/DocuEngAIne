@@ -17,6 +17,7 @@ import { MuseumPage } from './pages/MuseumPage'
 import { OptionListsPage } from './pages/OptionListsPage'
 import { RunbooksPage } from './pages/RunbooksPage'
 import { SecurityGroupsPage } from './pages/SecurityGroupsPage'
+import { SettingsPage } from './pages/SettingsPage'
 import { RunsPage } from './pages/RunsPage'
 import { UsersPage } from './pages/UsersPage'
 import { PortalPage } from './pages/PortalPage'
@@ -44,6 +45,7 @@ function App() {
           <Route path="access-reviews" element={<AccessReviewsPage />} />
           <Route path="ip-access" element={<IpAccessPage />} />
           <Route path="security-groups" element={<SecurityGroupsPage />} />
+          <Route path="settings" element={<SettingsPage />} />
           <Route path="museum" element={<MuseumPage />} />
           <Route path="portal" element={<PortalPage />} />
           <Route path="portal/:companyId" element={<PortalPage />} />

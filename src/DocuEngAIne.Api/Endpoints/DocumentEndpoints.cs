@@ -59,7 +59,7 @@ public static class DocumentEndpoints
         group.MapGet("/{id:guid}/versions/{versionId:guid}", GetVersionAsync);
 
         group.MapPost("/{id:guid}/restore", RestoreAsync);
-        group.MapPost("/{id:guid}/assist", AssistAsync);
+        group.MapPost("/{id:guid}/assist", AssistAsync).RequireTenantFeature(TenantFeatures.AiAssistant);
 
         return app;
     }

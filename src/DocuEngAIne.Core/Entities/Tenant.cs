@@ -16,6 +16,21 @@ public class Tenant : EntityBase
     /// </summary>
     public bool IpAllowlistEnabled { get; set; }
 
+    /// <summary>Shown in place of the product name in the app header; null = the product name.</summary>
+    public string? DisplayName { get; set; }
+
+    /// <summary>
+    /// <c>#RRGGBB</c> used for links and buttons; null = the default. Must read against the app's
+    /// dark background (WCAG AA), which also keeps dark button text readable on it.
+    /// </summary>
+    public string? AccentColor { get; set; }
+
+    /// <summary>
+    /// Overrides of <see cref="Enums.TenantTerms"/>, as <c>{"company":{"singular":"Client","plural":"Clients"}}</c>.
+    /// Only overridden terms are stored; null = every default.
+    /// </summary>
+    public string? TerminologyJson { get; set; }
+
     public ICollection<User> Users { get; set; } = [];
     public ICollection<Company> Companies { get; set; } = [];
     public ICollection<AssetType> AssetTypes { get; set; } = [];

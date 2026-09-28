@@ -1,3 +1,4 @@
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Llm;
 using Microsoft.AspNetCore.Mvc;
@@ -12,7 +13,8 @@ public static class LlmEndpoints
         var group = app.MapGroup("/api/llm").RequireAuthorization();
 
         group.MapGet("/config", GetConfig);
-        group.MapPost("/chat", ChatAsync);
+        // The provider config stays readable so admins can see what the assistant would use.
+        group.MapPost("/chat", ChatAsync).RequireTenantFeature(TenantFeatures.AiAssistant);
 
         return app;
     }

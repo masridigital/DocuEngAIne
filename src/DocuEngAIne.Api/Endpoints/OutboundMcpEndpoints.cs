@@ -1,10 +1,12 @@
 using System.Text.Json;
 using DocuEngAIne.Api.Mcp;
 using DocuEngAIne.Api.Middleware;
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
 using DocuEngAIne.Infrastructure.Security;
+using DocuEngAIne.Infrastructure.Tenancy;
 
 namespace DocuEngAIne.Api.Endpoints;
 
@@ -60,7 +62,8 @@ public static class OutboundMcpEndpoints
         DocuEngAIneDbContext db,
         IAuditService audit,
         IpAllowlistService allowlist,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        TenantFeatureService? features = null)
     {
         var presented = ApiTokenAuthenticator.ReadPresentedToken(
             http.Request.Headers.Authorization,
@@ -77,6 +80,14 @@ public static class OutboundMcpEndpoints
             return Results.Json(
                 new { error = IpAllowlistMiddleware.BlockedError, ip = IpAllowlist.Normalize(http.Connection.RemoteIpAddress)?.ToString() },
                 statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        // A tenant can switch AI-agent access off entirely; its tokens then read nothing.
+        if (features is not null
+            && user.TenantId is Guid gatedTenant
+            && !await features.IsEnabledAsync(gatedTenant, TenantFeatures.McpServer, cancellationToken))
+        {
+            return TenantConfigurationEndpoints.FeatureDisabled(TenantFeatures.Find(TenantFeatures.McpServer)!);
         }
 
         using var scope = CurrentUserScope.Use(user);

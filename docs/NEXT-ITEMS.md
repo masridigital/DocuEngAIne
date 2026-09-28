@@ -67,13 +67,20 @@ Shipped:
   Schema changes cannot strand data: type / list changes convert every stored value or are refused.
   The SPA gained layout and option-list admin pages and typed asset field view / edit / create.
   Closed a pre-existing gap: asset create accepted another tenant's layout id.
+- **Tenant configuration** — a registered feature catalog (client portal, AI assistant, MCP server,
+  access reviews; all default on) gating whole route families with `403 feature_disabled`, the
+  configuration routes themselves never gated; tenant names for companies / assets / documents /
+  runbooks; a header name and a contrast-checked accent color. Audited, Admin-only, with a Settings
+  page in the SPA. Not carried over: Docuengine's free-form custom CSS (an exfiltration vector) and
+  its regional settings (locale, timezone, date formats) — worth doing properly across every date
+  the app shows, not half-applied. Logos wait on blob storage.
 
 Next, in order:
 
-1. **Tenant configuration** — feature flags from a registered catalog, terminology map
-   (white-label names), branding (blocked on blob storage).
-2. **Tenant status lifecycle** — suspended / archived tenants.
-3. **Company archive** — the Museum slice deferred above.
+1. **Tenant status lifecycle** — suspended / archived tenants.
+2. **Company archive** — the Museum slice deferred above.
+3. **Regional settings** — tenant timezone and date / time formats, applied to every date the SPA
+   shows and to expiration day boundaries.
 
 Open decision from the scoping slice: links, flag assignments and flag definitions are still
 writable by Readers (company access is checked, the tenant role is not). Decide whether flagging is

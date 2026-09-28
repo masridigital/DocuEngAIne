@@ -3,8 +3,11 @@ import { ArchiveButton } from '../components/ArchiveButton'
 import {
   assistDocument,
   createFolder,
+  featureEnabled,
   useDocuments,
   useFolders,
+  useTenantConfiguration,
+  useTerms,
   type DocumentAssistAction,
   type DocumentAssistResponse,
   type DocumentFolder,
@@ -46,6 +49,10 @@ function flattenFolders(folders: DocumentFolder[]): FolderRow[] {
 }
 
 export function DocumentsPage() {
+  const term = useTerms()
+  const { data: configuration } = useTenantConfiguration()
+  // Summarize / rewrite are the AI assistant; they disappear while the tenant has it off.
+  const assistOn = featureEnabled(configuration, 'ai_assistant')
   const { data: folderData, error: folderError, isLoading: foldersLoading, mutate: mutateFolders } = useFolders()
   const folders: DocumentFolder[] = useMemo(() => (Array.isArray(folderData) ? folderData : []), [folderData])
   const rows = useMemo(() => flattenFolders(folders), [folders])
@@ -108,7 +115,7 @@ export function DocumentsPage() {
 
   return (
     <div className="page">
-      <h1>Documents</h1>
+      <h1>{term('document')}</h1>
       <p>Tenant knowledge base. Folders group articles; company-scoped folders belong to a client space.</p>
 
       <div className="kb-layout">
@@ -157,7 +164,7 @@ export function DocumentsPage() {
 
         <section>
           <h2>{articleHeading}</h2>
-          {docs.length > 0 && (
+          {assistOn && docs.length > 0 && (
             <input
               className="input"
               value={rewriteInstruction}
@@ -176,22 +183,26 @@ export function DocumentsPage() {
                   <p>{d.summary}</p>
                   {d.tags && <span className="tag">{d.tags}</span>}
                   <div className="list-item-meta">
-                    <button
-                      className="btn btn-secondary"
-                      type="button"
-                      disabled={assistBusyId === d.id}
-                      onClick={() => onAssist(d.id, 'summarize')}
-                    >
-                      {assistBusyId === d.id ? 'Working…' : 'Summarize'}
-                    </button>
-                    <button
-                      className="btn"
-                      type="button"
-                      disabled={assistBusyId === d.id}
-                      onClick={() => onAssist(d.id, 'rewrite')}
-                    >
-                      {assistBusyId === d.id ? 'Working…' : 'Rewrite'}
-                    </button>
+                    {assistOn ? (
+                      <>
+                        <button
+                          className="btn btn-secondary"
+                          type="button"
+                          disabled={assistBusyId === d.id}
+                          onClick={() => onAssist(d.id, 'summarize')}
+                        >
+                          {assistBusyId === d.id ? 'Working…' : 'Summarize'}
+                        </button>
+                        <button
+                          className="btn"
+                          type="button"
+                          disabled={assistBusyId === d.id}
+                          onClick={() => onAssist(d.id, 'rewrite')}
+                        >
+                          {assistBusyId === d.id ? 'Working…' : 'Rewrite'}
+                        </button>
+                      </>
+                    ) : null}
                     <ArchiveButton type="Document" id={d.id} label={d.title} onError={setAssistError} />
                   </div>
                   {preview?.documentId === d.id && (
