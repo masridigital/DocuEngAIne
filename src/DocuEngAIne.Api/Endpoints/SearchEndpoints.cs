@@ -1,3 +1,4 @@
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using Microsoft.AspNetCore.Mvc;
 
@@ -16,12 +17,20 @@ public static class SearchEndpoints
         [FromQuery] string? q,
         ISearchService search,
         ICurrentUser user,
+        ICompanyScopeAccessor? companyScope = null,
         CancellationToken cancellationToken = default)
     {
         if (user.TenantId is null)
             return Results.Unauthorized();
 
         var hits = await search.SearchAsync(q ?? string.Empty, user.TenantId.Value, cancellationToken);
+
+        // Hits come from the index, not the database, so the company filters never see them: a
+        // company-restricted caller only gets hits for companies they can read.
+        var scope = companyScope?.Current ?? CompanyAccessScope.Unrestricted;
+        if (!scope.IsUnrestricted)
+            hits = hits.Where(h => scope.Allows(h.CompanyId, CompanyAccessLevel.View)).ToList();
+
         return Results.Ok(hits);
     }
 }

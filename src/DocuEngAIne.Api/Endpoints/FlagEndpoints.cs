@@ -100,6 +100,9 @@ public static class FlagEndpoints
     {
         if (user.TenantId is null)
             return Results.Unauthorized();
+        // Flag definitions are tenant-wide configuration.
+        if (CompanyEndpoints.RequireCompanyAccess(db, null, CompanyAccessLevel.Edit) is { } scoped)
+            return scoped;
 
         var name = request.Name?.Trim() ?? "";
         if (string.IsNullOrWhiteSpace(name))
@@ -129,6 +132,10 @@ public static class FlagEndpoints
         ICurrentUser user,
         CancellationToken cancellationToken = default)
     {
+        // Flag definitions are tenant-wide configuration.
+        if (CompanyEndpoints.RequireCompanyAccess(db, null, CompanyAccessLevel.Edit) is { } scoped)
+            return scoped;
+
         var flag = await db.FlagDefinitions.ForTenant(user).FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
         if (flag is null)
             return Results.NotFound();
@@ -163,6 +170,10 @@ public static class FlagEndpoints
         ICurrentUser user,
         CancellationToken cancellationToken = default)
     {
+        // Flag definitions are tenant-wide configuration.
+        if (CompanyEndpoints.RequireCompanyAccess(db, null, CompanyAccessLevel.Edit) is { } scoped)
+            return scoped;
+
         var flag = await db.FlagDefinitions.ForTenant(user).FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
         if (flag is null)
             return Results.NotFound();
@@ -189,9 +200,11 @@ public static class FlagEndpoints
         if (!FlagEntityType.TryNormalize(request.EntityType, out var entityType))
             return Results.BadRequest(UnknownEntityTypeMessage);
 
-        var exists = await EntityExistsInTenantAsync(db, user, entityType, request.EntityId, cancellationToken);
-        if (!exists)
+        var owner = await CompanyEndpoints.FindOwnerCompanyAsync(db, user, entityType, request.EntityId, cancellationToken);
+        if (!owner.Found)
             return Results.BadRequest(EntityNotFoundMessage);
+        if (CompanyEndpoints.RequireCompanyAccess(db, owner.CompanyId, CompanyAccessLevel.Edit) is { } denied)
+            return denied;
 
         var already = await db.FlagAssignments.ForTenant(user).AnyAsync(
             a => a.FlagDefinitionId == id && a.EntityType == entityType && a.EntityId == request.EntityId,
@@ -232,6 +245,15 @@ public static class FlagEndpoints
                 cancellationToken);
         if (assignment is null)
             return Results.NotFound();
+
+        if (!db.CompanyScope.IsUnrestricted)
+        {
+            var owner = await CompanyEndpoints.FindOwnerCompanyAsync(db, user, entityType, entityId, cancellationToken);
+            if (!owner.Found)
+                return Results.NotFound();
+            if (CompanyEndpoints.RequireCompanyAccess(db, owner.CompanyId, CompanyAccessLevel.Edit) is { } denied)
+                return denied;
+        }
 
         db.FlagAssignments.Remove(assignment);
         await db.SaveChangesAsync(cancellationToken);

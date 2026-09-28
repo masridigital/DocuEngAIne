@@ -45,6 +45,8 @@ public static class AssetEndpoints
             // resolves to the caller's tenant-wide role.
             if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Asset, cancellationToken) is { } denied)
                 return denied;
+            if (CompanyEndpoints.RequireCompanyAccess(db, null, CompanyAccessLevel.Edit) is { } scoped)
+                return scoped;
 
             var assetType = new AssetType
             {
@@ -79,6 +81,8 @@ public static class AssetEndpoints
             // it: field definitions are tenant-wide schema and gate on the tenant-wide role.
             if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Asset, cancellationToken) is { } denied)
                 return denied;
+            if (CompanyEndpoints.RequireCompanyAccess(db, null, CompanyAccessLevel.Edit) is { } scoped)
+                return scoped;
 
             var field = await db.FieldDefinitions
                 .Where(f => db.AssetTypes.ForTenant(user).Any(t => t.Id == f.AssetTypeId))
@@ -179,7 +183,7 @@ public static class AssetEndpoints
         [FromQuery] string? reason = null,
         CancellationToken cancellationToken = default)
     {
-        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken, CompanyAccessLevel.Manage) is { } denied)
             return denied;
 
         var asset = await db.Assets
@@ -341,19 +345,32 @@ public static class ResourceWriteGuard
     /// Deliberately runs before the handler loads the row. The answer does not depend on whether the
     /// row exists, and checking first keeps a denied caller from learning which ids are real.
     /// </remarks>
+    /// <param name="companyLevel">
+    /// The company access the operation needs on the record's company: Edit to change it (the
+    /// default), Manage to archive, restore or delete it, View where the record is only the context
+    /// for a write elsewhere (starting a run of a runbook). Checked only for a named record.
+    /// </param>
     public static async Task<IResult?> RequireWriteAsync(
         IResourceAuthorizationService authorization,
         ICurrentUser user,
         Guid resourceId,
         string resourceType,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        CompanyAccessLevel companyLevel = CompanyAccessLevel.Edit)
     {
-        if (user.HasRole(UserRole.Contributor))
-            return null;
+        if (!user.HasRole(UserRole.Contributor)
+            && !await authorization.CanWriteAsync(resourceId, resourceType, cancellationToken))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
 
-        return await authorization.CanWriteAsync(resourceId, resourceType, cancellationToken)
-            ? null
-            : Results.StatusCode(StatusCodes.Status403Forbidden);
+        if (resourceId != Guid.Empty
+            && await authorization.GetCompanyAccessAsync(resourceId, resourceType, cancellationToken) < companyLevel)
+        {
+            return CompanyEndpoints.CompanyAccessDenied(tenantWide: false);
+        }
+
+        return null;
     }
 
     /// <summary>

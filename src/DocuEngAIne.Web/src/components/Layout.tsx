@@ -32,6 +32,7 @@ export function Layout() {
           {showUsers ? <NavLink to="/users">Users</NavLink> : null}
           {showUsers ? <NavLink to="/audit">Audit</NavLink> : null}
           {showUsers ? <NavLink to="/access-reviews">Access reviews</NavLink> : null}
+          {showUsers ? <NavLink to="/security-groups">Security groups</NavLink> : null}
           {showUsers ? <NavLink to="/ip-access">IP access</NavLink> : null}
         </nav>
         <div className="profile">

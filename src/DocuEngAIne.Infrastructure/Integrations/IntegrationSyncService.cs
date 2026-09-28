@@ -1416,7 +1416,7 @@ public class IntegrationSyncService : IIntegrationSyncService
     /// restoring brings the asset back into the next sync.
     /// </summary>
     private async Task<HashSet<Guid>> ArchivedAssetIdsAsync(List<Guid> mappedAssetIds, CancellationToken cancellationToken)
-        => (await _db.Assets.IgnoreQueryFilters().ForTenant(_user)
+        => (await _db.Assets.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(_user)
             .Where(a => mappedAssetIds.Contains(a.Id) && a.DeletedAt != null)
             .Select(a => a.Id)
             .ToListAsync(cancellationToken)).ToHashSet();

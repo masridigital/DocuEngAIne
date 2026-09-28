@@ -145,7 +145,7 @@ public static class DocumentEndpoints
         [FromQuery] string? reason = null,
         CancellationToken cancellationToken = default)
     {
-        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken, CompanyAccessLevel.Manage) is { } denied)
             return denied;
 
         var doc = await db.Documents

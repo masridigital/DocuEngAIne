@@ -59,6 +59,7 @@ if (app.Environment.IsDevelopment())
 app.UseAuthentication();
 app.UseMiddleware<IpAllowlistMiddleware>();
 app.UseAuthorization();
+app.UseMiddleware<CompanyScopeMiddleware>();
 
 app.MapHealthChecks("/api/health/live").AllowAnonymous();
 app.MapHealthChecks("/api/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
@@ -88,6 +89,7 @@ app.MapAuditEndpoints();
 app.MapArchiveEndpoints();
 app.MapAccessReviewEndpoints();
 app.MapIpAccessEndpoints();
+app.MapSecurityGroupEndpoints();
 app.MapPortalEndpoints();
 app.MapOutboundMcpEndpoints();
 app.MapLlmEndpoints();

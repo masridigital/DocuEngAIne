@@ -56,18 +56,23 @@ Shipped:
 - **Access reviews** — snapshot, decide (applied immediately), complete, CSV evidence.
 - **Tenant IP allowlist** — enforced on `/api/*` and `/mcp`, fails closed, with Docuengine's four
   anti-lockout rules and a host-level break-glass (`Security:DisableIpAllowlist`).
+- **Security-group company scoping** — groups confine members to granted companies at View / Edit
+  / Manage, via named EF query filters on every company-owned entity plus write guards; tenant-wide
+  records are opt-in per group and read-only for confined users; Admins and Owners bypass. Closed
+  two pre-existing gaps on the way: company and folder writes had no role check at all.
 
 Next, in order:
 
-1. **Security-group company scoping** — groups, members, per-company access grants; no
-   restriction means full access, the highest grant wins, Admin/Owner bypass. Has to reach every
-   company-scoped query (lists, rollups, search, portal, MCP), so it is its own slice.
-2. **Asset layouts** — versioned field layouts, option lists, per-company activation, typed field
+1. **Asset layouts** — versioned field layouts, option lists, per-company activation, typed field
    values validated before publish.
-3. **Tenant configuration** — feature flags from a registered catalog, terminology map
+2. **Tenant configuration** — feature flags from a registered catalog, terminology map
    (white-label names), branding (blocked on blob storage).
-4. **Tenant status lifecycle** — suspended / archived tenants.
-5. **Company archive** — the Museum slice deferred above.
+3. **Tenant status lifecycle** — suspended / archived tenants.
+4. **Company archive** — the Museum slice deferred above.
+
+Open decision from the scoping slice: links, flag assignments and flag definitions are still
+writable by Readers (company access is checked, the tenant role is not). Decide whether flagging is
+a Reader action before tightening it.
 
 Not ported: MFA, password, session and invitation-token mechanics (Entra owns authentication);
 role-carrying invitations are optional later work on top of Entra.

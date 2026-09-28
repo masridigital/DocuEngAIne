@@ -100,9 +100,14 @@ public static class LinkEndpoints
         if (fromType == toType && request.FromId == request.ToId)
             return Results.BadRequest(SelfLinkMessage);
 
-        if (!await EntityExistsInTenantAsync(db, user, fromType, request.FromId, cancellationToken)
-            || !await EntityExistsInTenantAsync(db, user, toType, request.ToId, cancellationToken))
+        var source = await CompanyEndpoints.FindOwnerCompanyAsync(db, user, fromType, request.FromId, cancellationToken);
+        var target = await CompanyEndpoints.FindOwnerCompanyAsync(db, user, toType, request.ToId, cancellationToken);
+        if (!source.Found || !target.Found)
             return Results.BadRequest(EntityNotFoundMessage);
+        // A link annotates its source, so linking needs Edit there; the target only has to be
+        // visible (a client's asset may point at a tenant-wide SOP the user can only read).
+        if (CompanyEndpoints.RequireCompanyAccess(db, source.CompanyId, CompanyAccessLevel.Edit) is { } denied)
+            return denied;
 
         var already = await db.ResourceLinks.ForTenant(user).AnyAsync(
             l => l.FromType == fromType
@@ -142,6 +147,17 @@ public static class LinkEndpoints
         var link = await db.ResourceLinks.ForTenant(user).FirstOrDefaultAsync(l => l.Id == id, cancellationToken);
         if (link is null)
             return Results.NotFound();
+
+        if (!db.CompanyScope.IsUnrestricted)
+        {
+            // A link with an end outside the caller's scope does not exist for them.
+            var source = await CompanyEndpoints.FindOwnerCompanyAsync(db, user, link.FromType, link.FromId, cancellationToken);
+            var target = await CompanyEndpoints.FindOwnerCompanyAsync(db, user, link.ToType, link.ToId, cancellationToken);
+            if (!source.Found || !target.Found)
+                return Results.NotFound();
+            if (CompanyEndpoints.RequireCompanyAccess(db, source.CompanyId, CompanyAccessLevel.Edit) is { } denied)
+                return denied;
+        }
 
         db.ResourceLinks.Remove(link);
         await db.SaveChangesAsync(cancellationToken);

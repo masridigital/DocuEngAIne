@@ -76,6 +76,15 @@ public static class ArchiveEndpoints
             TenantId = user.TenantId!.Value,
             ResourceType = resourceType,
             ResourceId = resourceId,
+            // Captured now: once archived, the row is hidden and the Museum is scoped on this.
+            CompanyId = entity switch
+            {
+                Asset a => a.CompanyId,
+                Document d => d.CompanyId,
+                Runbook r => r.CompanyId,
+                KeeperLink k => k.CompanyId,
+                _ => null,
+            },
             ResourceLabel = Truncate(string.IsNullOrWhiteSpace(label) ? resourceType : label, 450),
             Reason = trimmedReason,
             ArchivedAt = now,
@@ -166,7 +175,7 @@ public static class ArchiveEndpoints
             return Results.NotFound();
 
         // Restoring is the inverse of archiving, so it takes the same per-resource write gate.
-        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, entry.ResourceId, entry.ResourceType, cancellationToken) is { } denied)
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, entry.ResourceId, entry.ResourceType, cancellationToken, CompanyAccessLevel.Manage) is { } denied)
             return denied;
 
         if (entry.PermanentlyDeletedAt is not null)
@@ -181,20 +190,21 @@ public static class ArchiveEndpoints
             return Results.Conflict(new { error = "This item is not archived." });
 
         // A live row may have taken the slug while this one sat in the Museum. The unique index
-        // only covers live rows, so restoring as-is would collide: suffix instead of refusing.
+        // only covers live rows, so restoring as-is would collide: suffix instead of refusing. The
+        // check spans every company, because the index does.
         string? slugNote = null;
         switch (entity)
         {
             case Document { Slug: { Length: > 0 } original } doc:
             {
-                doc.Slug = await FreeSlugAsync(original, s => db.Documents.ForTenant(user).AnyAsync(d => d.Slug == s, cancellationToken));
+                doc.Slug = await FreeSlugAsync(original, s => db.Documents.IgnoreQueryFilters([DocuEngAIneDbContext.CompanyScopeFilter]).ForTenant(user).AnyAsync(d => d.Slug == s, cancellationToken));
                 if (doc.Slug != original)
                     slugNote = $"slug changed from '{original}' to '{doc.Slug}' (taken while archived)";
                 break;
             }
             case Runbook { Slug: { Length: > 0 } original } runbook:
             {
-                runbook.Slug = await FreeSlugAsync(original, s => db.Runbooks.ForTenant(user).AnyAsync(r => r.Slug == s, cancellationToken));
+                runbook.Slug = await FreeSlugAsync(original, s => db.Runbooks.IgnoreQueryFilters([DocuEngAIneDbContext.CompanyScopeFilter]).ForTenant(user).AnyAsync(r => r.Slug == s, cancellationToken));
                 if (runbook.Slug != original)
                     slugNote = $"slug changed from '{original}' to '{runbook.Slug}' (taken while archived)";
                 break;
@@ -274,7 +284,10 @@ public static class ArchiveEndpoints
         return Results.NoContent();
     }
 
-    /// <summary>Archived or live — the Museum reads past the soft-delete filter on purpose.</summary>
+    /// <summary>
+    /// Archived or live — the Museum reads past the soft-delete filter on purpose, and only that
+    /// filter: company scoping still applies.
+    /// </summary>
     private static async Task<ISoftDeletable?> FindAsync(
         DocuEngAIneDbContext db,
         ICurrentUser user,
@@ -282,13 +295,13 @@ public static class ArchiveEndpoints
         Guid resourceId,
         CancellationToken cancellationToken) => resourceType switch
         {
-            ResourceType.Asset => (ISoftDeletable?)await db.Assets.IgnoreQueryFilters().ForTenant(user)
+            ResourceType.Asset => (ISoftDeletable?)await db.Assets.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(user)
                 .FirstOrDefaultAsync(x => x.Id == resourceId, cancellationToken),
-            ResourceType.Document => (ISoftDeletable?)await db.Documents.IgnoreQueryFilters().ForTenant(user)
+            ResourceType.Document => (ISoftDeletable?)await db.Documents.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(user)
                 .FirstOrDefaultAsync(x => x.Id == resourceId, cancellationToken),
-            ResourceType.Runbook => (ISoftDeletable?)await db.Runbooks.IgnoreQueryFilters().ForTenant(user)
+            ResourceType.Runbook => (ISoftDeletable?)await db.Runbooks.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(user)
                 .FirstOrDefaultAsync(x => x.Id == resourceId, cancellationToken),
-            ResourceType.KeeperLink => (ISoftDeletable?)await db.KeeperLinks.IgnoreQueryFilters().ForTenant(user)
+            ResourceType.KeeperLink => (ISoftDeletable?)await db.KeeperLinks.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(user)
                 .FirstOrDefaultAsync(x => x.Id == resourceId, cancellationToken),
             _ => null,
         };

@@ -57,7 +57,8 @@ public static class RunbookEndpoints
 
         // Executing a runbook writes RunbookRun rows, so the run lifecycle gates as a write — keyed
         // to the parent runbook, which is the resource a grant can name. A tenant-wide Reader holding
-        // a Contributor grant on one runbook can therefore run that runbook and no other.
+        // a Contributor grant on one runbook can therefore run that runbook and no other. Company
+        // access needs only View on the runbook: the handlers check Edit on the run's own company.
         group.MapPost("/{id:guid}/runs", async (
             Guid id,
             [FromBody] StartRunbookRunRequest? request,
@@ -66,7 +67,7 @@ public static class RunbookEndpoints
             IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken, CompanyAccessLevel.View) is { } denied)
                 return denied;
 
             return await StartRunAsync(id, request ?? new StartRunbookRunRequest(), db, user, cancellationToken);
@@ -80,7 +81,7 @@ public static class RunbookEndpoints
             IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken, CompanyAccessLevel.View) is { } denied)
                 return denied;
 
             return await CompleteRunAsync(id, runId, db, user, cancellationToken);
@@ -94,7 +95,7 @@ public static class RunbookEndpoints
             IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken, CompanyAccessLevel.View) is { } denied)
                 return denied;
 
             return await CancelRunAsync(id, runId, db, user, cancellationToken);
@@ -111,7 +112,7 @@ public static class RunbookEndpoints
             IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
-            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
+            if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken, CompanyAccessLevel.View) is { } denied)
                 return denied;
             if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Document, cancellationToken) is { } deniedDoc)
                 return deniedDoc;
@@ -227,7 +228,7 @@ public static class RunbookEndpoints
         [FromQuery] string? reason = null,
         CancellationToken cancellationToken = default)
     {
-        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken, CompanyAccessLevel.Manage) is { } denied)
             return denied;
 
         var runbook = await db.Runbooks.ForTenant(user).FirstOrDefaultAsync(r => r.Id == id, cancellationToken);
@@ -406,14 +407,20 @@ public static class RunbookEndpoints
         if (runbook is null)
             return Results.NotFound();
 
-        if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
+        // The run is the write, so company access is checked on the company the run is for — a
+        // tenant-wide template run for a client needs Edit on that client, not on the template.
+        if (request.CompanyId is not null
+            && await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
             return badCompany;
+        var companyId = request.CompanyId ?? runbook.CompanyId;
+        if (CompanyEndpoints.RequireCompanyAccess(db, companyId, CompanyAccessLevel.Edit) is { } denied)
+            return denied;
 
         var run = new RunbookRun
         {
             TenantId = user.TenantId.Value,
             RunbookId = runbook.Id,
-            CompanyId = request.CompanyId ?? runbook.CompanyId,
+            CompanyId = companyId,
             Status = RunbookRunStatus.Running,
             StartedAt = DateTimeOffset.UtcNow,
             StartedByObjectId = user.ObjectId,
@@ -499,6 +506,8 @@ public static class RunbookEndpoints
             .FirstOrDefaultAsync(r => r.Id == runId && r.RunbookId == runbookId, cancellationToken);
         if (run is null)
             return Results.NotFound();
+        if (CompanyEndpoints.RequireCompanyAccess(db, run.CompanyId, CompanyAccessLevel.Edit) is { } denied)
+            return denied;
         if (run.Status != RunbookRunStatus.Running)
             return Results.BadRequest(NotRunningMessage);
 

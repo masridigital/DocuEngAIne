@@ -12,6 +12,9 @@ public static class CompanyEndpoints
     public const int RelatedTake = 8;
     public const string ParentCompanyNotFoundMessage = "Parent company not found.";
     public const string CompanyCannotBeOwnParentMessage = "Company cannot be its own parent.";
+    public const string CompanyAccessDeniedMessage = "Your access to this company does not allow that.";
+    public const string TenantWideAccessDeniedMessage = "Only users with access to every company can create or change records that belong to no company.";
+    public const string CreateRequiresFullAccessMessage = "Only users with access to every company can create companies.";
 
     public static IEndpointRouteBuilder MapCompanyEndpoints(this IEndpointRouteBuilder app)
     {
@@ -53,30 +56,50 @@ public static class CompanyEndpoints
             CancellationToken cancellationToken) =>
             await GetGraphAsync(id, db, user, cancellationToken));
 
+        // Companies are written like any other record: Contributor or above (tenant-wide role),
+        // plus the company access the change needs (see UpdateAsync / the delete below).
         group.MapPost("", async (
             [FromBody] CreateCompanyRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
-            await CreateAsync(request, db, user, cancellationToken));
+        {
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, nameof(Company), cancellationToken) is { } denied)
+                return denied;
+
+            return await CreateAsync(request, db, user, cancellationToken);
+        });
 
         group.MapPut("/{id:guid}", async (
             Guid id,
             [FromBody] UpdateCompanyRequest request,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
-            await UpdateAsync(id, request, db, user, cancellationToken));
+        {
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, nameof(Company), cancellationToken) is { } denied)
+                return denied;
+
+            return await UpdateAsync(id, request, db, user, cancellationToken);
+        });
 
         group.MapDelete("/{id:guid}", async (
             Guid id,
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IResourceAuthorizationService authorization,
             CancellationToken cancellationToken) =>
         {
+            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, nameof(Company), cancellationToken) is { } denied)
+                return denied;
+
             var company = await db.Companies.ForTenant(user).FirstOrDefaultAsync(c => c.Id == id, cancellationToken);
             if (company is null)
                 return Results.NotFound();
+            if (RequireCompanyAccess(db, id, CompanyAccessLevel.Manage) is { } deniedCompany)
+                return deniedCompany;
 
             db.Companies.Remove(company);
             await db.SaveChangesAsync(cancellationToken);
@@ -218,6 +241,10 @@ public static class CompanyEndpoints
         if (user.TenantId is null)
             return Results.Unauthorized();
 
+        // A company-restricted user would lose sight of a company the moment they created it.
+        if (!db.CompanyScope.IsUnrestricted)
+            return Results.Json(new { error = CreateRequiresFullAccessMessage }, statusCode: StatusCodes.Status403Forbidden);
+
         if (await db.Companies.ForTenant(user).AnyAsync(c => c.Slug == request.Slug, cancellationToken))
             return Results.Conflict("Slug already exists.");
 
@@ -268,6 +295,16 @@ public static class CompanyEndpoints
         if (company is null)
             return Results.NotFound();
 
+        if (RequireCompanyAccess(db, id, CompanyAccessLevel.Edit) is { } denied)
+            return denied;
+        // Deactivating, exposing through the client portal, or re-parenting is managing the
+        // company rather than editing its details.
+        var managing = (request.IsActive is bool active && active != company.IsActive)
+            || (request.PortalEnabled is bool portal && portal != company.PortalEnabled)
+            || (request.ParentCompanyId is Guid parent && parent != company.ParentCompanyId);
+        if (managing && RequireCompanyAccess(db, id, CompanyAccessLevel.Manage) is { } deniedManage)
+            return deniedManage;
+
         if (await EnsureParentCompanyInTenantAsync(db, user, request.ParentCompanyId, excludeId: id, cancellationToken) is { } badParent)
             return badParent;
 
@@ -304,6 +341,12 @@ public static class CompanyEndpoints
         return Results.NoContent();
     }
 
+    /// <summary>
+    /// Validates the company a record is being written into: it must be a company in the tenant that
+    /// the caller can see (otherwise 400, the same as a company that does not exist), and the caller
+    /// needs Edit on it. No company means a tenant-wide record, which a company-restricted caller
+    /// cannot write (403).
+    /// </summary>
     public static async Task<IResult?> EnsureCompanyInTenantAsync(
         DocuEngAIneDbContext db,
         ICurrentUser user,
@@ -311,11 +354,74 @@ public static class CompanyEndpoints
         CancellationToken cancellationToken = default)
     {
         if (companyId is not Guid id)
-            return null;
+            return RequireCompanyAccess(db, null, CompanyAccessLevel.Edit);
 
         var exists = await db.Companies.ForTenant(user).AnyAsync(c => c.Id == id, cancellationToken);
-        return exists ? null : Results.BadRequest("Company not found.");
+        if (!exists)
+            return Results.BadRequest("Company not found.");
+        return RequireCompanyAccess(db, id, CompanyAccessLevel.Edit);
     }
+
+    /// <summary>
+    /// The company that owns a record named by type and id (a company owns itself), as the caller
+    /// sees it: <c>Found</c> is false when the record does not exist or is outside the caller's
+    /// company scope. Types are the shared Company / Asset / Document / Runbook / KeeperLink names.
+    /// </summary>
+    public static async Task<(bool Found, Guid? CompanyId)> FindOwnerCompanyAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        string entityType,
+        Guid entityId,
+        CancellationToken cancellationToken = default)
+    {
+        switch (entityType)
+        {
+            case LinkEntityType.Company:
+                return (await db.Companies.ForTenant(user).AnyAsync(c => c.Id == entityId, cancellationToken), entityId);
+            case LinkEntityType.Asset:
+            {
+                var owner = await db.Assets.ForTenant(user).Where(x => x.Id == entityId)
+                    .Select(x => new { x.CompanyId }).FirstOrDefaultAsync(cancellationToken);
+                return (owner is not null, owner?.CompanyId);
+            }
+            case LinkEntityType.Document:
+            {
+                var owner = await db.Documents.ForTenant(user).Where(x => x.Id == entityId)
+                    .Select(x => new { x.CompanyId }).FirstOrDefaultAsync(cancellationToken);
+                return (owner is not null, owner?.CompanyId);
+            }
+            case LinkEntityType.Runbook:
+            {
+                var owner = await db.Runbooks.ForTenant(user).Where(x => x.Id == entityId)
+                    .Select(x => new { x.CompanyId }).FirstOrDefaultAsync(cancellationToken);
+                return (owner is not null, owner?.CompanyId);
+            }
+            case LinkEntityType.KeeperLink:
+            {
+                var owner = await db.KeeperLinks.ForTenant(user).Where(x => x.Id == entityId)
+                    .Select(x => new { x.CompanyId }).FirstOrDefaultAsync(cancellationToken);
+                return (owner is not null, owner?.CompanyId);
+            }
+            default:
+                return (false, null);
+        }
+    }
+
+    /// <summary>
+    /// Null when the caller's company scope allows <paramref name="level"/> on
+    /// <paramref name="companyId"/> (null = a tenant-wide record); otherwise a 403 saying why.
+    /// </summary>
+    public static IResult? RequireCompanyAccess(DocuEngAIneDbContext db, Guid? companyId, CompanyAccessLevel level)
+        => db.CompanyScope.Allows(companyId, level) ? null : CompanyAccessDenied(tenantWide: companyId is null);
+
+    /// <summary>
+    /// A company-scope refusal, with its reason. A missing role stays a bare 403 (see
+    /// <see cref="ResourceWriteGuard"/>); this one names the scope so the user knows who can help.
+    /// </summary>
+    public static IResult CompanyAccessDenied(bool tenantWide)
+        => Results.Json(
+            new { error = tenantWide ? TenantWideAccessDeniedMessage : CompanyAccessDeniedMessage },
+            statusCode: StatusCodes.Status403Forbidden);
 
     /// <summary>
     /// Applies a company attachment on update. <paramref name="companyId"/> <c>null</c> with
@@ -333,6 +439,8 @@ public static class CompanyEndpoints
     {
         if (companyIdClear || companyId == Guid.Empty)
         {
+            if (RequireCompanyAccess(db, null, CompanyAccessLevel.Edit) is { } denied)
+                return denied;
             assign(null);
             return null;
         }
