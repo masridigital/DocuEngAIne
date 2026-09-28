@@ -5,6 +5,7 @@ import { AccessReviewsPage } from './pages/AccessReviewsPage'
 import { AssetLayoutsPage } from './pages/AssetLayoutsPage'
 import { AssetsPage } from './pages/AssetsPage'
 import { AuditPage } from './pages/AuditPage'
+import { SecurityEventsPage } from './pages/SecurityEventsPage'
 import { CompaniesPage } from './pages/CompaniesPage'
 import { DashboardPage } from './pages/DashboardPage'
 import { DocumentsPage } from './pages/DocumentsPage'
@@ -43,6 +44,7 @@ function App() {
           <Route path="integrations" element={<IntegrationsPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="audit" element={<AuditPage />} />
+          <Route path="security-events" element={<SecurityEventsPage />} />
           <Route path="access-reviews" element={<AccessReviewsPage />} />
           <Route path="ip-access" element={<IpAccessPage />} />
           <Route path="security-groups" element={<SecurityGroupsPage />} />

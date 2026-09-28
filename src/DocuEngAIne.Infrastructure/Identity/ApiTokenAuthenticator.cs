@@ -18,29 +18,51 @@ public static class ApiTokenAuthenticator
     /// </summary>
     public static readonly TimeSpan LastUsedWriteInterval = TimeSpan.FromMinutes(1);
 
+    /// <summary>Why a token that was recognised was refused; the tenant it belongs to gets to know.</summary>
+    public enum RejectionReason
+    {
+        Revoked,
+        Expired,
+        TenantClosed,
+    }
+
+    /// <summary>A recognised token that was refused. An unknown token has no tenant to report to, so it yields none.</summary>
+    public sealed record Rejection(Guid TenantId, Guid TokenId, string TokenName, RejectionReason Reason);
+
+    public sealed record Result(TokenCurrentUser? User, Rejection? Rejected);
+
     public static async Task<TokenCurrentUser?> AuthenticateAsync(
+        string? plaintext,
+        DocuEngAIneDbContext db,
+        CancellationToken cancellationToken = default)
+        => (await ResolveAsync(plaintext, db, cancellationToken)).User;
+
+    /// <summary>As <see cref="AuthenticateAsync"/>, also saying why a recognised token was refused.</summary>
+    public static async Task<Result> ResolveAsync(
         string? plaintext,
         DocuEngAIneDbContext db,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(plaintext))
-            return null;
+            return new Result(null, null);
 
         var hash = ApiTokenHasher.Hash(plaintext.Trim());
         var token = await db.ApiTokens
-            .FirstOrDefaultAsync(t => t.TokenHash == hash && t.RevokedAt == null, cancellationToken);
+            .FirstOrDefaultAsync(t => t.TokenHash == hash, cancellationToken);
 
         if (token is null)
-            return null;
+            return new Result(null, null);
+        if (token.RevokedAt is not null)
+            return new Result(null, new Rejection(token.TenantId, token.Id, token.Name, RejectionReason.Revoked));
 
         var now = DateTimeOffset.UtcNow;
         if (token.ExpiresAt is DateTimeOffset expiresAt && expiresAt <= now)
-            return null;
+            return new Result(null, new Rejection(token.TenantId, token.Id, token.Name, RejectionReason.Expired));
 
         var tenantActive = await db.Tenants.AsNoTracking()
             .AnyAsync(t => t.Id == token.TenantId && t.Status == TenantStatus.Active, cancellationToken);
         if (!tenantActive)
-            return null;
+            return new Result(null, new Rejection(token.TenantId, token.Id, token.Name, RejectionReason.TenantClosed));
 
         if (token.LastUsedAt is not DateTimeOffset lastUsed || now - lastUsed >= LastUsedWriteInterval)
         {
@@ -48,7 +70,7 @@ public static class ApiTokenAuthenticator
             await db.SaveChangesAsync(cancellationToken);
         }
 
-        return new TokenCurrentUser(token.TenantId, token.Id, token.Name);
+        return new Result(new TokenCurrentUser(token.TenantId, token.Id, token.Name), null);
     }
 
     public static string? ReadPresentedToken(string? authorizationHeader, string? apiTokenHeader)

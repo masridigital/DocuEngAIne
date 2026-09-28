@@ -1,5 +1,6 @@
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
+using DocuEngAIne.Infrastructure.Security;
 using DocuEngAIne.Infrastructure.Tenancy;
 
 namespace DocuEngAIne.Api.Middleware;
@@ -21,7 +22,7 @@ public sealed class TenantStatusMiddleware
 
     public TenantStatusMiddleware(RequestDelegate next) => _next = next;
 
-    public async Task InvokeAsync(HttpContext context, ICurrentUser user, TenantStatusService statuses)
+    public async Task InvokeAsync(HttpContext context, ICurrentUser user, TenantStatusService statuses, SecurityEventRecorder events)
     {
         var path = context.Request.Path;
         if (path.StartsWithSegments("/api")
@@ -31,6 +32,16 @@ public sealed class TenantStatusMiddleware
             && await statuses.GetAsync(tenantId, context.RequestAborted) is { Status: not TenantStatus.Active } state)
         {
             var suspended = state.Status == TenantStatus.Suspended;
+            // Filed in the closed tenant's own log, for its administrators to see on reactivation.
+            await events.RecordAsync(
+                tenantId,
+                SecurityEventTypes.TenantClosedAccess,
+                $"{user.DisplayName ?? user.Email ?? "A signed-in user"} tried to use the tenant while it is {(suspended ? "suspended" : "archived")}.",
+                IpAllowlist.Normalize(context.Connection.RemoteIpAddress)?.ToString(),
+                user.ObjectId,
+                user.DisplayName ?? user.Email,
+                path,
+                cancellationToken: context.RequestAborted);
             context.Response.StatusCode = StatusCodes.Status403Forbidden;
             await context.Response.WriteAsJsonAsync(
                 new

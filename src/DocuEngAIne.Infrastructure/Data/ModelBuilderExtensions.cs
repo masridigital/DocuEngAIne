@@ -306,6 +306,21 @@ public static class ModelBuilderExtensions
             a.HasIndex(x => new { x.TenantId, x.EntityType, x.EntityId });
         });
 
+        modelBuilder.Entity<SecurityEvent>(e =>
+        {
+            e.Property(x => x.EventType).HasMaxLength(64);
+            e.Property(x => x.Severity).HasMaxLength(16);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.IpAddress).HasMaxLength(45);
+            e.Property(x => x.ActorObjectId).HasMaxLength(128);
+            e.Property(x => x.ActorName).HasMaxLength(200);
+            e.Property(x => x.Path).HasMaxLength(256);
+            e.HasIndex(x => new { x.TenantId, x.LastSeenAt });
+            // The merge lookup: same kind, same address, same caller.
+            e.HasIndex(x => new { x.TenantId, x.EventType, x.IpAddress, x.ActorObjectId });
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<ArchiveEntry>(a =>
         {
             a.Property(x => x.ResourceType).HasMaxLength(50);
