@@ -12,9 +12,10 @@ namespace DocuEngAIne.Api.Endpoints;
 
 /// <summary>
 /// Tenant configuration: optional features from the registered catalog, what the app calls things,
-/// and the header name and accent color. Everyone in the tenant reads it (the app renders from it);
-/// only Admins and Owners change it, and every change is audited with what it moved from. The
-/// configuration routes are never gated by a feature, so a feature that is off can be turned back on.
+/// the header name and accent color, and the time zone and date / time formats. Everyone in the
+/// tenant reads it (the app renders from it); only Admins and Owners change it, and every change is
+/// audited with what it moved from. The configuration routes are never gated by a feature, so a
+/// feature that is off can be turned back on.
 /// </summary>
 public static class TenantConfigurationEndpoints
 {
@@ -28,6 +29,7 @@ public static class TenantConfigurationEndpoints
         admin.MapPut("/features/{key}", SetFeatureAsync);
         admin.MapPut("/terminology", SetTerminologyAsync);
         admin.MapPut("/branding", SetBrandingAsync);
+        admin.MapPut("/regional", SetRegionalAsync);
 
         return app;
     }
@@ -72,10 +74,22 @@ public static class TenantConfigurationEndpoints
 
     public sealed record BrandingView(string? DisplayName, string? AccentColor);
 
+    /// <summary>
+    /// The settings in effect (defaults filled in), and the formats that can be chosen. A stored zone
+    /// this host does not know reads as UTC, which is also what the server then counts days in.
+    /// </summary>
+    public sealed record RegionalView(
+        string TimeZone,
+        string DateFormat,
+        string TimeFormat,
+        IReadOnlyList<DateFormatDefinition> DateFormats,
+        IReadOnlyList<TimeFormatDefinition> TimeFormats);
+
     public sealed record TenantConfigurationView(
         IReadOnlyList<FeatureView> Features,
         IReadOnlyList<TermView> Terminology,
-        BrandingView Branding);
+        BrandingView Branding,
+        RegionalView Regional);
 
     public sealed record SetFeatureRequest(bool Enabled);
 
@@ -86,6 +100,9 @@ public static class TenantConfigurationEndpoints
 
     /// <summary>Both are replaced: null or blank clears a value back to the default.</summary>
     public sealed record SetBrandingRequest(string? DisplayName, string? AccentColor);
+
+    /// <summary>All three are replaced: null or blank puts a value back to the default.</summary>
+    public sealed record SetRegionalRequest(string? TimeZone, string? DateFormat, string? TimeFormat);
 
     public static async Task<IResult> GetAsync(
         DocuEngAIneDbContext db,
@@ -99,14 +116,15 @@ public static class TenantConfigurationEndpoints
         // A tenant that has not been onboarded yet simply has every default.
         var tenant = await db.Tenants.AsNoTracking()
             .Where(t => t.Id == tenantId)
-            .Select(t => new { t.DisplayName, t.AccentColor, t.TerminologyJson })
+            .Select(t => new { t.DisplayName, t.AccentColor, t.TerminologyJson, t.TimeZoneId, t.DateFormat, t.TimeFormat })
             .FirstOrDefaultAsync(cancellationToken);
         var states = await features.GetStatesAsync(tenantId, cancellationToken);
 
         return Results.Ok(new TenantConfigurationView(
             MapFeatures(states),
             MapTerms(TenantAppearance.ParseTerms(tenant?.TerminologyJson)),
-            new BrandingView(tenant?.DisplayName, tenant?.AccentColor)));
+            new BrandingView(tenant?.DisplayName, tenant?.AccentColor),
+            MapRegional(tenant?.TimeZoneId, tenant?.DateFormat, tenant?.TimeFormat)));
     }
 
     public static async Task<IResult> SetFeatureAsync(
@@ -281,6 +299,97 @@ public static class TenantConfigurationEndpoints
         }
 
         return Results.Ok(new BrandingView(tenant.DisplayName, tenant.AccentColor));
+    }
+
+    public static async Task<IResult> SetRegionalAsync(
+        [FromBody] SetRegionalRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IAuditService? audit = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (user.TenantId is not Guid tenantId)
+            return Results.Unauthorized();
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, cancellationToken);
+        if (tenant is null)
+            return Results.NotFound(TenantEndpoints.TenantNotOnboardedMessage);
+
+        // Each is stored only when it differs from the default, so "back to the default" is one state.
+        string? timeZoneId = null;
+        if (!string.IsNullOrWhiteSpace(request.TimeZone))
+        {
+            if (!TenantClock.TryFindZone(request.TimeZone.Trim(), out var zone))
+            {
+                return Results.BadRequest(new
+                {
+                    error = $"'{request.TimeZone.Trim()}' is not a time zone this server knows. Use an IANA name such as Europe/London or America/New_York.",
+                });
+            }
+
+            timeZoneId = zone == TimeZoneInfo.Utc ? null : zone.Id;
+        }
+
+        string? dateFormat = null;
+        if (!string.IsNullOrWhiteSpace(request.DateFormat))
+        {
+            if (TenantRegional.FindDateFormat(request.DateFormat.Trim()) is not { } format)
+                return Results.BadRequest(new { error = $"'{request.DateFormat.Trim()}' is not one of the date formats on offer." });
+            dateFormat = format.Key == TenantRegional.DefaultDateFormat ? null : format.Key;
+        }
+
+        string? timeFormat = null;
+        if (!string.IsNullOrWhiteSpace(request.TimeFormat))
+        {
+            if (TenantRegional.FindTimeFormat(request.TimeFormat.Trim()) is not { } format)
+                return Results.BadRequest(new { error = $"'{request.TimeFormat.Trim()}' is not a time format. Use {TenantRegional.TimeFormat24} or {TenantRegional.TimeFormat12}." });
+            timeFormat = format.Key == TenantRegional.DefaultTimeFormat ? null : format.Key;
+        }
+
+        var before = MapRegional(tenant.TimeZoneId, tenant.DateFormat, tenant.TimeFormat);
+        var after = MapRegional(timeZoneId, dateFormat, timeFormat);
+        var changes = new Dictionary<string, object>();
+        if (before.TimeZone != after.TimeZone)
+            changes["regional.timeZone"] = new { from = before.TimeZone, to = after.TimeZone };
+        if (before.DateFormat != after.DateFormat)
+            changes["regional.dateFormat"] = new { from = before.DateFormat, to = after.DateFormat };
+        if (before.TimeFormat != after.TimeFormat)
+            changes["regional.timeFormat"] = new { from = before.TimeFormat, to = after.TimeFormat };
+
+        // Stored even without an effective change: a zone this host no longer knows is replaced.
+        tenant.TimeZoneId = timeZoneId;
+        tenant.DateFormat = dateFormat;
+        tenant.TimeFormat = timeFormat;
+        await db.SaveChangesAsync(cancellationToken);
+
+        if (changes.Count > 0 && audit is not null)
+        {
+            await audit.LogAsync(
+                new AuditEntry(
+                    "Tenant.SetRegional",
+                    nameof(Tenant),
+                    tenantId,
+                    "Changed the time zone or how dates and times are written",
+                    Category: AuditCategories.System,
+                    TargetLabel: tenant.Name,
+                    ChangesJson: JsonSerializer.Serialize(changes)),
+                cancellationToken);
+        }
+
+        return Results.Ok(after);
+    }
+
+    /// <summary>The settings in effect, from what is stored.</summary>
+    public static RegionalView MapRegional(string? timeZoneId, string? dateFormat, string? timeFormat)
+    {
+        var zone = TenantClock.TryFindZone(timeZoneId, out var found) && found != TimeZoneInfo.Utc
+            ? found.Id
+            : TenantRegional.DefaultTimeZone;
+        return new RegionalView(
+            zone,
+            TenantRegional.FindDateFormat(dateFormat)?.Key ?? TenantRegional.DefaultDateFormat,
+            TenantRegional.FindTimeFormat(timeFormat)?.Key ?? TenantRegional.DefaultTimeFormat,
+            TenantRegional.DateFormats,
+            TenantRegional.TimeFormats);
     }
 
     private static List<FeatureView> MapFeatures(IReadOnlyDictionary<string, bool> states)

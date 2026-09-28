@@ -7,17 +7,12 @@ import {
   usePortalDocuments,
   usePortalExpirations,
   usePortalKeeperLinks,
+  useFormat,
   useTenantConfiguration,
   type ExpirationItem,
   type PortalDocument,
   type PortalKeeperLink,
 } from '../hooks/useApi'
-
-function formatDate(iso: string) {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toISOString().slice(0, 10)
-}
 
 export function PortalPage() {
   const { companyId } = useParams()
@@ -72,6 +67,7 @@ function PortalCompany({ companyId }: { companyId: string }) {
   const { data: docData } = usePortalDocuments(companyId)
   const { data: expirationData } = usePortalExpirations(companyId)
   const { data: keeperData } = usePortalKeeperLinks(companyId)
+  const fmt = useFormat()
   const documents: PortalDocument[] = Array.isArray(docData) ? docData : []
   const expirations: ExpirationItem[] = Array.isArray(expirationData) ? expirationData : []
   const keepers: PortalKeeperLink[] = Array.isArray(keeperData) ? keeperData : []
@@ -128,7 +124,7 @@ function PortalCompany({ companyId }: { companyId: string }) {
                 <tr key={`${item.sourceType}-${item.id}`}>
                   <td>{item.name}</td>
                   <td>{item.fieldName}</td>
-                  <td>{formatDate(item.expiresAt)}</td>
+                  <td>{item.day ? fmt.day(item.day) : fmt.date(item.expiresAt)}</td>
                   <td>{item.daysUntil}d</td>
                 </tr>
               ))}

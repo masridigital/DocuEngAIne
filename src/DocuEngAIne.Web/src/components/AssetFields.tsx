@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { AssetFieldInput, OptionItem, OptionList } from '../hooks/useApi'
+import { useFormat, type AssetFieldInput, type OptionItem, type OptionList } from '../hooks/useApi'
 import { parseChoices, type FormField, type OptionLookup } from './assetFieldForm'
 
 function labelFor(item: OptionItem | undefined, value: string) {
@@ -19,6 +19,7 @@ function isHttpUrl(value: string) {
 /** A stored value as people read it. */
 export function FieldValue(props: { field: FormField; value: string | null | undefined; lists: OptionLookup }) {
   const { field, value, lists } = props
+  const fmt = useFormat()
   if (value === null || value === undefined || value === '') return <span className="muted">—</span>
   const items = field.optionListId ? lists.get(field.optionListId)?.items ?? [] : []
   switch (field.fieldType) {
@@ -28,10 +29,10 @@ export function FieldValue(props: { field: FormField; value: string | null | und
       return <>{labelFor(items.find((i) => i.value === value), value)}</>
     case 'MultiSelect':
       return <>{parseChoices(value).map((v) => labelFor(items.find((i) => i.value === v), v)).join(', ')}</>
-    case 'DateTime': {
-      const moment = new Date(value)
-      return <>{Number.isNaN(moment.getTime()) ? value : moment.toLocaleString()}</>
-    }
+    case 'Date':
+      return <>{fmt.day(value)}</>
+    case 'DateTime':
+      return <>{fmt.dateTime(value)}</>
     case 'Url':
       return isHttpUrl(value) ? (
         <a href={value} target="_blank" rel="noopener noreferrer">

@@ -18,6 +18,7 @@ import {
   useAssetLayoutVersion,
   useAssetLayoutVersions,
   useCompanies,
+  useFormat,
   useOptionLists,
   useProfile,
   usesOptions,
@@ -325,6 +326,7 @@ function Versions(props: { layoutId: string }) {
   const { data: versions, error } = useAssetLayoutVersions(props.layoutId)
   const [open, setOpen] = useState<number | null>(null)
   const { data: detail } = useAssetLayoutVersion(props.layoutId, open)
+  const fmt = useFormat()
 
   if (error) return <p className="error">Failed to load the version history.</p>
   if (!versions) return <p>Loading…</p>
@@ -354,7 +356,7 @@ function Versions(props: { layoutId: string }) {
               <td>v{v.versionNumber}</td>
               <td>{v.summary}</td>
               <td>{v.createdByName ?? <span className="muted">—</span>}</td>
-              <td>{new Date(v.createdAt).toLocaleString()}</td>
+              <td>{fmt.dateTime(v.createdAt)}</td>
               <td>
                 <button
                   className="btn"
@@ -379,6 +381,7 @@ function LayoutDetail(props: { id: string; canEdit: boolean; onClose: () => void
   const { data, error, isLoading } = useAssetLayout(props.id)
   const { data: lists } = useOptionLists()
   const { data: companies } = useCompanies()
+  const fmt = useFormat()
   const [companyId, setCompanyId] = useState('')
   const [message, setMessage] = useState<string | null>(null)
   const [problems, setProblems] = useState<AssetLayoutProblem[]>([])
@@ -551,7 +554,7 @@ function LayoutDetail(props: { id: string; canEdit: boolean; onClose: () => void
               {enabled.map((c) => (
                 <tr key={c.companyId}>
                   <td>{c.companyName}</td>
-                  <td>{new Date(c.activatedAt).toLocaleDateString()}</td>
+                  <td>{fmt.date(c.activatedAt)}</td>
                   <td>
                     {props.canEdit ? (
                       <button

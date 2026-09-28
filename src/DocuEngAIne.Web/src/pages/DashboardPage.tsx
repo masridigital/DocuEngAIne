@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import {
   useExpirations,
   useFlagReview,
+  useFormat,
   useRecents,
   useRunbookRuns,
   type ExpirationItem,
@@ -29,13 +30,6 @@ function hrefFor(entityType: string, id: string) {
     default:
       return '/'
   }
-}
-
-function formatWhen(iso?: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toISOString().slice(0, 10)
 }
 
 function daysLabel(days: number) {
@@ -183,19 +177,21 @@ function FavoriteRow({ item }: { item: FlagReviewItem }) {
 }
 
 function RecentRow({ item }: { item: RecentItem }) {
+  const fmt = useFormat()
   return (
     <li>
       <Link to={hrefFor(item.entityType, item.id)}>{item.name}</Link>
-      <span className="widget-meta">{item.entityType} · {formatWhen(item.updatedAt)}</span>
+      <span className="widget-meta">{item.entityType} · {fmt.date(item.updatedAt)}</span>
     </li>
   )
 }
 
 function TaskRow({ item }: { item: RunbookRunRollup }) {
+  const fmt = useFormat()
   return (
     <li>
       <Link to={`/runs?status=${encodeURIComponent(item.status)}`}>{item.runbookTitle}</Link>
-      <span className="widget-meta">{item.companyName ?? '—'} · {formatWhen(item.startedAt)}</span>
+      <span className="widget-meta">{item.companyName ?? '—'} · {fmt.date(item.startedAt)}</span>
     </li>
   )
 }

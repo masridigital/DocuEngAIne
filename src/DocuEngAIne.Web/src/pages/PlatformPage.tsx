@@ -3,6 +3,7 @@ import {
   archiveTenant,
   reactivateTenant,
   suspendTenant,
+  useFormat,
   usePlatformTenants,
   useProfile,
   type PlatformTenant,
@@ -20,6 +21,7 @@ export function PlatformPage() {
   const { data, error, isLoading } = usePlatformTenants(allowed)
   const [message, setMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState<string | null>(null)
+  const fmt = useFormat()
 
   async function act(id: string, action: () => Promise<void>) {
     setMessage(null)
@@ -114,12 +116,12 @@ export function PlatformPage() {
                   <span className={STATUS_CLASS[t.status]}>{t.status}</span>
                   {t.statusReason ? <div className="muted">{t.statusReason}</div> : null}
                   {t.statusChangedAt ? (
-                    <div className="muted">since {new Date(t.statusChangedAt).toLocaleDateString()}</div>
+                    <div className="muted">since {fmt.date(t.statusChangedAt)}</div>
                   ) : null}
                 </td>
                 <td>{t.activeUsers}</td>
                 <td>{t.companies}</td>
-                <td>{new Date(t.createdAt).toLocaleDateString()}</td>
+                <td>{fmt.date(t.createdAt)}</td>
                 <td className="row-actions">
                   {t.id === profile?.tenant?.id ? (
                     <span className="muted">Your tenant</span>

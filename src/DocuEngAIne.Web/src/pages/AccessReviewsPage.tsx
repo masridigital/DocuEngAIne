@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { FeatureOff } from '../components/FeatureOff'
+import { endOfDay } from '../components/regional'
 import {
   cancelAccessReview,
   canManageUsers,
@@ -11,6 +12,7 @@ import {
   startAccessReview,
   useAccessReview,
   useAccessReviews,
+  useFormat,
   useProfile,
   useTenantConfiguration,
   USER_ROLES,
@@ -23,13 +25,6 @@ const STATUS_LABELS: Record<string, string> = {
   InProgress: 'In progress',
   Completed: 'Completed',
   Cancelled: 'Cancelled',
-}
-
-function formatTimestamp(value?: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
 }
 
 function DecisionControls(props: {
@@ -90,6 +85,7 @@ function DecisionControls(props: {
 
 function ReviewDetail(props: { id: string; currentUserId?: string; onClose: () => void }) {
   const { data, error, isLoading } = useAccessReview(props.id)
+  const fmt = useFormat()
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -120,8 +116,8 @@ function ReviewDetail(props: { id: string; currentUserId?: string; onClose: () =
       {errorMessage && <p className="error">{errorMessage}</p>}
       {data.notes ? <p>{data.notes}</p> : null}
       <p className="muted">
-        Started {formatTimestamp(review.startedAt)} · {review.itemCount} user(s) · {pending} pending
-        {review.dueAt ? ` · due ${formatTimestamp(review.dueAt)}` : ''}
+        Started {fmt.dateTime(review.startedAt)} · {review.itemCount} user(s) · {pending} pending
+        {review.dueAt ? ` · due ${fmt.date(review.dueAt)}` : ''}
       </p>
 
       <div className="toolbar">
@@ -188,7 +184,7 @@ function ReviewDetail(props: { id: string; currentUserId?: string; onClose: () =
                     <>
                       {item.decision === 'ChangeRole' ? `Role → ${item.requestedRole}` : item.decision}
                       <div className="muted">
-                        {item.decidedByName ?? '—'} · {formatTimestamp(item.decidedAt)}
+                        {item.decidedByName ?? '—'} · {fmt.dateTime(item.decidedAt)}
                       </div>
                       {item.decisionNotes ? <div className="muted">{item.decisionNotes}</div> : null}
                     </>
@@ -220,6 +216,7 @@ export function AccessReviewsPage() {
   const reviewsOn = featureEnabled(configuration, 'access_reviews')
   const { data, error, isLoading } = useAccessReviews(allowed && reviewsOn && !configurationLoading)
   const reviews = Array.isArray(data) ? data : []
+  const fmt = useFormat()
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [name, setName] = useState('')
@@ -233,7 +230,9 @@ export function AccessReviewsPage() {
     setFormError(null)
     setSubmitting(true)
     try {
-      const created = await createAccessReview({ name: name.trim(), dueAt: dueAt || undefined })
+      // Due by the end of the chosen day, in the tenant's zone.
+      const due = dueAt ? endOfDay(dueAt, fmt.regional.timeZone) : null
+      const created = await createAccessReview({ name: name.trim(), dueAt: due ?? undefined })
       setName('')
       setDueAt('')
       setSelectedId(created.id)
@@ -311,8 +310,8 @@ export function AccessReviewsPage() {
                 <td>{STATUS_LABELS[r.status] ?? r.status}</td>
                 <td>{r.itemCount}</td>
                 <td>{r.pendingCount}</td>
-                <td>{formatTimestamp(r.dueAt)}</td>
-                <td>{formatTimestamp(r.createdAt)}</td>
+                <td>{fmt.date(r.dueAt)}</td>
+                <td>{fmt.dateTime(r.createdAt)}</td>
               </tr>
             ))}
           </tbody>

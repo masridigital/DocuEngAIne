@@ -1,11 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useExpirations, type ExpirationItem } from '../hooks/useApi'
-
-function formatDate(iso: string) {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toISOString().slice(0, 10)
-}
+import { useExpirations, useFormat, type ExpirationItem } from '../hooks/useApi'
 
 function daysClass(days: number) {
   if (days < 0) return 'days-expired'
@@ -23,6 +17,7 @@ export function ExpirationsPage() {
   const [query, setQuery] = useState('')
   const [showExpired, setShowExpired] = useState(false)
   const { data, error, isLoading } = useExpirations({ q: query, showExpired })
+  const fmt = useFormat()
   const items: ExpirationItem[] = Array.isArray(data) ? data : []
 
   const countLabel = useMemo(() => {
@@ -76,7 +71,7 @@ export function ExpirationsPage() {
                 <td>{item.name}</td>
                 <td>{item.companyName ?? '—'}</td>
                 <td>{item.fieldName}</td>
-                <td>{formatDate(item.expiresAt)}</td>
+                <td>{item.day ? fmt.day(item.day) : fmt.date(item.expiresAt)}</td>
                 <td className={daysClass(item.daysUntil)}>{daysLabel(item.daysUntil)}</td>
               </tr>
             ))}

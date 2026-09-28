@@ -1,15 +1,18 @@
 import { useState, type FormEvent } from 'react'
 import { APP_BACKGROUND, contrastRatio, isHexColor, MINIMUM_CONTRAST } from '../components/branding'
+import { DEFAULT_REGIONAL, formatDateTime, timeZoneChoices } from '../components/regional'
 import {
   canManageUsers,
   DEFAULT_PRODUCT_NAME,
   setTenantBranding,
   setTenantFeature,
+  setTenantRegional,
   setTenantTerminology,
   useProfile,
   useTenantConfiguration,
   type TenantConfiguration,
   type TenantFeature,
+  type TenantRegional,
   type TenantTerm,
 } from '../hooks/useApi'
 
@@ -286,6 +289,117 @@ function Branding(props: { branding: TenantConfiguration['branding'] }) {
   )
 }
 
+function Regional(props: { regional: TenantRegional }) {
+  const [timeZone, setTimeZone] = useState(props.regional.timeZone)
+  const [dateFormat, setDateFormat] = useState(props.regional.dateFormat)
+  const [timeFormat, setTimeFormat] = useState(props.regional.timeFormat)
+  const [message, setMessage] = useState<string | null>(null)
+  const [saved, setSaved] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [now] = useState(() => new Date())
+
+  const zones = timeZoneChoices(timeZone)
+  const preview = formatDateTime(now, { timeZone, dateFormat, timeFormat })
+
+  async function save(e: FormEvent) {
+    e.preventDefault()
+    setMessage(null)
+    setBusy(true)
+    try {
+      await setTenantRegional({ timeZone, dateFormat, timeFormat })
+      setSaved(true)
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Failed to save the regional settings.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form className="panel" onSubmit={save}>
+      <h2>Time zone and formats</h2>
+      <p className="muted">
+        Every time in the app is shown in this zone, whatever each person's own device is set to, and what they type
+        into a date or time box is read in it. It also decides what "today" is for expirations. Exports stay in UTC.
+      </p>
+      {message && <p className="error">{message}</p>}
+      <div className="form-grid">
+        <label>
+          Time zone
+          <select
+            className="input"
+            value={timeZone}
+            onChange={(e) => {
+              setSaved(false)
+              setTimeZone(e.target.value)
+            }}
+          >
+            {zones.map((z) => (
+              <option key={z} value={z}>
+                {z}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Dates
+          <select
+            className="input"
+            value={dateFormat}
+            onChange={(e) => {
+              setSaved(false)
+              setDateFormat(e.target.value)
+            }}
+          >
+            {props.regional.dateFormats.map((f) => (
+              <option key={f.key} value={f.key}>
+                {f.example}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Times
+          <select
+            className="input"
+            value={timeFormat}
+            onChange={(e) => {
+              setSaved(false)
+              setTimeFormat(e.target.value)
+            }}
+          >
+            {props.regional.timeFormats.map((f) => (
+              <option key={f.key} value={f.key}>
+                {f.name} ({f.example})
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+      <p className="muted">When this page opened, it was {preview} there.</p>
+      <div className="toolbar">
+        <button className="btn" type="submit" disabled={busy}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>{' '}
+        <button
+          className="btn btn-secondary"
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            setSaved(false)
+            setTimeZone(DEFAULT_REGIONAL.timeZone)
+            setDateFormat(DEFAULT_REGIONAL.dateFormat)
+            setTimeFormat(DEFAULT_REGIONAL.timeFormat)
+          }}
+        >
+          Use defaults
+        </button>{' '}
+        {saved ? <span className="muted">Saved.</span> : null}
+      </div>
+    </form>
+  )
+}
+
 export function SettingsPage() {
   const { data: profile, isLoading: profileLoading } = useProfile()
   const allowed = canManageUsers(profile?.role)
@@ -325,6 +439,7 @@ export function SettingsPage() {
       <Features features={data.features} />
       <Names terms={data.terminology} />
       <Branding branding={data.branding} />
+      {data.regional ? <Regional regional={data.regional} /> : null}
     </div>
   )
 }

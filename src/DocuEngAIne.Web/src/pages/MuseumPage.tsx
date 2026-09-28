@@ -5,19 +5,13 @@ import {
   permanentlyDeleteArchiveEntry,
   restoreArchiveEntry,
   useArchive,
+  useFormat,
   useProfile,
   useTerms,
   type ArchiveEntry,
   type ArchiveResourceType,
   type ArchiveState,
 } from '../hooks/useApi'
-
-function formatTimestamp(value?: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
-}
 
 function useTypeLabel() {
   const term = useTerms()
@@ -39,9 +33,9 @@ function useTypeLabel() {
   }
 }
 
-function stateText(e: ArchiveEntry) {
-  if (e.state === 'restored') return `Restored ${formatTimestamp(e.restoredAt)}`
-  if (e.state === 'deleted') return `Deleted ${formatTimestamp(e.permanentlyDeletedAt)}`
+function stateText(e: ArchiveEntry, dateTime: (value?: string | null) => string) {
+  if (e.state === 'restored') return `Restored ${dateTime(e.restoredAt)}`
+  if (e.state === 'deleted') return `Deleted ${dateTime(e.permanentlyDeletedAt)}`
   return 'Archived'
 }
 
@@ -59,6 +53,7 @@ type Actions = {
 export function MuseumPage() {
   const term = useTerms()
   const typeLabel = useTypeLabel()
+  const fmt = useFormat()
   const { data: profile } = useProfile()
   const isAdmin = canManageUsers(profile?.role)
 
@@ -195,10 +190,10 @@ export function MuseumPage() {
                         </div>
                       )}
                     </td>
-                    <td>{formatTimestamp(e.archivedAt)}</td>
+                    <td>{fmt.dateTime(e.archivedAt)}</td>
                     <td>{e.archivedByName || e.archivedByObjectId || '—'}</td>
                     <td>{e.reason ?? '—'}</td>
-                    <td>{stateText(e)}</td>
+                    <td>{stateText(e, fmt.dateTime)}</td>
                     <td>
                       <EntryActions entry={e} actions={actions} />
                     </td>
@@ -246,6 +241,7 @@ function EntryActions({ entry, actions }: { entry: ArchiveEntry; actions: Action
  */
 function CompanyContents({ parent, actions }: { parent: ArchiveEntry; actions: Actions }) {
   const typeLabel = useTypeLabel()
+  const fmt = useFormat()
   const [page, setPage] = useState(1)
   const { data, error, isLoading } = useArchive({ state: 'all', parentId: parent.id, page })
   const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1
@@ -275,7 +271,7 @@ function CompanyContents({ parent, actions }: { parent: ArchiveEntry; actions: A
             <tr key={e.id}>
               <td>{typeLabel(e.resourceType)}</td>
               <td>{e.resourceLabel}</td>
-              <td>{stateText(e)}</td>
+              <td>{stateText(e, fmt.dateTime)}</td>
               <td>
                 {e.state === 'archived' && companyArchived && actions.isAdmin && (
                   <button className="btn" disabled={actions.busyId === e.id} onClick={() => actions.onPermanentDelete(e)}>

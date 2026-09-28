@@ -1,15 +1,8 @@
 import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
-import { promoteRunbookRun, useCompanies, useRunbookRuns, type RunbookRunRollup } from '../hooks/useApi'
+import { promoteRunbookRun, useCompanies, useFormat, useRunbookRuns, type RunbookRunRollup } from '../hooks/useApi'
 
 const statuses = ['', 'Running', 'Completed', 'Cancelled'] as const
-
-function formatWhen(iso?: string | null) {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleString()
-}
 
 function statusClass(status: string) {
   const key = status.toLowerCase()
@@ -19,6 +12,7 @@ function statusClass(status: string) {
 }
 
 export function RunsPage() {
+  const fmt = useFormat()
   const [params, setParams] = useSearchParams()
   const [status, setStatus] = useState(params.get('status') ?? '')
   const [companyId, setCompanyId] = useState(params.get('companyId') ?? '')
@@ -134,8 +128,8 @@ export function RunsPage() {
                   )}
                 </td>
                 <td className={statusClass(item.status)}>{item.status}</td>
-                <td>{formatWhen(item.startedAt)}</td>
-                <td>{formatWhen(item.finishedAt)}</td>
+                <td>{fmt.dateTime(item.startedAt)}</td>
+                <td>{fmt.dateTime(item.finishedAt)}</td>
                 <td className="row-actions">
                   {item.status.toLowerCase() === 'completed' && (
                     promotedIds[item.id] ? (

@@ -1,5 +1,15 @@
 import useSWR, { mutate } from 'swr'
 import { acquireApiToken } from '../auth/msalConfig'
+import {
+  dayInZone,
+  DEFAULT_REGIONAL,
+  endOfDay,
+  formatDate,
+  formatDateTime,
+  formatDay,
+  startOfDay,
+  type Regional,
+} from '../components/regional'
 
 /** Thrown for any non-2xx API response. Carries the HTTP status and the response body. */
 export class ApiError extends Error {
@@ -345,6 +355,8 @@ export type ExpirationItem = {
   fieldName: string
   expiresAt: string
   daysUntil: number
+  /** The calendar day it expires on, in the tenant's zone (`yyyy-MM-dd`). */
+  day?: string
 }
 
 export function useExpirations(opts?: { q?: string; showExpired?: boolean; companyId?: string }) {
@@ -1135,19 +1147,23 @@ export type AuditFilters = {
   page?: number
 }
 
-function auditQuery(filters: AuditFilters) {
+/** From / to are tenant days: from its first moment to the last moment of the "to" day, inclusive. */
+function auditQuery(filters: AuditFilters, timeZone: string) {
   const params = new URLSearchParams()
   if (filters.action) params.set('action', filters.action)
   if (filters.category) params.set('category', filters.category)
   if (filters.entityType) params.set('entityType', filters.entityType)
-  if (filters.from) params.set('from', new Date(filters.from).toISOString())
-  if (filters.to) params.set('to', new Date(filters.to).toISOString())
+  const from = filters.from ? startOfDay(filters.from, timeZone) : null
+  const to = filters.to ? endOfDay(filters.to, timeZone) : null
+  if (from) params.set('from', from)
+  if (to) params.set('to', to)
   return params
 }
 
 /** Admin-gated audit trail. Pass enabled=false to skip the request entirely. */
 export function useAuditEvents(filters: AuditFilters, enabled = true) {
-  const params = auditQuery(filters)
+  const { timeZone } = useRegional()
+  const params = auditQuery(filters, timeZone)
   if (filters.page && filters.page > 1) params.set('page', String(filters.page))
   const qs = params.toString()
   return useSWR<AuditEventPage>(enabled ? `/api/audit-events${qs ? `?${qs}` : ''}` : null, fetcher)
@@ -1161,16 +1177,16 @@ export function useAuditActivity(entityType?: string, entityId?: string) {
   )
 }
 
-/** Downloads the filtered trail as CSV. The export itself is audit-logged server-side. */
-export async function exportAuditCsv(filters: AuditFilters) {
-  const qs = auditQuery(filters).toString()
+/** Downloads the filtered trail as CSV (times in UTC). The export itself is audit-logged server-side. */
+export async function exportAuditCsv(filters: AuditFilters, timeZone: string) {
+  const qs = auditQuery(filters, timeZone).toString()
   const res = await apiFetch(`/api/audit-events/export${qs ? `?${qs}` : ''}`)
   const blob = await res.blob()
   const url = URL.createObjectURL(blob)
   try {
     const link = document.createElement('a')
     link.href = url
-    link.download = `audit-events-${new Date().toISOString().slice(0, 10)}.csv`
+    link.download = `audit-events-${dayInZone(new Date(), timeZone)}.csv`
     document.body.appendChild(link)
     link.click()
     link.remove()
@@ -1322,10 +1338,11 @@ function refreshAccessReview(id: string) {
   return Promise.all([mutate(ACCESS_REVIEWS_KEY), mutate(`${ACCESS_REVIEWS_KEY}/${id}`)])
 }
 
+/** `dueAt` is an instant (the page sends the end of the chosen day in the tenant's zone). */
 export async function createAccessReview(input: { name: string; dueAt?: string; notes?: string }) {
   const created = await postJson<AccessReviewSummary>(ACCESS_REVIEWS_KEY, {
     name: input.name,
-    dueAt: input.dueAt ? new Date(input.dueAt).toISOString() : undefined,
+    dueAt: input.dueAt || undefined,
     notes: input.notes || undefined,
   })
   await mutate(ACCESS_REVIEWS_KEY)
@@ -1549,10 +1566,16 @@ export type TenantTerm = {
 
 export type TenantBranding = { displayName?: string | null; accentColor?: string | null }
 
+export type TenantRegional = Regional & {
+  dateFormats: { key: string; example: string }[]
+  timeFormats: { key: string; name: string; example: string }[]
+}
+
 export type TenantConfiguration = {
   features: TenantFeature[]
   terminology: TenantTerm[]
   branding: TenantBranding
+  regional?: TenantRegional
 }
 
 export const TENANT_CONFIGURATION_KEY = '/api/tenant/configuration'
@@ -1583,6 +1606,35 @@ export function useTerms() {
     const term = data?.terminology.find((t) => t.key === key)
     return term ? term[form] : DEFAULT_TERMS[key][form]
   }
+}
+
+/** The tenant's time zone and formats; UTC, yyyy-MM-dd and 24-hour until the configuration loads. */
+export function useRegional(): Regional {
+  const { data } = useTenantConfiguration()
+  return data?.regional ?? DEFAULT_REGIONAL
+}
+
+/**
+ * Writes dates the tenant's way: `day` for calendar days (`yyyy-MM-dd`, never moved by a zone),
+ * `date` for the day an instant falls on in the tenant's zone, `dateTime` for an instant.
+ */
+export function useFormat() {
+  const regional = useRegional()
+  return {
+    regional,
+    day: (value: string | null | undefined) => formatDay(value, regional),
+    date: (value: string | Date | null | undefined) => formatDate(value, regional),
+    dateTime: (value: string | Date | null | undefined) => formatDateTime(value, regional),
+  }
+}
+
+/** Null puts a setting back to its default. Expiration days are counted in the zone, so they refresh too. */
+export async function setTenantRegional(input: { timeZone: string | null; dateFormat: string | null; timeFormat: string | null }) {
+  await putJson('/api/tenant/regional', input)
+  await Promise.all([
+    mutate(TENANT_CONFIGURATION_KEY),
+    mutate((key) => typeof key === 'string' && (key.startsWith('/api/expirations') || key.startsWith('/api/portal'))),
+  ])
 }
 
 export async function setTenantFeature(key: string, enabled: boolean) {

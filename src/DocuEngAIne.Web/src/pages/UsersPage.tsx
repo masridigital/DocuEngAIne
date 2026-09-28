@@ -3,6 +3,7 @@ import {
   canManageUsers,
   setUserActive,
   updateUserRole,
+  useFormat,
   useProfile,
   useUsers,
   USER_ROLES,
@@ -10,14 +11,8 @@ import {
   type UserRole,
 } from '../hooks/useApi'
 
-function formatTimestamp(value?: string | null) {
-  if (!value) return '—'
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleString()
-}
-
 export function UsersPage() {
+  const fmt = useFormat()
   const { data: profile, isLoading: profileLoading } = useProfile()
   const allowed = canManageUsers(profile?.role)
   const { data, error, isLoading, mutate } = useUsers(allowed)
@@ -132,7 +127,7 @@ export function UsersPage() {
                     </select>
                   </td>
                   <td>{u.isActive ? 'Active' : 'Suspended'}</td>
-                  <td>{formatTimestamp(u.lastSeenAt)}</td>
+                  <td>{fmt.dateTime(u.lastSeenAt)}</td>
                   <td>
                     {u.id !== profile?.id && (
                       <button
