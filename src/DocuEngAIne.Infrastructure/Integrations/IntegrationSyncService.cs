@@ -124,10 +124,13 @@ public class IntegrationSyncService : IIntegrationSyncService
                 // Upsert still runs after companies: it needs their mappings to exist.
                 IReadOnlyList<ExternalLocationDto> sites = [];
                 IReadOnlyList<ExternalContactDto> contacts = [];
+                IReadOnlyList<HaloAssetDto> assets = [];
                 if (!connection.SkipLocations)
                     sites = await HaloSiteMapper.PullAsync(_mcpClient, mcpId, cancellationToken: cancellationToken);
                 if (!connection.SkipContacts)
                     contacts = await HaloUserMapper.PullAsync(_mcpClient, mcpId, cancellationToken: cancellationToken);
+                if (!connection.SkipAssets)
+                    assets = await HaloAssetMapper.PullAsync(_mcpClient, mcpId, cancellationToken: cancellationToken);
 
                 var run = await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
                 // Re-checked before EACH pass, not once: a child pass swallows its own failure into
@@ -137,6 +140,8 @@ public class IntegrationSyncService : IIntegrationSyncService
                     await SyncLocationsAsync(connection, run, sites, cancellationToken);
                 if (run.Status == SyncRunStatus.Succeeded && contacts.Count > 0)
                     await SyncContactsAsync(connection, run, contacts, cancellationToken);
+                if (run.Status == SyncRunStatus.Succeeded && assets.Count > 0)
+                    await SyncDevicesAsync(connection, run, ActiveHaloAssets(connection, run, assets), cancellationToken);
                 return run;
             }
             catch (SyncAlreadyRunningException)
@@ -162,12 +167,18 @@ public class IntegrationSyncService : IIntegrationSyncService
                 // FailRunAsync, instead of leaving a succeeded company run plus a second failed run.
                 // The device *upsert* still runs after companies: it needs their mappings to exist.
                 IReadOnlyList<ExternalDeviceDto> devices = [];
+                IReadOnlyList<ExternalLocationDto> locations = [];
                 if (!connection.SkipAssets)
                     devices = await PullNinjaDevicesAsync(mcpId, cancellationToken);
+                if (!connection.SkipLocations)
+                    locations = await NinjaLocationMapper.PullAsync(_mcpClient, mcpId, cancellationToken: cancellationToken);
 
                 var run = await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                // Re-checked before EACH pass — see the Halo block for why.
                 if (devices.Count > 0 && run.Status == SyncRunStatus.Succeeded)
                     await SyncDevicesAsync(connection, run, devices, cancellationToken);
+                if (locations.Count > 0 && run.Status == SyncRunStatus.Succeeded)
+                    await SyncLocationsAsync(connection, run, locations, cancellationToken);
                 return run;
             }
             catch (SyncAlreadyRunningException)
@@ -189,12 +200,18 @@ public class IntegrationSyncService : IIntegrationSyncService
             {
                 var companies = await PullCippCompaniesAsync(mcpId, cancellationToken);
                 IReadOnlyList<ExternalDeviceDto> devices = [];
+                IReadOnlyList<ExternalContactDto> users = [];
                 if (!connection.SkipAssets)
                     devices = await PullCippDevicesAsync(mcpId, companies, connection, cancellationToken);
+                if (!connection.SkipContacts)
+                    users = await PullCippUsersAsync(mcpId, companies, connection, cancellationToken);
 
                 var run = await SyncFromPayloadAsync(connection.Id, companies, cancellationToken);
+                // Re-checked before EACH pass — see the Halo block for why.
                 if (devices.Count > 0 && run.Status == SyncRunStatus.Succeeded)
                     await SyncDevicesAsync(connection, run, devices, cancellationToken);
+                if (users.Count > 0 && run.Status == SyncRunStatus.Succeeded)
+                    await SyncContactsAsync(connection, run, users, cancellationToken);
                 return run;
             }
             catch (SyncAlreadyRunningException)
@@ -1229,6 +1246,52 @@ public class IntegrationSyncService : IIntegrationSyncService
                 _mcpClient, mcpServerId, company.ExternalId, company.ExternalId, cancellationToken));
         }
         return devices;
+    }
+
+    /// <summary>
+    /// One <c>cipp_list_users</c> call per tenant, addressed exactly as <see cref="PullCippDevicesAsync"/>
+    /// addresses devices, and stamped with the tenant's <c>customerId</c> so the contact pass resolves
+    /// each user through the company mappings. Excluded tenants are not pulled.
+    /// </summary>
+    private async Task<IReadOnlyList<ExternalContactDto>> PullCippUsersAsync(
+        Guid mcpServerId,
+        IReadOnlyList<ExternalCompanyDto> companies,
+        IntegrationConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var users = new List<ExternalContactDto>();
+        foreach (var company in companies)
+        {
+            if (connection.SkipInactive && company.IsInactive == true)
+                continue;
+            if (string.IsNullOrWhiteSpace(company.ExternalId))
+                continue;
+            users.AddRange(await CippUserMapper.PullAsync(
+                _mcpClient, mcpServerId, company.ExternalId, company.ExternalId, cancellationToken));
+        }
+        return users;
+    }
+
+    /// <summary>
+    /// Halo assets less the ones Halo marks inactive, when the connection skips inactive records.
+    /// The device pass cannot see the flag (it is on <see cref="HaloAssetDto"/> only), so it is
+    /// applied here and counted as skipped.
+    /// </summary>
+    private static IReadOnlyList<ExternalDeviceDto> ActiveHaloAssets(
+        IntegrationConnection connection, SyncRun run, IReadOnlyList<HaloAssetDto> assets)
+    {
+        if (!connection.SkipInactive)
+            return assets;
+
+        var active = new List<ExternalDeviceDto>(assets.Count);
+        foreach (var asset in assets)
+        {
+            if (asset.IsInactive == true)
+                run.ItemsSkipped++;
+            else
+                active.Add(asset);
+        }
+        return active;
     }
 
     private async Task<IReadOnlyList<ExternalCompanyDto>> PullMerakiCompaniesAsync(

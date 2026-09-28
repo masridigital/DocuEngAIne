@@ -17,9 +17,10 @@ Since `be7465b`, roughly fifty PRs landed in two days. The wave was wide and mos
   dispatched by `IntegrationSyncService.SyncAsync`, converge through `CompanyIdentity` /
   `CompanyMatchIndex`, and stamp `ExternalIdsJson`. PR #66 additionally wired Halo sites/users,
   Action1 endpoints, CIPP devices, Meraki networks, and UniFi sites/devices into child passes.
-- **A dozen mappers still have no caller** (Halo assets, Ninja locations, CIPP users, Keeper
-  MSP/SCIM, Datto, Huntress, ImmyBot, Liongard, Azure subscriptions/resource groups, Graph
-  partner/delegated-admin, DNSFilter, ThreatLocker). They are tested dead code until a sync pass
+- **Nine mappers still have no caller** (Keeper MSP/SCIM, Datto, Huntress, ImmyBot, Liongard,
+  Azure subscriptions/resource groups, Graph partner/delegated-admin, DNSFilter, ThreatLocker).
+  Halo assets, Ninja locations and CIPP users are now dispatched as child passes of their
+  providers' syncs. They are tested dead code until a sync pass
   dispatches them — see "Decide the mapper backlog" below.
 - **The scheduler is real**: `IntegrationSyncHostedService` polls every minute;
   `SyncCadencePolicy` budgets 20% of the detected StackJack allowance (plan auto-detected from
@@ -140,7 +141,8 @@ Stale branches safe to delete: `feature/integrations-mcp`, `cursor/unifi-host-pu
 
 ### 2. Decide the mapper backlog: wire or stop building
 
-A dozen mappers are dead code. Each is well-tested against fixtures, but no sync pass dispatches them,
+Halo assets, Ninja locations and CIPP users are wired (each behind its connection's skip flag,
+pulled before the company upsert so a tool failure fails the run once). The rest are still dead code. Each is well-tested against fixtures, but no sync pass dispatches them,
 and each unwired provider that later gets wired without an `IntegrationProvider` enum value would
 fall through to the `"custom"` provider key and collide in `ExternalIdsJson`. Either schedule the
 site/user/device passes that consume them (the Ninja device pass is the template) or stop merging
