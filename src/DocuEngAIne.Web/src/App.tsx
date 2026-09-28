@@ -1,6 +1,7 @@
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './App.css'
 import { Layout } from './components/Layout'
+import { AccessReviewsPage } from './pages/AccessReviewsPage'
 import { AssetsPage } from './pages/AssetsPage'
 import { AuditPage } from './pages/AuditPage'
 import { CompaniesPage } from './pages/CompaniesPage'
@@ -34,6 +35,7 @@ function App() {
           <Route path="integrations" element={<IntegrationsPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="audit" element={<AuditPage />} />
+          <Route path="access-reviews" element={<AccessReviewsPage />} />
           <Route path="museum" element={<MuseumPage />} />
           <Route path="portal" element={<PortalPage />} />
           <Route path="portal/:companyId" element={<PortalPage />} />

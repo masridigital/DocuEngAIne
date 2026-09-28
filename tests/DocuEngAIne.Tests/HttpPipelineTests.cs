@@ -233,6 +233,18 @@ public class HttpPipelineTests : IClassFixture<TestHost>
     }
 
     [Fact]
+    public async Task Access_Reviews_Require_Admin()
+    {
+        using (var reader = _host.CreateReaderClient())
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, (await reader.GetAsync("/api/access-reviews")).StatusCode);
+        }
+
+        using var owner = _host.CreateOwnerClient();
+        Assert.Equal(HttpStatusCode.OK, (await owner.GetAsync("/api/access-reviews")).StatusCode);
+    }
+
+    [Fact]
     public async Task Audit_Events_Require_Admin()
     {
         using (var reader = _host.CreateReaderClient())

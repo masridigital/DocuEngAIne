@@ -252,6 +252,30 @@ public static class ModelBuilderExtensions
             a.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
+        modelBuilder.Entity<AccessReview>(r =>
+        {
+            r.Property(x => x.Name).HasMaxLength(150);
+            r.Property(x => x.Notes).HasMaxLength(2000);
+            r.Property(x => x.CreatedByObjectId).HasMaxLength(128);
+            r.HasIndex(x => new { x.TenantId, x.Status });
+            r.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            r.HasMany(x => x.Items).WithOne(i => i.AccessReview).HasForeignKey(i => i.AccessReviewId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AccessReviewItem>(i =>
+        {
+            i.Property(x => x.SubjectEmail).HasMaxLength(320);
+            i.Property(x => x.SubjectName).HasMaxLength(200);
+            i.Property(x => x.DecidedByObjectId).HasMaxLength(128);
+            i.Property(x => x.DecidedByName).HasMaxLength(200);
+            i.Property(x => x.DecisionNotes).HasMaxLength(2000);
+            // One item per subject per review: the snapshot is the population, not a log.
+            i.HasIndex(x => new { x.AccessReviewId, x.SubjectUserId }).IsUnique();
+            i.HasIndex(x => new { x.TenantId, x.SubjectUserId });
+            // Restrict: AccessReview already cascades from Tenant's side — SQL Server forbids a second path.
+            i.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<ApiToken>(a =>
         {
             a.Property(x => x.Name).HasMaxLength(200);
