@@ -3,10 +3,17 @@ using DocuEngAIne.Core.Interfaces;
 
 namespace DocuEngAIne.Core.Entities;
 
-public class Company : EntityBase, ITenantScoped
+public class Company : EntityBase, ITenantScoped, ISoftDeletable
 {
     public Guid TenantId { get; set; }
     public Tenant Tenant { get; set; } = null!;
+
+    /// <summary>
+    /// Set while the company is in the Museum. Its assets, documents, runbooks and Keeper links are
+    /// archived with it (each with an entry under the company's), its folders and runs are hidden,
+    /// and sync and imports leave it alone instead of re-creating it.
+    /// </summary>
+    public DateTimeOffset? DeletedAt { get; set; }
 
     public required string Name { get; set; }
     public required string Slug { get; set; }

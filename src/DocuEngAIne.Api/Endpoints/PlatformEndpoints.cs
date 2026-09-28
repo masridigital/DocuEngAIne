@@ -50,7 +50,8 @@ public static class PlatformEndpoints
 
     public static async Task<IResult> ListTenantsAsync(DocuEngAIneDbContext db, CancellationToken cancellationToken = default)
     {
-        // Deliberately across tenants, and past the operator's own company scope.
+        // Deliberately across tenants, and past the operator's own company scope. That reads past
+        // the Museum too, so archived companies are left out of the count by hand.
         var tenants = await db.Tenants.IgnoreQueryFilters().AsNoTracking()
             .OrderBy(t => t.Name)
             .Select(t => new TenantSummary(
@@ -63,7 +64,7 @@ public static class PlatformEndpoints
                 t.StatusChangedAt,
                 t.CreatedAt,
                 t.Users.Count(u => u.IsActive),
-                t.Companies.Count()))
+                t.Companies.Count(c => c.DeletedAt == null)))
             .ToListAsync(cancellationToken);
         return Results.Ok(tenants);
     }
@@ -184,7 +185,7 @@ public static class PlatformEndpoints
                 t.StatusChangedAt,
                 t.CreatedAt,
                 t.Users.Count(u => u.IsActive),
-                t.Companies.Count()))
+                t.Companies.Count(c => c.DeletedAt == null)))
             .FirstAsync(cancellationToken);
 
     private static string? Clean(string? value)

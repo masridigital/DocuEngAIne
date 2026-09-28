@@ -1,6 +1,7 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { createCompany, createResourceLink, updateCompany, useCompanies, useCompany, useCompanyGraph, useMyCompanyAccess, useTerms, type Company, type CompanyGraph, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
+import { Link, useNavigate, useParams } from 'react-router-dom'
+import { ArchiveButton } from '../components/ArchiveButton'
+import { canEditContent, createCompany, createResourceLink, updateCompany, useCompanies, useCompany, useCompanyGraph, useMyCompanyAccess, useProfile, useTerms, type Company, type CompanyAccess, type CompanyGraph, type RelatedLinkItem, type RelatedListItem } from '../hooks/useApi'
 
 function slugify(value: string) {
   return value
@@ -22,6 +23,12 @@ function isHttpUrl(value?: string | null): value is string {
 
 function isActive(c: Company) {
   return c.isActive !== false
+}
+
+/** Archiving a company needs Manage on it; a user with no company restrictions has that everywhere. */
+function canManageCompany(access: CompanyAccess | undefined, companyId: string) {
+  if (!access) return false
+  return !access.restricted || access.companies.some((c) => c.companyId === companyId && c.level === 'Manage')
 }
 
 export function CompaniesPage() {
@@ -470,8 +477,13 @@ function RelatedLinksSection({
 
 function CompanyDetail({ id }: { id: string }) {
   const term = useTerms()
+  const navigate = useNavigate()
+  const { data: profile } = useProfile()
+  const { data: access } = useMyCompanyAccess()
   const { data: company, error, isLoading, mutate } = useCompany(id)
   const { mutate: mutateGraph } = useCompanyGraph(id)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
+  const canArchive = canEditContent(profile?.role) && canManageCompany(access, id)
   const [haloPortalUrl, setHaloPortalUrl] = useState('')
   const [ninjaPortalUrl, setNinjaPortalUrl] = useState('')
   const [portalEnabled, setPortalEnabled] = useState(false)
@@ -522,8 +534,19 @@ function CompanyDetail({ id }: { id: string }) {
               Open in Ninja
             </a>
           )}
+          {canArchive && (
+            <ArchiveButton
+              type="Company"
+              id={company.id}
+              label={company.name}
+              question={`Archive "${company.name}" to the Museum with everything in it? Its records disappear everywhere and sync leaves them alone; restoring it from the Museum brings them all back.`}
+              onArchived={() => navigate('/companies', { replace: true })}
+              onError={setArchiveError}
+            />
+          )}
         </div>
       )}
+      {archiveError && <p className="error">{archiveError}</p>}
       {isLoading && <p>Loading…</p>}
       {error && <p className="error">Failed to load company.</p>}
       {company && (

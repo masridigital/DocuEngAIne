@@ -24,6 +24,13 @@ public class ArchiveEntry : EntityBase, ITenantScoped
     /// </summary>
     public Guid? CompanyId { get; set; }
 
+    /// <summary>
+    /// For an item archived because its company was: the company's entry. Such items are restored
+    /// and permanently deleted with the company, and cannot be restored on their own while it is
+    /// archived.
+    /// </summary>
+    public Guid? ParentEntryId { get; set; }
+
     /// <summary>Name or title at archive time.</summary>
     public required string ResourceLabel { get; set; }
     public string? Reason { get; set; }

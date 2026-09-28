@@ -531,6 +531,14 @@ public class IntegrationSyncService : IIntegrationSyncService
             var providerKey = CompanyIdentity.ProviderKey(connection.Provider);
             var index = new CompanyMatchIndex(
                 await _db.Companies.ForTenant(_user).ToListAsync(cancellationToken));
+            // Companies in the Museum, matched only when no live company is: a record that belongs
+            // to one is skipped, never adopted, updated or re-created, until it is restored. Kept
+            // apart from the live index so an archived namesake cannot make a live match ambiguous.
+            var archivedIndex = new CompanyMatchIndex(
+                await _db.Companies.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(_user)
+                    .Where(c => c.DeletedAt != null)
+                    .AsNoTracking()
+                    .ToListAsync(cancellationToken));
 
             // One external record per company per connection. Without this, two rows from the same
             // provider that share a normalized name or domain ("Acme" and "ACME") would both adopt
@@ -554,11 +562,46 @@ public class IntegrationSyncService : IIntegrationSyncService
                         && m.ExternalType == "company"
                         && m.ExternalId == dto.ExternalId, cancellationToken);
 
+                Company? mapped = null;
+                if (mapping is not null)
+                {
+                    var mappedId = mapping.LocalEntityId;
+                    mapped = await _db.Companies.IgnoreQueryFilters([ModelBuilderExtensions.SoftDeleteFilter]).ForTenant(_user)
+                        .FirstOrDefaultAsync(c => c.Id == mappedId, cancellationToken);
+                    if (mapped is { DeletedAt: not null })
+                    {
+                        // Archived to the Museum: the technician's decision, so the pull leaves it alone.
+                        run.ItemsSkipped++;
+                        continue;
+                    }
+
+                    if (mapped is null)
+                    {
+                        // Out of the caller's sight is not gone: leave that mapping be.
+                        if (await _db.Companies.IgnoreQueryFilters().ForTenant(_user).AnyAsync(c => c.Id == mappedId, cancellationToken))
+                        {
+                            run.ItemsSkipped++;
+                            continue;
+                        }
+
+                        // The company is gone for good. Drop the mapping and treat the record as new.
+                        _db.IntegrationMappings.Remove(mapping);
+                        mapping = null;
+                    }
+                }
+
                 Company company;
                 if (mapping is null)
                 {
                     // Another provider may already own this client. Adopt it instead of duplicating.
                     var match = index.Find(providerKey, dto);
+                    if ((match is null || claimedCompanyIds.Contains(match.Company.Id))
+                        && archivedIndex.Find(providerKey, dto) is not null)
+                    {
+                        run.ItemsSkipped++;
+                        continue;
+                    }
+
                     if (match is not null && !claimedCompanyIds.Contains(match.Company.Id))
                     {
                         company = match.Company;
@@ -614,8 +657,7 @@ public class IntegrationSyncService : IIntegrationSyncService
                 }
                 else
                 {
-                    company = await _db.Companies.ForTenant(_user)
-                        .FirstAsync(c => c.Id == mapping.LocalEntityId, cancellationToken);
+                    company = mapped!;
                     ApplyDetails(company, dto, connection);
                     StampExternalId(company, connection, providerKey, dto.ExternalId);
                     index.Add(company);
@@ -660,17 +702,7 @@ public class IntegrationSyncService : IIntegrationSyncService
         try
         {
             // A device attaches to whatever company this connection mapped its organization to.
-            // Built as an assignment loop, not ToDictionary: a duplicate external id must not throw
-            // and abort an otherwise good run.
-            var companyByOrganization = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-            var companyMappings = await _db.IntegrationMappings.ForTenant(_user)
-                .Where(m => m.IntegrationConnectionId == connection.Id
-                    && m.ExternalType == "company"
-                    && m.LocalEntityType == nameof(Company))
-                .Select(m => new { m.ExternalId, m.LocalEntityId })
-                .ToListAsync(cancellationToken);
-            foreach (var companyMapping in companyMappings)
-                companyByOrganization[companyMapping.ExternalId] = companyMapping.LocalEntityId;
+            var companyByOrganization = await LiveCompanyByOrganizationAsync(connection, cancellationToken);
 
             var deviceMappings = await _db.IntegrationMappings.ForTenant(_user)
                 .Where(m => m.IntegrationConnectionId == connection.Id
@@ -697,8 +729,8 @@ public class IntegrationSyncService : IIntegrationSyncService
                 if (!companyByOrganization.TryGetValue(dto.OrganizationExternalId, out var companyId))
                 {
                     // Organization never mapped to a company on this connection (skipped as inactive,
-                    // or created in Ninja after the org page was read). Skip rather than leave an
-                    // orphan asset nobody can find from a company page.
+                    // or created in Ninja after the org page was read), or its company is in the
+                    // Museum. Skip rather than leave an asset nobody can find from a company page.
                     run.ItemsSkipped++;
                     continue;
                 }
@@ -897,15 +929,7 @@ public class IntegrationSyncService : IIntegrationSyncService
     {
         try
         {
-            var companyByOrganization = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-            var companyMappings = await _db.IntegrationMappings.ForTenant(_user)
-                .Where(m => m.IntegrationConnectionId == connection.Id
-                    && m.ExternalType == "company"
-                    && m.LocalEntityType == nameof(Company))
-                .Select(m => new { m.ExternalId, m.LocalEntityId })
-                .ToListAsync(cancellationToken);
-            foreach (var companyMapping in companyMappings)
-                companyByOrganization[companyMapping.ExternalId] = companyMapping.LocalEntityId;
+            var companyByOrganization = await LiveCompanyByOrganizationAsync(connection, cancellationToken);
 
             var existingMappings = await _db.IntegrationMappings.ForTenant(_user)
                 .Where(m => m.IntegrationConnectionId == connection.Id
@@ -1407,6 +1431,38 @@ public class IntegrationSyncService : IIntegrationSyncService
         connection.LastError = error;
         await _db.SaveChangesAsync(cancellationToken);
         return run;
+    }
+
+    /// <summary>
+    /// This connection's organization → company map, live companies only. An organization whose
+    /// company is in the Museum (or gone) is left out, so its records are skipped instead of being
+    /// written into a company nobody can see. Built as an assignment loop, not ToDictionary: a
+    /// duplicate external id must not throw and abort an otherwise good run.
+    /// </summary>
+    private async Task<Dictionary<string, Guid>> LiveCompanyByOrganizationAsync(
+        IntegrationConnection connection,
+        CancellationToken cancellationToken)
+    {
+        var companyMappings = await _db.IntegrationMappings.ForTenant(_user)
+            .Where(m => m.IntegrationConnectionId == connection.Id
+                && m.ExternalType == "company"
+                && m.LocalEntityType == nameof(Company))
+            .Select(m => new { m.ExternalId, m.LocalEntityId })
+            .ToListAsync(cancellationToken);
+        var mappedCompanyIds = companyMappings.Select(m => m.LocalEntityId).Distinct().ToList();
+        var liveCompanyIds = (await _db.Companies.ForTenant(_user)
+            .Where(c => mappedCompanyIds.Contains(c.Id))
+            .Select(c => c.Id)
+            .ToListAsync(cancellationToken)).ToHashSet();
+
+        var companyByOrganization = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        foreach (var companyMapping in companyMappings)
+        {
+            if (liveCompanyIds.Contains(companyMapping.LocalEntityId))
+                companyByOrganization[companyMapping.ExternalId] = companyMapping.LocalEntityId;
+        }
+
+        return companyByOrganization;
     }
 
     /// <summary>
