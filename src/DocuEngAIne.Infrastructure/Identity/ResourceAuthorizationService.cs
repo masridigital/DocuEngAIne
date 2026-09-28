@@ -28,7 +28,8 @@ public class ResourceAuthorizationService : IResourceAuthorizationService
             .AsNoTracking()
             .FirstOrDefaultAsync(u => u.TenantId == _currentUser.TenantId && u.EntraObjectId == _currentUser.ObjectId, cancellationToken);
 
-        if (user is null)
+        // A deactivated row confers nothing — not its tenant role, not its per-resource grants.
+        if (user is null || !user.IsActive)
             return UserRole.None;
 
         var assignment = await _db.ResourceRoleAssignments

@@ -217,6 +217,21 @@ public class HttpPipelineTests : IClassFixture<TestHost>
         Assert.Equal(HttpStatusCode.Forbidden, destroy.StatusCode);
     }
 
+    [Theory]
+    [InlineData("/api/me")]
+    [InlineData("/api/companies")]
+    [InlineData("/api/documents")]
+    [InlineData("/api/users")]
+    [InlineData("/api/audit-events")]
+    public async Task Deactivated_User_Is_Refused_Everywhere_Even_With_An_Admin_App_Role(string path)
+    {
+        using var client = _host.CreateSuspendedAdminClient();
+
+        var response = await client.GetAsync(path);
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+    }
+
     [Fact]
     public async Task Audit_Events_Require_Admin()
     {

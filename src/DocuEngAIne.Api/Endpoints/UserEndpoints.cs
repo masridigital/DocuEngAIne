@@ -30,6 +30,9 @@ public static class UserEndpoints
     public const string UnknownRoleMessage = "Unknown role.";
     public const string LastOwnerMessage = "Cannot change the role of the tenant's last Owner. Grant Owner to another active user first.";
     public const string OwnerRoleRequiresOwnerMessage = "Only an Owner can grant or revoke the Owner role.";
+    public const string CannotDeactivateSelfMessage = "You cannot deactivate your own account. Ask another administrator.";
+    public const string LastOwnerDeactivateMessage = "Cannot deactivate the tenant's last active Owner. Grant Owner to another active user first.";
+    public const string OwnerActivationRequiresOwnerMessage = "Only an Owner can deactivate or reactivate an Owner.";
 
     public static IEndpointRouteBuilder MapUserEndpoints(this IEndpointRouteBuilder app)
     {
@@ -56,6 +59,22 @@ public static class UserEndpoints
             IAuditService audit,
             CancellationToken cancellationToken) =>
             await SetRoleAsync(id, request, db, user, audit, cancellationToken));
+
+        group.MapPost("/{id:guid}/deactivate", async (
+            Guid id,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            IAuditService audit,
+            CancellationToken cancellationToken) =>
+            await SetActiveAsync(id, false, db, user, audit, cancellationToken));
+
+        group.MapPost("/{id:guid}/activate", async (
+            Guid id,
+            DocuEngAIneDbContext db,
+            ICurrentUser user,
+            IAuditService audit,
+            CancellationToken cancellationToken) =>
+            await SetActiveAsync(id, true, db, user, audit, cancellationToken));
 
         return app;
     }
@@ -136,28 +155,8 @@ public static class UserEndpoints
         if (previousRole == newRole)
             return Results.NoContent();
 
-        // Only *active* Owners count. An inactive user fails the admin policy, so an Owner row that
-        // cannot sign in is not a tenant administrator and must not be mistaken for the one holding
-        // the tenant's last set of keys.
-        var targetId = target.Id;
-        var otherActiveOwners = await db.Users.ForTenant(user)
-            .CountAsync(u => u.Id != targetId && u.Role == UserRole.Owner && u.IsActive, cancellationToken);
-
-        // Owner is the top of the enum, so any change away from Owner is a demotion. Only an ACTIVE
-        // Owner counts as an administrator -- an inactive one fails the admin policy's own IsActive
-        // check -- so a deactivated sole Owner is not the tenant's last set of keys and must stay
-        // demotable. Without the IsActive term here, that row could never be changed at all.
-        if (previousRole == UserRole.Owner && target.IsActive && otherActiveOwners == 0)
-            return Results.BadRequest(LastOwnerMessage);
-
-        // The target is not an Owner here (the guard above returned), so otherActiveOwners is the
-        // tenant's full count of active Owners — zero means the recovery case described above.
-        if ((previousRole == UserRole.Owner || newRole == UserRole.Owner)
-            && otherActiveOwners > 0
-            && await ResolveCallerRoleAsync(db, user, cancellationToken) < UserRole.Owner)
-        {
-            return Results.Json(OwnerRoleRequiresOwnerMessage, statusCode: StatusCodes.Status403Forbidden);
-        }
+        if (await GuardRoleChangeAsync(db, user, target, newRole, cancellationToken) is { } refused)
+            return refused;
 
         target.Role = newRole;
         await db.SaveChangesAsync(cancellationToken);
@@ -183,6 +182,150 @@ public static class UserEndpoints
     }
 
     /// <summary>
+    /// The last-Owner and Owner-requires-Owner refusals for moving <paramref name="target"/> to
+    /// <paramref name="newRole"/>, or null when the change is allowed. Shared with access-review
+    /// decisions, which change roles through the same invariants.
+    /// </summary>
+    internal static async Task<IResult?> GuardRoleChangeAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        User target,
+        UserRole newRole,
+        CancellationToken cancellationToken)
+    {
+        var previousRole = target.Role;
+
+        // Only *active* Owners count. An inactive user fails the admin policy, so an Owner row that
+        // cannot sign in is not a tenant administrator and must not be mistaken for the one holding
+        // the tenant's last set of keys.
+        var otherActiveOwners = await CountOtherActiveOwnersAsync(db, user, target, cancellationToken);
+
+        // Owner is the top of the enum, so any change away from Owner is a demotion. Only an ACTIVE
+        // Owner counts as an administrator -- an inactive one fails the admin policy's own IsActive
+        // check -- so a deactivated sole Owner is not the tenant's last set of keys and must stay
+        // demotable. Without the IsActive term here, that row could never be changed at all.
+        if (previousRole == UserRole.Owner && newRole != UserRole.Owner && target.IsActive && otherActiveOwners == 0)
+            return Results.BadRequest(LastOwnerMessage);
+
+        // The target is not an Owner here (the guard above returned), so otherActiveOwners is the
+        // tenant's full count of active Owners — zero means the recovery case described above.
+        if ((previousRole == UserRole.Owner || newRole == UserRole.Owner)
+            && otherActiveOwners > 0
+            && await ResolveCallerRoleAsync(db, user, cancellationToken) < UserRole.Owner)
+        {
+            return Results.Json(OwnerRoleRequiresOwnerMessage, statusCode: StatusCodes.Status403Forbidden);
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Refusals for deactivating <paramref name="target"/>: never yourself, never the last active
+    /// Owner, and an Owner only by an Owner — deactivating an Owner revokes Owner-level access just
+    /// as a demotion does, so it takes the same rules. Shared with access-review revoke decisions.
+    /// </summary>
+    internal static async Task<IResult?> GuardDeactivateAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        User target,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrEmpty(user.ObjectId)
+            && string.Equals(target.EntraObjectId, user.ObjectId, StringComparison.OrdinalIgnoreCase))
+        {
+            return Results.BadRequest(CannotDeactivateSelfMessage);
+        }
+
+        if (target.Role != UserRole.Owner)
+            return null;
+
+        var otherActiveOwners = await CountOtherActiveOwnersAsync(db, user, target, cancellationToken);
+        if (target.IsActive && otherActiveOwners == 0)
+            return Results.BadRequest(LastOwnerDeactivateMessage);
+
+        if (otherActiveOwners > 0 && await ResolveCallerRoleAsync(db, user, cancellationToken) < UserRole.Owner)
+            return Results.Json(OwnerActivationRequiresOwnerMessage, statusCode: StatusCodes.Status403Forbidden);
+
+        return null;
+    }
+
+    /// <summary>Reactivating an Owner grants Owner-level access, so it takes the Owner-requires-Owner rule.</summary>
+    internal static async Task<IResult?> GuardActivateAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        User target,
+        CancellationToken cancellationToken)
+    {
+        if (target.Role != UserRole.Owner)
+            return null;
+
+        var otherActiveOwners = await CountOtherActiveOwnersAsync(db, user, target, cancellationToken);
+        if (otherActiveOwners > 0 && await ResolveCallerRoleAsync(db, user, cancellationToken) < UserRole.Owner)
+            return Results.Json(OwnerActivationRequiresOwnerMessage, statusCode: StatusCodes.Status403Forbidden);
+
+        return null;
+    }
+
+    /// <summary>
+    /// Deactivates or reactivates one user. A deactivated user is refused on every authenticated
+    /// route (<c>ActiveUserRequirement</c>), and its stored role and grants confer nothing.
+    /// </summary>
+    public static async Task<IResult> SetActiveAsync(
+        Guid id,
+        bool active,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IAuditService audit,
+        CancellationToken cancellationToken = default)
+    {
+        if (user.TenantId is null)
+            return Results.Unauthorized();
+
+        var target = await db.Users.ForTenant(user).FirstOrDefaultAsync(u => u.Id == id, cancellationToken);
+        if (target is null)
+            return Results.NotFound();
+
+        if (target.IsActive == active)
+            return Results.NoContent();
+
+        var refused = active
+            ? await GuardActivateAsync(db, user, target, cancellationToken)
+            : await GuardDeactivateAsync(db, user, target, cancellationToken);
+        if (refused is not null)
+            return refused;
+
+        target.IsActive = active;
+        await db.SaveChangesAsync(cancellationToken);
+
+        await audit.LogAsync(
+            new AuditEntry(
+                active ? "User.Activate" : "User.Deactivate",
+                nameof(User),
+                target.Id,
+                $"{(active ? "Reactivated" : "Deactivated")} by {user.Email ?? user.ObjectId ?? "unknown"}",
+                Category: AuditCategories.Security,
+                TargetLabel: target.DisplayName ?? target.Email,
+                ChangesJson: JsonSerializer.Serialize(new
+                {
+                    isActive = new { from = !active, to = active },
+                })),
+            cancellationToken);
+
+        return Results.NoContent();
+    }
+
+    private static Task<int> CountOtherActiveOwnersAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        User target,
+        CancellationToken cancellationToken)
+    {
+        var targetId = target.Id;
+        return db.Users.ForTenant(user)
+            .CountAsync(u => u.Id != targetId && u.Role == UserRole.Owner && u.IsActive, cancellationToken);
+    }
+
+    /// <summary>
     /// The caller's effective tenant role, taken as the higher of the two signals that
     /// <see cref="AuthExtensions.AdminPolicy"/> itself accepts: an Entra app role, or the stored
     /// <see cref="User.Role"/> row.
@@ -192,7 +335,7 @@ public static class UserEndpoints
     /// an optional setup step, so a tenant that never defined them has only the row; and an Entra
     /// Owner who has not yet hit <c>GET /api/me</c> has only the claim.
     /// </remarks>
-    private static async Task<UserRole> ResolveCallerRoleAsync(
+    internal static async Task<UserRole> ResolveCallerRoleAsync(
         DocuEngAIneDbContext db,
         ICurrentUser user,
         CancellationToken cancellationToken)

@@ -274,6 +274,14 @@ export function updateUserRole(id: string, role: UserRole) {
   return putJson(`/api/users/${id}/role`, { role })
 }
 
+/**
+ * Suspends or reactivates a user. A suspended user is refused on every route; the server refuses
+ * suspending yourself, the last active Owner, or (for non-Owners) any Owner.
+ */
+export function setUserActive(id: string, active: boolean) {
+  return postJson<void>(`/api/users/${id}/${active ? 'activate' : 'deactivate'}`)
+}
+
 export type RecentItem = {
   entityType: string
   id: string
