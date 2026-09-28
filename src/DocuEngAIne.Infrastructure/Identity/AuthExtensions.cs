@@ -57,16 +57,29 @@ public static class AuthExtensions
 
         services.AddAuthorization(options =>
         {
-            options.AddPolicy("RequireAuthenticated", policy => policy.RequireAuthenticatedUser());
+            // RequireAuthorization() with no policy name resolves to DefaultPolicy, so every
+            // authenticated route also refuses a deactivated user — not just the admin routes.
+            options.DefaultPolicy = new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .AddRequirements(new ActiveUserRequirement())
+                .Build();
+            options.AddPolicy("RequireAuthenticated", policy =>
+            {
+                policy.RequireAuthenticatedUser();
+                policy.AddRequirements(new ActiveUserRequirement());
+            });
             options.AddPolicy(AdminPolicy, policy =>
             {
                 policy.RequireAuthenticatedUser();
-                policy.AddRequirements(new TenantAdminRequirement());
+                // The active-user requirement is what stops an Entra Admin/Owner app-role claim from
+                // outliving a deactivated row: the admin handler accepts that claim without the DB.
+                policy.AddRequirements(new ActiveUserRequirement(), new TenantAdminRequirement());
             });
         });
 
-        // Scoped, not singleton: the handler reads the Users table through the request-scoped DbContext.
+        // Scoped, not singleton: the handlers read the Users table through the request-scoped DbContext.
         services.AddScoped<IAuthorizationHandler, TenantAdminAuthorizationHandler>();
+        services.AddScoped<IAuthorizationHandler, ActiveUserAuthorizationHandler>();
 
         services.AddHttpContextAccessor();
 
@@ -134,6 +147,53 @@ public sealed class TenantAdminAuthorizationHandler : AuthorizationHandler<Tenan
             .FirstOrDefaultAsync(u => u.TenantId == tenantId && u.EntraObjectId == objectId);
 
         if (user is not null && user.IsActive && user.Role >= UserRole.Admin)
+            context.Succeed(requirement);
+    }
+}
+
+/// <summary>
+/// Refuses a caller whose <see cref="Core.Entities.User"/> row in the current tenant is deactivated.
+/// </summary>
+/// <remarks>
+/// Before this requirement, <see cref="Core.Entities.User.IsActive"/> only gated the admin policy's
+/// row fallback: every other route needs just a valid Entra token, write checks read Entra claims
+/// or the stored role without looking at the flag, and an Entra Admin/Owner app role passed the
+/// admin policy with no database lookup at all. Deactivating a user therefore removed almost
+/// nothing. No row at all still succeeds — first sign-in provisions it through <c>GET /api/me</c>,
+/// and onboarding runs before any row exists.
+/// </remarks>
+public sealed class ActiveUserRequirement : IAuthorizationRequirement
+{
+}
+
+public sealed class ActiveUserAuthorizationHandler : AuthorizationHandler<ActiveUserRequirement>
+{
+    private readonly DocuEngAIneDbContext _db;
+    private readonly ICurrentUser _currentUser;
+
+    public ActiveUserAuthorizationHandler(DocuEngAIneDbContext db, ICurrentUser currentUser)
+    {
+        _db = db;
+        _currentUser = currentUser;
+    }
+
+    protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, ActiveUserRequirement requirement)
+    {
+        if (context.User?.Identity?.IsAuthenticated != true)
+            return;
+
+        if (_currentUser.TenantId is not Guid tenantId || string.IsNullOrEmpty(_currentUser.ObjectId))
+        {
+            context.Succeed(requirement);
+            return;
+        }
+
+        var objectId = _currentUser.ObjectId;
+        var deactivated = await _db.Users
+            .AsNoTracking()
+            .AnyAsync(u => u.TenantId == tenantId && u.EntraObjectId == objectId && !u.IsActive);
+
+        if (!deactivated)
             context.Succeed(requirement);
     }
 }

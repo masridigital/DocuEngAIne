@@ -1,12 +1,14 @@
 import { useMsal } from '@azure/msal-react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import { canManageUsers, useProfile } from '../hooks/useApi'
+import { ApiError, canManageUsers, useProfile } from '../hooks/useApi'
 
 export function Layout() {
-  const { data: profile, isLoading } = useProfile()
+  const { data: profile, error: profileError, isLoading } = useProfile()
   const { instance } = useMsal()
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0]
   const showUsers = canManageUsers(profile?.role)
+  // The API refuses a suspended user on every route; say so once instead of failing every page.
+  const suspended = profileError instanceof ApiError && profileError.status === 403
 
   return (
     <div className="app-shell">
@@ -38,7 +40,14 @@ export function Layout() {
         </div>
       </header>
       <main className="app-main">
-        <Outlet />
+        {suspended ? (
+          <div className="page">
+            <h1>Access suspended</h1>
+            <p>Your access to this tenant has been suspended. Contact a tenant administrator to have it restored.</p>
+          </div>
+        ) : (
+          <Outlet />
+        )}
       </main>
     </div>
   )

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   canManageUsers,
+  setUserActive,
   updateUserRole,
   useProfile,
   useUsers,
@@ -27,6 +28,24 @@ export function UsersPage() {
   const [busyId, setBusyId] = useState<string | null>(null)
 
   const activeOwnerCount = users.filter((u) => u.role === 'Owner' && u.isActive).length
+
+  async function onToggleActive(user: TenantUser) {
+    const next = !user.isActive
+    const who = user.displayName || user.email
+    if (!next && !window.confirm(`Suspend ${who}? They lose access to this tenant immediately.`)) return
+    setMessage(null)
+    setErrorMessage(null)
+    setBusyId(user.id)
+    try {
+      await setUserActive(user.id, next)
+      setMessage(next ? `${who} reactivated.` : `${who} suspended.`)
+      await mutate()
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to change status.')
+    } finally {
+      setBusyId(null)
+    }
+  }
 
   async function onRoleChange(user: TenantUser, role: UserRole) {
     if (role === user.role) return
@@ -82,14 +101,15 @@ export function UsersPage() {
               <th>Name</th>
               <th>Email</th>
               <th>Role</th>
-              <th>IsActive</th>
+              <th>Status</th>
               <th>LastSeenAt</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {users.length === 0 && (
               <tr>
-                <td colSpan={5}>No users provisioned yet.</td>
+                <td colSpan={6}>No users provisioned yet.</td>
               </tr>
             )}
             {users.map((u) => {
@@ -111,8 +131,21 @@ export function UsersPage() {
                       ))}
                     </select>
                   </td>
-                  <td>{u.isActive ? 'Yes' : 'No'}</td>
+                  <td>{u.isActive ? 'Active' : 'Suspended'}</td>
                   <td>{formatTimestamp(u.lastSeenAt)}</td>
+                  <td>
+                    {u.id !== profile?.id && (
+                      <button
+                        className="btn"
+                        type="button"
+                        disabled={busyId === u.id || (lastOwner && u.isActive)}
+                        title={lastOwner && u.isActive ? "Cannot suspend the tenant's last Owner." : undefined}
+                        onClick={() => void onToggleActive(u)}
+                      >
+                        {u.isActive ? 'Suspend' : 'Reactivate'}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               )
             })}

@@ -43,6 +43,8 @@ public sealed class TestHost : WebApplicationFactory<Program>
     public string OwnerObjectId { get; } = Guid.NewGuid().ToString();
     public string ReaderObjectId { get; } = Guid.NewGuid().ToString();
     public string ContributorObjectId { get; } = Guid.NewGuid().ToString();
+    /// <summary>Deactivated user whose client still carries an Entra Admin app-role claim.</summary>
+    public string SuspendedAdminObjectId { get; } = Guid.NewGuid().ToString();
     public Guid OtherTenantCompanyId { get; } = Guid.NewGuid();
     public Guid OtherTenantFolderId { get; } = Guid.NewGuid();
 
@@ -138,6 +140,9 @@ public sealed class TestHost : WebApplicationFactory<Program>
     public HttpClient CreateContributorClient() =>
         CreateAuthenticatedClient(ContributorObjectId, TenantAId, nameof(UserRole.Contributor));
 
+    public HttpClient CreateSuspendedAdminClient() =>
+        CreateAuthenticatedClient(SuspendedAdminObjectId, TenantAId, nameof(UserRole.Admin));
+
     private void Seed(IServiceProvider services)
     {
         using var scope = services.CreateScope();
@@ -172,6 +177,15 @@ public sealed class TestHost : WebApplicationFactory<Program>
                 Email = ContributorEmail,
                 DisplayName = "Contributor",
                 Role = UserRole.Contributor,
+            },
+            new User
+            {
+                TenantId = TenantAId,
+                EntraObjectId = SuspendedAdminObjectId,
+                Email = "suspended@example.test",
+                DisplayName = "Suspended Admin",
+                Role = UserRole.Admin,
+                IsActive = false,
             });
 
         db.Companies.Add(new Company
