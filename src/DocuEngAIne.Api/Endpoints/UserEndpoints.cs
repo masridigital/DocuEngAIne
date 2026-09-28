@@ -1,3 +1,4 @@
+using System.Text.Json;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
@@ -172,7 +173,10 @@ public static class UserEndpoints
                 $"Role changed from {previousRole} to {newRole} by {user.Email ?? user.ObjectId ?? "unknown"}",
                 Category: AuditCategories.Security,
                 TargetLabel: target.DisplayName ?? target.Email,
-                ChangesJson: $$"""{"role":{"from":"{{previousRole}}","to":"{{newRole}}"}}"""),
+                ChangesJson: JsonSerializer.Serialize(new
+                {
+                    role = new { from = previousRole.ToString(), to = newRole.ToString() },
+                })),
             cancellationToken);
 
         return Results.NoContent();
