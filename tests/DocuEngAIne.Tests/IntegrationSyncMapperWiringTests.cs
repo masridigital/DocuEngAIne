@@ -362,6 +362,183 @@ public class IntegrationSyncMapperWiringTests
     }
 
     [Fact]
+    public async Task Halo_SyncAsync_Creates_Assets_After_Companies_And_Skips_Inactive_Ones()
+    {
+        var mcp = new RecordingHaloMcp
+        {
+            Clients =
+            [
+                new { id = 12, name = "Masri", inactive = false },
+                new { id = 29, name = "Inactive Co", inactive = true },
+            ],
+            AssetsJson = HaloAssetMapperTests.CompactListFixture,
+        };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedAsync(db, user, IntegrationProvider.Halo);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        var assetCall = Assert.Single(mcp.Calls, c => c.Tool == HaloAssetMapper.ToolName);
+        Assert.Equal(server.Id, assetCall.ServerId);
+        Assert.Contains("\"pageNo\":1", assetCall.Args, StringComparison.Ordinal);
+
+        var company = await db.Companies.SingleAsync();
+        var laptop = Assert.Single(await db.Assets.ToListAsync());
+        Assert.Equal("LAP-001", laptop.Name);
+        Assert.Equal(company.Id, laptop.CompanyId);
+        var mapping = Assert.Single(await db.IntegrationMappings.Where(m => m.ExternalType == "device").ToListAsync());
+        Assert.Equal("101", mapping.ExternalId);
+        Assert.Equal(laptop.Id, mapping.LocalEntityId);
+
+        // Company + laptop; the inactive company and the inactive desktop are skipped.
+        Assert.Equal(2, run.ItemsCreated);
+        Assert.Equal(2, run.ItemsSkipped);
+    }
+
+    [Fact]
+    public async Task Halo_SyncAsync_SkipInactive_False_Imports_The_Inactive_Asset()
+    {
+        var mcp = new RecordingHaloMcp
+        {
+            Clients =
+            [
+                new { id = 12, name = "Masri", inactive = false },
+                new { id = 29, name = "Inactive Co", inactive = true },
+            ],
+            AssetsJson = HaloAssetMapperTests.CompactListFixture,
+        };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedAsync(db, user, IntegrationProvider.Halo, skipInactive: false);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        var inactiveCo = await db.Companies.SingleAsync(c => c.Name == "Inactive Co");
+        var desktop = Assert.Single(await db.Assets.Where(a => a.Name == "DSK-009").ToListAsync());
+        Assert.Equal(inactiveCo.Id, desktop.CompanyId);
+        Assert.Equal(4, run.ItemsCreated);
+        Assert.Equal(0, run.ItemsSkipped);
+    }
+
+    [Fact]
+    public async Task Halo_SyncAsync_SkipAssets_Never_Calls_The_Asset_Tool()
+    {
+        var mcp = new RecordingHaloMcp
+        {
+            Clients = [new { id = 12, name = "Masri", inactive = false }],
+            AssetsJson = HaloAssetMapperTests.CompactListFixture,
+        };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedAsync(db, user, IntegrationProvider.Halo, skipAssets: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool == HaloAssetMapper.ToolName);
+        Assert.Empty(await db.Assets.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Ninja_SyncAsync_Creates_Locations_After_Organizations()
+    {
+        var mcp = new RecordingNinjaMcp
+        {
+            OrganizationsJson = """[{"id":2,"name":"Masri Digital"},{"id":11,"name":"Dawn Dental"}]""",
+            LocationsJson = NinjaLocationMapperTests.LocationsArrayFixture,
+        };
+        var (db, user, sync) = Create(mcp);
+        var (server, connection) = await SeedAsync(db, user, IntegrationProvider.NinjaOne, skipAssets: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.Equal(NinjaOrganizationMapper.ToolName, mcp.Calls[0].Tool);
+        Assert.Equal(server.Id, Assert.Single(mcp.Calls, c => c.Tool == NinjaLocationMapper.ToolName).ServerId);
+
+        var masri = await db.Companies.SingleAsync(c => c.Name == "Masri Digital");
+        var dawn = await db.Companies.SingleAsync(c => c.Name == "Dawn Dental");
+        var locationType = Assert.Single(await db.AssetTypes.Where(t => t.Name == IntegrationSyncService.LocationAssetTypeName).ToListAsync());
+        var locations = await db.Assets.Where(a => a.AssetTypeId == locationType.Id).ToListAsync();
+        Assert.Equal(2, locations.Count);
+        Assert.Equal(masri.Id, locations.Single(l => l.Name == "HQ").CompanyId);
+        Assert.Equal(dawn.Id, locations.Single(l => l.Name == "Main Office").CompanyId);
+        Assert.Contains("200 Masri St", (await db.IntegrationMappings.SingleAsync(m => m.ExternalType == "location" && m.ExternalId == "24")).MetadataJson, StringComparison.Ordinal);
+
+        // Two organizations + two locations; Dallas (22) and Property Intel (24) have no mapped organization.
+        Assert.Equal(4, run.ItemsCreated);
+        Assert.Equal(2, run.ItemsSkipped);
+    }
+
+    [Fact]
+    public async Task Ninja_SyncAsync_SkipLocations_Never_Calls_The_Location_Tool()
+    {
+        var mcp = new RecordingNinjaMcp
+        {
+            OrganizationsJson = """[{"id":2,"name":"Masri Digital"}]""",
+            LocationsJson = NinjaLocationMapperTests.LocationsArrayFixture,
+        };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedAsync(db, user, IntegrationProvider.NinjaOne, skipLocations: true, skipAssets: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool == NinjaLocationMapper.ToolName);
+        Assert.Empty(await db.Assets.ToListAsync());
+    }
+
+    [Fact]
+    public async Task Cipp_SyncAsync_Creates_People_With_TenantFilter_Equal_To_Company_ExternalId()
+    {
+        var mcp = new RecordingCippMcp
+        {
+            TenantsJson = CippTenantMapperTests.LiveCompactListFixture,
+            UsersJson = CippUserMapperTests.UserListFixture,
+        };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedAsync(db, user, IntegrationProvider.Cipp, skipAssets: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        var userCall = Assert.Single(mcp.Calls, c => c.Tool == CippUserMapper.ToolName);
+        Assert.Contains($"\"tenantFilter\":\"{CippUserMapperTests.AdrocCustomerId}\"", userCall.Args, StringComparison.Ordinal);
+        Assert.DoesNotContain("deadbeef", string.Join("", mcp.Calls.Select(c => c.Args)), StringComparison.Ordinal);
+
+        var company = await db.Companies.SingleAsync();
+        var peopleType = Assert.Single(await db.AssetTypes.Where(t => t.Name == IntegrationSyncService.PeopleAssetTypeName).ToListAsync());
+        var james = Assert.Single(await db.Assets.Where(a => a.AssetTypeId == peopleType.Id).ToListAsync());
+        Assert.Equal("James Adroc", james.Name);
+        Assert.Equal(company.Id, james.CompanyId);
+        var mapping = Assert.Single(await db.IntegrationMappings.Where(m => m.ExternalType == "contact").ToListAsync());
+        Assert.Equal("11111111-2222-3333-4444-555555555555", mapping.ExternalId);
+        Assert.Contains("james@adroccap.com", mapping.MetadataJson, StringComparison.Ordinal);
+
+        // Company + James; the excluded tenant and the disabled user are skipped.
+        Assert.Equal(2, run.ItemsCreated);
+        Assert.Equal(2, run.ItemsSkipped);
+    }
+
+    [Fact]
+    public async Task Cipp_SyncAsync_SkipContacts_Never_Calls_The_User_Tool()
+    {
+        var mcp = new RecordingCippMcp
+        {
+            TenantsJson = CippTenantMapperTests.LiveCompactListFixture,
+            UsersJson = CippUserMapperTests.UserListFixture,
+        };
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedAsync(db, user, IntegrationProvider.Cipp, skipContacts: true, skipAssets: true);
+
+        var run = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, run.Status);
+        Assert.DoesNotContain(mcp.Calls, c => c.Tool == CippUserMapper.ToolName);
+        Assert.Empty(await db.Assets.ToListAsync());
+    }
+
+    [Fact]
     public async Task Meraki_SyncAsync_Creates_Networks_After_Orgs()
     {
         var mcp = new RecordingMerakiMcp
@@ -508,6 +685,7 @@ public class IntegrationSyncMapperWiringTests
         public List<object> Clients { get; init; } = [];
         public string UsersJson { get; init; } = """{"users":[]}""";
         public string SitesJson { get; init; } = """{"sites":[]}""";
+        public string AssetsJson { get; init; } = """{"assets":[]}""";
 
         public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
             => Task.FromResult("""{"result":{"tools":[]}}""");
@@ -523,6 +701,10 @@ public class IntegrationSyncMapperWiringTests
             else if (toolName == HaloSiteMapper.ToolName)
             {
                 inner = SitesJson;
+            }
+            else if (toolName == HaloAssetMapper.ToolName)
+            {
+                inner = AssetsJson;
             }
             else
             {
@@ -589,6 +771,7 @@ public class IntegrationSyncMapperWiringTests
         public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
         public string TenantsJson { get; init; } = "[]";
         public string DevicesJson { get; init; } = "[]";
+        public string UsersJson { get; init; } = "[]";
 
         public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
             => Task.FromResult("""{"result":{"tools":[]}}""");
@@ -596,7 +779,35 @@ public class IntegrationSyncMapperWiringTests
         public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
         {
             Calls.Add((mcpServerId, toolName, argumentsJson));
-            var inner = toolName == CippDeviceMapper.ToolName ? DevicesJson : TenantsJson;
+            var inner = toolName switch
+            {
+                var t when t == CippDeviceMapper.ToolName => DevicesJson,
+                var t when t == CippUserMapper.ToolName => UsersJson,
+                _ => TenantsJson,
+            };
+            return Task.FromResult(WrapRpc(inner));
+        }
+    }
+
+    /// <summary>One page of each list: the fixtures are shorter than a page, so paging stops after one call.</summary>
+    private sealed class RecordingNinjaMcp : IMcpClient
+    {
+        public List<(Guid ServerId, string Tool, string? Args)> Calls { get; } = [];
+        public string OrganizationsJson { get; init; } = "[]";
+        public string LocationsJson { get; init; } = "[]";
+
+        public Task<string> ListToolsAsync(Guid mcpServerId, CancellationToken cancellationToken = default)
+            => Task.FromResult("""{"result":{"tools":[]}}""");
+
+        public Task<string> CallToolAsync(Guid mcpServerId, string toolName, string? argumentsJson, CancellationToken cancellationToken = default)
+        {
+            Calls.Add((mcpServerId, toolName, argumentsJson));
+            var inner = toolName switch
+            {
+                var t when t == NinjaLocationMapper.ToolName => LocationsJson,
+                var t when t == NinjaOrganizationMapper.ToolName => OrganizationsJson,
+                _ => "[]",
+            };
             return Task.FromResult(WrapRpc(inner));
         }
     }

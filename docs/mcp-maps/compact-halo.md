@@ -4,17 +4,12 @@ Envelope on list tools: `{ record_count, clients | users | sites | assets }`.
 
 ## Shipped
 
-| Tool | Entity |
-|---|---|
-| `halo_list_clients` | `Company` |
-
-## Next (not this PR)
-
-| Tool | Target | Notes |
+| Tool | Entity | Notes |
 |---|---|---|
-| `halo_list_users` | contacts | **People** asset layout, not Entra `User` |
-| `halo_list_sites` | locations | No `pageNo`. Cap 200. |
-| `halo_list_assets` | `Asset` | |
+| `halo_list_clients` | `Company` | |
+| `halo_list_sites` | `Asset` (Locations layout) | `SkipLocations`. No `pageNo`. Cap 200. |
+| `halo_list_users` | `Asset` (People layout) | `SkipContacts`. People, not Entra `User`. |
+| `halo_list_assets` | `Asset` (Computer) | `SkipAssets`. `inactive` assets are skipped with `SkipInactive`. Name is `inventory_number`, falling back to `name`. |
 
 ## Do not persist
 
