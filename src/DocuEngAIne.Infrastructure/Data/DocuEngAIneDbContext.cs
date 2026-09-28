@@ -68,6 +68,7 @@ public class DocuEngAIneDbContext : DbContext
     public DbSet<AccessReview> AccessReviews => Set<AccessReview>();
     public DbSet<AccessReviewItem> AccessReviewItems => Set<AccessReviewItem>();
     public DbSet<IpAllowlistEntry> IpAllowlistEntries => Set<IpAllowlistEntry>();
+    public DbSet<TenantFeatureSetting> TenantFeatureSettings => Set<TenantFeatureSetting>();
     public DbSet<SecurityGroup> SecurityGroups => Set<SecurityGroup>();
     public DbSet<SecurityGroupMember> SecurityGroupMembers => Set<SecurityGroupMember>();
     public DbSet<SecurityGroupCompanyGrant> SecurityGroupCompanyGrants => Set<SecurityGroupCompanyGrant>();

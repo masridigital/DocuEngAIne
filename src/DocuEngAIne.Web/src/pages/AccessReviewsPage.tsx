@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react'
+import { FeatureOff } from '../components/FeatureOff'
 import {
   cancelAccessReview,
   canManageUsers,
@@ -6,10 +7,12 @@ import {
   createAccessReview,
   decideAccessReviewItem,
   exportAccessReviewCsv,
+  featureEnabled,
   startAccessReview,
   useAccessReview,
   useAccessReviews,
   useProfile,
+  useTenantConfiguration,
   USER_ROLES,
   type AccessReviewItem,
   type UserRole,
@@ -212,8 +215,10 @@ function ReviewDetail(props: { id: string; currentUserId?: string; onClose: () =
 
 export function AccessReviewsPage() {
   const { data: profile, isLoading: profileLoading } = useProfile()
+  const { data: configuration, isLoading: configurationLoading } = useTenantConfiguration()
   const allowed = canManageUsers(profile?.role)
-  const { data, error, isLoading } = useAccessReviews(allowed)
+  const reviewsOn = featureEnabled(configuration, 'access_reviews')
+  const { data, error, isLoading } = useAccessReviews(allowed && reviewsOn && !configurationLoading)
   const reviews = Array.isArray(data) ? data : []
 
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -239,7 +244,7 @@ export function AccessReviewsPage() {
     }
   }
 
-  if (profileLoading) {
+  if (profileLoading || configurationLoading) {
     return (
       <div className="page">
         <h1>Access reviews</h1>
@@ -247,6 +252,8 @@ export function AccessReviewsPage() {
       </div>
     )
   }
+
+  if (!reviewsOn) return <FeatureOff title="Access reviews" name="Access reviews" />
 
   if (!allowed) {
     return (

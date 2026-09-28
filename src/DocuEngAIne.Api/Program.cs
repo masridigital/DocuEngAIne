@@ -68,6 +68,7 @@ app.MapHealthChecks("/api/health/ready", new Microsoft.AspNetCore.Diagnostics.He
 }).AllowAnonymous();
 
 app.MapTenantEndpoints();
+app.MapTenantConfigurationEndpoints();
 app.MapCompanyEndpoints();
 app.MapIntegrationEndpoints();
 app.MapItGlueMigrationEndpoints();

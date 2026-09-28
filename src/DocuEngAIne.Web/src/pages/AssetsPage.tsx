@@ -14,6 +14,7 @@ import {
   useCompanies,
   useOptionLists,
   useProfile,
+  useTerms,
   type Asset,
   type AssetFieldInput,
 } from '../hooks/useApi'
@@ -222,6 +223,7 @@ function AssetPanel(props: { id: string; canEdit: boolean; onClose: () => void }
 }
 
 function NewAssetForm(props: { onCreated: (id: string) => void; onCancel: () => void }) {
+  const term = useTerms()
   const { data: layouts } = useAssetLayouts()
   const { data: companies } = useCompanies()
   const { data: lists } = useOptionLists()
@@ -288,7 +290,7 @@ function NewAssetForm(props: { onCreated: (id: string) => void; onCancel: () => 
 
   return (
     <form className="panel" onSubmit={submit}>
-      <h2>New asset</h2>
+      <h2>New {term('asset', 'singular')}</h2>
       {message && <p className="error">{message}</p>}
       <div className="form-grid">
         <label>
@@ -341,7 +343,7 @@ function NewAssetForm(props: { onCreated: (id: string) => void; onCancel: () => 
       ) : null}
       <div className="toolbar">
         <button className="btn" type="submit" disabled={busy || !layout || !name.trim()}>
-          {busy ? 'Creating…' : 'Create asset'}
+          {busy ? 'Creating…' : `Create ${term('asset', 'singular')}`}
         </button>{' '}
         <button className="btn btn-secondary" type="button" disabled={busy} onClick={props.onCancel}>
           Cancel
@@ -352,6 +354,7 @@ function NewAssetForm(props: { onCreated: (id: string) => void; onCancel: () => 
 }
 
 export function AssetsPage() {
+  const term = useTerms()
   const { data, error, isLoading } = useAssets()
   const { data: profile } = useProfile()
   const canEdit = canEditContent(profile?.role)
@@ -362,11 +365,13 @@ export function AssetsPage() {
 
   return (
     <div className="page">
-      <h1>Assets</h1>
+      <h1>{term('asset')}</h1>
       <p className="muted">Open in Halo / Open in Ninja when a device or asset portal URL is stored. URLs only — no secrets.</p>
       {canEdit && !creating ? (
         <div className="toolbar">
-          <button className="btn" type="button" onClick={() => setCreating(true)}>New asset</button>
+          <button className="btn" type="button" onClick={() => setCreating(true)}>
+            New {term('asset', 'singular')}
+          </button>
         </div>
       ) : null}
       {creating ? (

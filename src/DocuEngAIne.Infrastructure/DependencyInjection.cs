@@ -8,6 +8,7 @@ using DocuEngAIne.Infrastructure.Integrations.Migration;
 using DocuEngAIne.Infrastructure.Llm;
 using DocuEngAIne.Infrastructure.Search;
 using DocuEngAIne.Infrastructure.Security;
+using DocuEngAIne.Infrastructure.Tenancy;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -42,6 +43,7 @@ public static class DependencyInjection
         services.AddHostedService<AuditRetentionHostedService>();
         services.AddMemoryCache();
         services.AddScoped<IpAllowlistService>();
+        services.AddScoped<TenantFeatureService>();
 
         var connectionString = SqlConnectionDefaults.Resolve(
             configuration.GetConnectionString("DocuEngAIne"),

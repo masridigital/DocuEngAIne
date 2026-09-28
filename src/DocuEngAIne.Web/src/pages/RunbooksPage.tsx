@@ -1,13 +1,14 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ArchiveButton } from '../components/ArchiveButton'
-import { startRunbookRun, useRunbooks, type Runbook } from '../hooks/useApi'
+import { startRunbookRun, useRunbooks, useTerms, type Runbook } from '../hooks/useApi'
 
 function runsLabel(count: number) {
   return count === 1 ? '1 run' : `${count} runs`
 }
 
 export function RunbooksPage() {
+  const term = useTerms()
   const { data, error, isLoading, mutate } = useRunbooks()
   const runbooks: Runbook[] = Array.isArray(data) ? data : []
   const [startingId, setStartingId] = useState<string | null>(null)
@@ -28,7 +29,7 @@ export function RunbooksPage() {
 
   return (
     <div className="page">
-      <h1>Runbooks</h1>
+      <h1>{term('runbook')}</h1>
       <p>
         SOPs and checklists. Start a run to track a pass through the steps. Tenant-wide books are templates; company-linked books are per-client.{' '}
         <Link to="/runs">Process completion</Link> rolls up recent runs.

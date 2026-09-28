@@ -1,4 +1,5 @@
 using DocuEngAIne.Core.Entities;
+using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
@@ -21,7 +22,7 @@ public static class PortalEndpoints
 
     public static IEndpointRouteBuilder MapPortalEndpoints(this IEndpointRouteBuilder app)
     {
-        var group = app.MapGroup("/api/portal").RequireAuthorization();
+        var group = app.MapGroup("/api/portal").RequireAuthorization().RequireTenantFeature(TenantFeatures.ClientPortal);
 
         group.MapGet("", () => Results.Ok(Describe()));
         group.MapGet("/companies", ListCompaniesAsync);
