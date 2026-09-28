@@ -391,6 +391,348 @@ export function useAssets() {
   return useSWR<Asset[]>('/api/assets', fetcher)
 }
 
+/** Contributor and above may create assets and change asset layouts and option lists. */
+export function canEditContent(role?: string | null): boolean {
+  return role === 'Contributor' || role === 'Admin' || role === 'Owner'
+}
+
+export type AssetFieldType =
+  | 'Text'
+  | 'Markdown'
+  | 'Number'
+  | 'Date'
+  | 'DateTime'
+  | 'Url'
+  | 'Email'
+  | 'Phone'
+  | 'Checkbox'
+  | 'Select'
+  | 'MultiSelect'
+
+export const ASSET_FIELD_TYPES: AssetFieldType[] = [
+  'Text',
+  'Markdown',
+  'Number',
+  'Date',
+  'DateTime',
+  'Url',
+  'Email',
+  'Phone',
+  'Checkbox',
+  'Select',
+  'MultiSelect',
+]
+
+export function usesOptions(type?: string | null): boolean {
+  return type === 'Select' || type === 'MultiSelect'
+}
+
+/** One field value on an asset, with the layout field it belongs to. `value` is the stored form. */
+export type AssetFieldValue = {
+  fieldId: string
+  name: string
+  fieldType: string
+  section?: string | null
+  helpText?: string | null
+  isRequired: boolean
+  optionListId?: string | null
+  value?: string | null
+  /** False for a value whose field is no longer on the layout (older data): shown, not editable. */
+  onLayout: boolean
+}
+
+export type AssetDetail = {
+  id: string
+  name: string
+  location?: string | null
+  status?: string | null
+  notes?: string | null
+  companyId?: string | null
+  expiresAt?: string | null
+  haloAssetUrl?: string | null
+  ninjaDeviceUrl?: string | null
+  assetType?: { id?: string | null; name?: string | null } | null
+  fields: AssetFieldValue[]
+}
+
+/** A value to submit for a field: text, a list of option values, a checkbox, or null to clear. */
+export type AssetFieldInput = string | string[] | boolean | null
+
+export function useAsset(id: string | undefined) {
+  return useSWR<AssetDetail>(id ? `/api/assets/${id}` : null, fetcher)
+}
+
+export type CreateAssetInput = {
+  name: string
+  assetTypeId: string
+  companyId?: string | null
+  location?: string | null
+  status?: string | null
+  fields?: Record<string, AssetFieldInput>
+}
+
+export async function createAsset(input: CreateAssetInput) {
+  const created = await postJson<{ id: string; name: string }>('/api/assets', input)
+  await mutate('/api/assets')
+  return created
+}
+
+/** Sets or clears the submitted fields only; returns the asset as stored. */
+export async function updateAssetFields(id: string, values: Record<string, AssetFieldInput>) {
+  const res = await apiFetch(`/api/assets/${id}/fields`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ values }),
+  })
+  const updated = await readJson<AssetDetail>(res)
+  await mutate(`/api/assets/${id}`, updated, { revalidate: false })
+  return updated
+}
+
+/** Per-field messages from a refused field write (`{ error, fields: { [fieldId]: message } }`). */
+export function fieldErrors(error: unknown): Record<string, string> {
+  if (!(error instanceof ApiError)) return {}
+  const data = error.data as { fields?: unknown } | undefined
+  if (!data || typeof data !== 'object' || !data.fields || typeof data.fields !== 'object') return {}
+  const result: Record<string, string> = {}
+  for (const [key, message] of Object.entries(data.fields as Record<string, unknown>)) {
+    if (typeof message === 'string') result[key] = message
+  }
+  return result
+}
+
+export type AssetLayoutField = {
+  id: string
+  name: string
+  fieldType: AssetFieldType
+  isRequired: boolean
+  isExpiration: boolean
+  sortOrder: number
+  section?: string | null
+  helpText?: string | null
+  optionListId?: string | null
+  optionListName?: string | null
+}
+
+export type AssetLayoutSummary = {
+  id: string
+  name: string
+  description?: string | null
+  icon?: string | null
+  isPublished: boolean
+  publishedAt?: string | null
+  availableToAllCompanies: boolean
+  currentVersion: number
+  fields: AssetLayoutField[]
+  /** For a layout limited to chosen companies: the ones it is enabled for (that you can see). */
+  enabledCompanyIds: string[]
+}
+
+export type AssetLayoutProblem = { code: string; message: string; fieldId?: string | null }
+
+export type AssetLayoutDetail = {
+  layout: AssetLayoutSummary
+  companies: { companyId: string; companyName: string; activatedAt: string }[]
+  assetCount: number
+  /** What would stop the layout from being published as it stands. */
+  problems: AssetLayoutProblem[]
+}
+
+export type AssetLayoutVersion = {
+  versionNumber: number
+  summary?: string | null
+  createdByName?: string | null
+  createdAt: string
+}
+
+export type AssetLayoutVersionDetail = AssetLayoutVersion & { schema: unknown }
+
+export type AssetLayoutFieldInput = {
+  name: string
+  type: AssetFieldType
+  isRequired?: boolean
+  isExpiration?: boolean
+  section?: string | null
+  helpText?: string | null
+  optionListId?: string | null
+}
+
+export type UpdateAssetLayoutFieldInput = {
+  name?: string
+  fieldType?: AssetFieldType
+  isRequired?: boolean
+  isExpiration?: boolean
+  sortOrder?: number
+  section?: string
+  helpText?: string
+  optionListId?: string
+  optionListClear?: boolean
+}
+
+/** Whether new assets of `layout` can be created in `companyId` (null = tenant-wide). */
+export function layoutUsableFor(layout: AssetLayoutSummary, companyId: string | null): boolean {
+  if (!layout.isPublished) return false
+  if (layout.availableToAllCompanies) return true
+  return companyId !== null && layout.enabledCompanyIds.includes(companyId)
+}
+
+/** The problems list a refused publish or schema change carries (409 `{ error, problems }`). */
+export function layoutProblems(error: unknown): AssetLayoutProblem[] {
+  if (!(error instanceof ApiError)) return []
+  const data = error.data as { problems?: unknown } | undefined
+  return data && typeof data === 'object' && Array.isArray(data.problems) ? (data.problems as AssetLayoutProblem[]) : []
+}
+
+const ASSET_LAYOUTS_KEY = '/api/assets/types'
+
+export function useAssetLayouts() {
+  return useSWR<AssetLayoutSummary[]>(ASSET_LAYOUTS_KEY, fetcher)
+}
+
+export function useAssetLayout(id: string | undefined) {
+  return useSWR<AssetLayoutDetail>(id ? `${ASSET_LAYOUTS_KEY}/${id}` : null, fetcher)
+}
+
+export function useAssetLayoutVersions(id: string | undefined) {
+  return useSWR<AssetLayoutVersion[]>(id ? `${ASSET_LAYOUTS_KEY}/${id}/versions` : null, fetcher)
+}
+
+export function useAssetLayoutVersion(id: string | undefined, versionNumber: number | null) {
+  return useSWR<AssetLayoutVersionDetail>(
+    id && versionNumber !== null ? `${ASSET_LAYOUTS_KEY}/${id}/versions/${versionNumber}` : null,
+    fetcher,
+  )
+}
+
+function refreshAssetLayout(id: string) {
+  return Promise.all([
+    mutate(ASSET_LAYOUTS_KEY),
+    mutate(`${ASSET_LAYOUTS_KEY}/${id}`),
+    mutate(`${ASSET_LAYOUTS_KEY}/${id}/versions`),
+    // Option lists show which layouts use them.
+    mutate(OPTION_LISTS_KEY),
+  ])
+}
+
+export async function createAssetLayout(input: {
+  name: string
+  description?: string
+  availableToAllCompanies?: boolean
+  fields?: AssetLayoutFieldInput[]
+}) {
+  const created = await postJson<AssetLayoutDetail>(ASSET_LAYOUTS_KEY, input)
+  await mutate(ASSET_LAYOUTS_KEY)
+  return created
+}
+
+export async function updateAssetLayout(
+  id: string,
+  input: { name?: string; description?: string; icon?: string; availableToAllCompanies?: boolean },
+) {
+  await putJson(`${ASSET_LAYOUTS_KEY}/${id}`, input)
+  await refreshAssetLayout(id)
+}
+
+export async function deleteAssetLayout(id: string) {
+  await apiFetch(`${ASSET_LAYOUTS_KEY}/${id}`, { method: 'DELETE' })
+  await mutate(ASSET_LAYOUTS_KEY)
+  await mutate(OPTION_LISTS_KEY)
+}
+
+export async function publishAssetLayout(id: string) {
+  await postJson<AssetLayoutDetail>(`${ASSET_LAYOUTS_KEY}/${id}/publish`)
+  await refreshAssetLayout(id)
+}
+
+export async function unpublishAssetLayout(id: string) {
+  await postJson<AssetLayoutDetail>(`${ASSET_LAYOUTS_KEY}/${id}/unpublish`)
+  await refreshAssetLayout(id)
+}
+
+export async function addAssetLayoutField(id: string, input: AssetLayoutFieldInput) {
+  await postJson<AssetLayoutField>(`${ASSET_LAYOUTS_KEY}/${id}/fields`, input)
+  await refreshAssetLayout(id)
+}
+
+export async function updateAssetLayoutField(layoutId: string, fieldId: string, input: UpdateAssetLayoutFieldInput) {
+  await putJson(`/api/assets/fields/${fieldId}`, input)
+  await refreshAssetLayout(layoutId)
+}
+
+export async function deleteAssetLayoutField(layoutId: string, fieldId: string) {
+  await apiFetch(`/api/assets/fields/${fieldId}`, { method: 'DELETE' })
+  await refreshAssetLayout(layoutId)
+}
+
+export async function enableAssetLayoutForCompany(id: string, companyId: string) {
+  await putJson(`${ASSET_LAYOUTS_KEY}/${id}/companies/${companyId}`, {})
+  await refreshAssetLayout(id)
+}
+
+export async function disableAssetLayoutForCompany(id: string, companyId: string) {
+  await apiFetch(`${ASSET_LAYOUTS_KEY}/${id}/companies/${companyId}`, { method: 'DELETE' })
+  await refreshAssetLayout(id)
+}
+
+export type OptionItem = {
+  id: string
+  label: string
+  /** What asset values store; fixed when the option is created, so labels can be renamed. */
+  value: string
+  sortOrder: number
+  isActive: boolean
+}
+
+export type OptionList = {
+  id: string
+  name: string
+  description?: string | null
+  isActive: boolean
+  items: OptionItem[]
+  /** "Layout › Field" for every field that draws on the list. */
+  usedBy: string[]
+}
+
+const OPTION_LISTS_KEY = '/api/option-lists'
+
+export function useOptionLists() {
+  return useSWR<OptionList[]>(OPTION_LISTS_KEY, fetcher)
+}
+
+function refreshOptionLists() {
+  // Layout problems (e.g. a choice field with nothing left to pick) depend on the lists.
+  return Promise.all([
+    mutate(OPTION_LISTS_KEY),
+    mutate((key) => typeof key === 'string' && key.startsWith(ASSET_LAYOUTS_KEY)),
+  ])
+}
+
+export async function createOptionList(input: { name: string; description?: string; items?: { label: string }[] }) {
+  const created = await postJson<OptionList>(OPTION_LISTS_KEY, input)
+  await refreshOptionLists()
+  return created
+}
+
+export async function updateOptionList(id: string, input: { name?: string; description?: string; isActive?: boolean }) {
+  await putJson(`${OPTION_LISTS_KEY}/${id}`, input)
+  await refreshOptionLists()
+}
+
+export async function deleteOptionList(id: string) {
+  await apiFetch(`${OPTION_LISTS_KEY}/${id}`, { method: 'DELETE' })
+  await refreshOptionLists()
+}
+
+export async function addOptionItem(id: string, label: string) {
+  await postJson<OptionItem>(`${OPTION_LISTS_KEY}/${id}/items`, { label })
+  await refreshOptionLists()
+}
+
+export async function updateOptionItem(id: string, itemId: string, input: { label?: string; sortOrder?: number; isActive?: boolean }) {
+  await putJson(`${OPTION_LISTS_KEY}/${id}/items/${itemId}`, input)
+  await refreshOptionLists()
+}
+
 export type DocumentFolder = {
   id: string
   name: string

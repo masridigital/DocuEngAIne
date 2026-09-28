@@ -98,12 +98,54 @@ public static class ModelBuilderExtensions
         modelBuilder.Entity<AssetType>(a =>
         {
             a.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            a.HasMany(x => x.CompanyActivations).WithOne(c => c.AssetType).HasForeignKey(c => c.AssetTypeId).OnDelete(DeleteBehavior.Cascade);
+            a.HasMany(x => x.Versions).WithOne(v => v.AssetType).HasForeignKey(v => v.AssetTypeId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<FieldDefinition>(f =>
         {
             f.HasIndex(x => new { x.AssetTypeId, x.Name }).IsUnique();
             f.Property(x => x.IsExpiration).HasDefaultValue(false);
+            f.Property(x => x.Section).HasMaxLength(100);
+            f.Property(x => x.HelpText).HasMaxLength(500);
+            // Restrict: a list still used by a field cannot be deleted (the endpoint says which).
+            f.HasOne(x => x.OptionList).WithMany().HasForeignKey(x => x.OptionListId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AssetTypeCompanyActivation>(c =>
+        {
+            c.HasIndex(x => new { x.AssetTypeId, x.CompanyId }).IsUnique();
+            c.HasIndex(x => new { x.TenantId, x.CompanyId });
+            c.Property(x => x.ActivatedByObjectId).HasMaxLength(128);
+            // Restrict on both Tenant and Company: the row already cascades from Tenant through
+            // AssetType, and SQL Server forbids a second path. Company delete removes them itself.
+            c.HasOne(x => x.Company).WithMany().HasForeignKey(x => x.CompanyId).OnDelete(DeleteBehavior.Restrict);
+            c.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AssetTypeVersion>(v =>
+        {
+            v.HasIndex(x => new { x.AssetTypeId, x.VersionNumber }).IsUnique();
+            v.Property(x => x.Summary).HasMaxLength(500);
+            v.Property(x => x.CreatedByObjectId).HasMaxLength(128);
+            v.Property(x => x.CreatedByName).HasMaxLength(200);
+            v.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<OptionList>(o =>
+        {
+            o.Property(x => x.Name).HasMaxLength(100);
+            o.Property(x => x.Description).HasMaxLength(500);
+            o.HasIndex(x => new { x.TenantId, x.Name }).IsUnique();
+            o.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
+            o.HasMany(x => x.Items).WithOne(i => i.OptionList).HasForeignKey(i => i.OptionListId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<OptionListItem>(i =>
+        {
+            i.Property(x => x.Label).HasMaxLength(100);
+            i.Property(x => x.Value).HasMaxLength(100);
+            i.HasIndex(x => new { x.OptionListId, x.Value }).IsUnique();
         });
 
         modelBuilder.Entity<Asset>(a =>

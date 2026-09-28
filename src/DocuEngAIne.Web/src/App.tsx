@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import './App.css'
 import { Layout } from './components/Layout'
 import { AccessReviewsPage } from './pages/AccessReviewsPage'
+import { AssetLayoutsPage } from './pages/AssetLayoutsPage'
 import { AssetsPage } from './pages/AssetsPage'
 import { AuditPage } from './pages/AuditPage'
 import { CompaniesPage } from './pages/CompaniesPage'
@@ -13,6 +14,7 @@ import { IntegrationsPage } from './pages/IntegrationsPage'
 import { IpAccessPage } from './pages/IpAccessPage'
 import { KeeperPage } from './pages/KeeperPage'
 import { MuseumPage } from './pages/MuseumPage'
+import { OptionListsPage } from './pages/OptionListsPage'
 import { RunbooksPage } from './pages/RunbooksPage'
 import { SecurityGroupsPage } from './pages/SecurityGroupsPage'
 import { RunsPage } from './pages/RunsPage'
@@ -28,6 +30,8 @@ function App() {
           <Route path="companies" element={<CompaniesPage />} />
           <Route path="companies/:id" element={<CompaniesPage />} />
           <Route path="assets" element={<AssetsPage />} />
+          <Route path="asset-layouts" element={<AssetLayoutsPage />} />
+          <Route path="option-lists" element={<OptionListsPage />} />
           <Route path="documents" element={<DocumentsPage />} />
           <Route path="runbooks" element={<RunbooksPage />} />
           <Route path="runs" element={<RunsPage />} />

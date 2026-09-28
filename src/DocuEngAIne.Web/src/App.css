@@ -655,3 +655,32 @@ details.advanced > summary {
   margin: 0 0 8px;
   font-size: 1.15rem;
 }
+
+.form-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.form-field-wide {
+  grid-column: 1 / -1;
+}
+
+.form-field .error {
+  margin: 0;
+}
+
+.problem-list {
+  margin: 8px 0 16px;
+  padding-left: 20px;
+}
+
+.schema-json {
+  max-height: 360px;
+  overflow: auto;
+  padding: 12px;
+  background: var(--surface-2);
+  border-radius: 6px;
+  font-size: 0.8rem;
+}

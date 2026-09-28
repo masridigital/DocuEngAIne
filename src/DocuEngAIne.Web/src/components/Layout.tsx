@@ -1,12 +1,13 @@
 import { useMsal } from '@azure/msal-react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import { ApiError, canManageUsers, ipBlockedAddress, useProfile } from '../hooks/useApi'
+import { ApiError, canEditContent, canManageUsers, ipBlockedAddress, useProfile } from '../hooks/useApi'
 
 export function Layout() {
   const { data: profile, error: profileError, isLoading } = useProfile()
   const { instance } = useMsal()
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0]
   const showUsers = canManageUsers(profile?.role)
+  const showSchema = canEditContent(profile?.role)
   // The API refuses a suspended user, or an address outside the tenant's IP allowlist, on every
   // route; say which once instead of failing every page.
   const blockedIp = ipBlockedAddress(profileError)
@@ -20,6 +21,8 @@ export function Layout() {
           <NavLink to="/" end>Dashboard</NavLink>
           <NavLink to="/companies">Companies</NavLink>
           <NavLink to="/assets">Assets</NavLink>
+          {showSchema ? <NavLink to="/asset-layouts">Asset layouts</NavLink> : null}
+          {showSchema ? <NavLink to="/option-lists">Option lists</NavLink> : null}
           <NavLink to="/documents">Docs</NavLink>
           <NavLink to="/runbooks">Runbooks</NavLink>
           <NavLink to="/runs">Runs</NavLink>

@@ -363,8 +363,14 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<bool>("AvailableToAllCompanies")
+                        .HasColumnType("bit");
+
                     b.Property<DateTimeOffset>("CreatedAt")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("CurrentVersion")
+                        .HasColumnType("int");
 
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
@@ -372,9 +378,15 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Property<string>("Icon")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<bool>("IsPublished")
+                        .HasColumnType("bit");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
+
+                    b.Property<DateTimeOffset?>("PublishedAt")
+                        .HasColumnType("datetimeoffset");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -388,6 +400,90 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("AssetTypes");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.AssetTypeCompanyActivation", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ActivatedByObjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("AssetTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CompanyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CompanyId");
+
+                    b.HasIndex("AssetTypeId", "CompanyId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "CompanyId");
+
+                    b.ToTable("AssetTypeCompanyActivations");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.AssetTypeVersion", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AssetTypeId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("CreatedByName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("CreatedByObjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("SchemaJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Summary")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<int>("VersionNumber")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("AssetTypeId", "VersionNumber")
+                        .IsUnique();
+
+                    b.ToTable("AssetTypeVersions");
                 });
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.AuditLog", b =>
@@ -764,6 +860,10 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("HelpText")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
                     b.Property<bool>("IsExpiration")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
@@ -776,6 +876,13 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(450)");
 
+                    b.Property<Guid?>("OptionListId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Section")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<int>("SortOrder")
                         .HasColumnType("int");
 
@@ -783,6 +890,8 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("OptionListId");
 
                     b.HasIndex("AssetTypeId", "Name")
                         .IsUnique();
@@ -1151,6 +1260,80 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("McpServers");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.OptionList", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Name")
+                        .IsUnique();
+
+                    b.ToTable("OptionLists");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.OptionListItem", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Label")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("OptionListId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<DateTimeOffset>("UpdatedAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("Value")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OptionListId", "Value")
+                        .IsUnique();
+
+                    b.ToTable("OptionListItems");
                 });
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.ResourceLink", b =>
@@ -1717,6 +1900,52 @@ namespace DocuEngAIne.Api.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.AssetTypeCompanyActivation", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.AssetType", "AssetType")
+                        .WithMany("CompanyActivations")
+                        .HasForeignKey("AssetTypeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DocuEngAIne.Core.Entities.Company", "Company")
+                        .WithMany()
+                        .HasForeignKey("CompanyId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AssetType");
+
+                    b.Navigation("Company");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.AssetTypeVersion", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.AssetType", "AssetType")
+                        .WithMany("Versions")
+                        .HasForeignKey("AssetTypeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AssetType");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Company", b =>
                 {
                     b.HasOne("DocuEngAIne.Core.Entities.Company", "ParentCompany")
@@ -1823,7 +2052,14 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("DocuEngAIne.Core.Entities.OptionList", "OptionList")
+                        .WithMany()
+                        .HasForeignKey("OptionListId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.Navigation("AssetType");
+
+                    b.Navigation("OptionList");
                 });
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.FlagAssignment", b =>
@@ -1931,6 +2167,28 @@ namespace DocuEngAIne.Api.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.OptionList", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.OptionListItem", b =>
+                {
+                    b.HasOne("DocuEngAIne.Core.Entities.OptionList", "OptionList")
+                        .WithMany("Items")
+                        .HasForeignKey("OptionListId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("OptionList");
                 });
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.ResourceLink", b =>
@@ -2129,7 +2387,11 @@ namespace DocuEngAIne.Api.Data.Migrations
                 {
                     b.Navigation("Assets");
 
+                    b.Navigation("CompanyActivations");
+
                     b.Navigation("Fields");
+
+                    b.Navigation("Versions");
                 });
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Company", b =>
@@ -2176,6 +2438,11 @@ namespace DocuEngAIne.Api.Data.Migrations
             modelBuilder.Entity("DocuEngAIne.Core.Entities.McpServer", b =>
                 {
                     b.Navigation("Integrations");
+                });
+
+            modelBuilder.Entity("DocuEngAIne.Core.Entities.OptionList", b =>
+                {
+                    b.Navigation("Items");
                 });
 
             modelBuilder.Entity("DocuEngAIne.Core.Entities.Runbook", b =>

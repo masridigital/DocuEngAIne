@@ -1,6 +1,8 @@
+using System.Text.Json;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
+using DocuEngAIne.Infrastructure.Assets;
 using DocuEngAIne.Infrastructure.Data;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -9,100 +11,13 @@ namespace DocuEngAIne.Api.Endpoints;
 
 public static class AssetEndpoints
 {
+    public const string LayoutNotFoundMessage = "Asset layout not found.";
+    public const string LayoutChangeWithValuesMessage =
+        "Clear this asset's field values before changing its layout: they belong to the current layout's fields.";
+
     public static IEndpointRouteBuilder MapAssetEndpoints(this IEndpointRouteBuilder app)
     {
         var group = app.MapGroup("/api/assets").RequireAuthorization();
-
-        group.MapGet("/types", async (
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            CancellationToken cancellationToken) =>
-        {
-            var types = await db.AssetTypes
-                .ForTenant(user)
-                .AsNoTracking()
-                .Include(t => t.Fields.OrderBy(f => f.SortOrder))
-                .ToListAsync(cancellationToken);
-
-            return Results.Ok(types.Select(t => new
-            {
-                t.Id,
-                t.Name,
-                t.Description,
-                t.Icon,
-                Fields = t.Fields.Select(f => new { f.Id, f.Name, f.FieldType, f.IsRequired, f.IsExpiration }),
-            }));
-        });
-
-        group.MapPost("/types", async (
-            [FromBody] CreateAssetTypeRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            // Asset types are tenant-wide schema, not a resource anyone can hold a grant on, so this
-            // resolves to the caller's tenant-wide role.
-            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Asset, cancellationToken) is { } denied)
-                return denied;
-            if (CompanyEndpoints.RequireCompanyAccess(db, null, CompanyAccessLevel.Edit) is { } scoped)
-                return scoped;
-
-            var assetType = new AssetType
-            {
-                TenantId = user.TenantId!.Value,
-                Name = request.Name,
-                Description = request.Description,
-                Icon = request.Icon,
-                Fields = request.Fields?.Select((f, i) => new FieldDefinition
-                {
-                    Name = f.Name,
-                    FieldType = f.Type,
-                    IsRequired = f.IsRequired,
-                    IsExpiration = f.IsExpiration,
-                    SortOrder = i,
-                }).ToList() ?? [],
-            };
-
-            db.AssetTypes.Add(assetType);
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.Created($"/api/assets/types/{assetType.Id}", new { assetType.Id, assetType.Name });
-        });
-
-        group.MapPut("/fields/{id:guid}", async (
-            Guid id,
-            [FromBody] UpdateFieldDefinitionRequest request,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            IResourceAuthorizationService authorization,
-            CancellationToken cancellationToken) =>
-        {
-            // The route id is a FieldDefinition, not an Asset, so a per-asset grant cannot apply to
-            // it: field definitions are tenant-wide schema and gate on the tenant-wide role.
-            if (await ResourceWriteGuard.RequireTenantWriteAsync(authorization, user, ResourceType.Asset, cancellationToken) is { } denied)
-                return denied;
-            if (CompanyEndpoints.RequireCompanyAccess(db, null, CompanyAccessLevel.Edit) is { } scoped)
-                return scoped;
-
-            var field = await db.FieldDefinitions
-                .Where(f => db.AssetTypes.ForTenant(user).Any(t => t.Id == f.AssetTypeId))
-                .FirstOrDefaultAsync(f => f.Id == id, cancellationToken);
-
-            if (field is null)
-                return Results.NotFound();
-
-            field.Name = request.Name ?? field.Name;
-            field.FieldType = request.FieldType ?? field.FieldType;
-            if (request.IsRequired.HasValue)
-                field.IsRequired = request.IsRequired.Value;
-            if (request.IsExpiration.HasValue)
-                field.IsExpiration = request.IsExpiration.Value;
-            if (request.SortOrder.HasValue)
-                field.SortOrder = request.SortOrder.Value;
-
-            await db.SaveChangesAsync(cancellationToken);
-            return Results.NoContent();
-        });
 
         group.MapGet("", async (
             DocuEngAIneDbContext db,
@@ -119,6 +34,7 @@ public static class AssetEndpoints
 
         group.MapPost("", PostAsync);
         group.MapPut("/{id:guid}", PutAsync);
+        group.MapPut("/{id:guid}/fields", PutFieldsAsync);
         group.MapDelete("/{id:guid}", DeleteAsync);
 
         return app;
@@ -139,6 +55,19 @@ public static class AssetEndpoints
         if (await CompanyEndpoints.EnsureCompanyInTenantAsync(db, user, request.CompanyId, cancellationToken) is { } badCompany)
             return badCompany;
 
+        // The layout must be this tenant's: another tenant's id would otherwise attach its fields here.
+        var layout = await db.AssetTypes.ForTenant(user)
+            .Include(t => t.Fields)
+            .FirstOrDefaultAsync(t => t.Id == request.AssetTypeId, cancellationToken);
+        if (layout is null)
+            return Results.BadRequest(LayoutNotFoundMessage);
+        if (await AssetLayoutEndpoints.EnsureUsableAsync(db, user, layout, request.CompanyId, cancellationToken) is { } unusable)
+            return unusable;
+
+        var checkedValues = await NormalizeValuesAsync(db, user, layout, request.Fields, creating: true, cancellationToken);
+        if (checkedValues.Error is { } invalidValues)
+            return invalidValues;
+
         var asset = new Asset
         {
             TenantId = user.TenantId!.Value,
@@ -155,6 +84,12 @@ public static class AssetEndpoints
         };
 
         db.Assets.Add(asset);
+        foreach (var (fieldId, value) in checkedValues.Values!)
+        {
+            if (value is not null)
+                db.CustomFieldValues.Add(new CustomFieldValue { AssetId = asset.Id, FieldDefinitionId = fieldId, Value = value });
+        }
+
         await db.SaveChangesAsync(cancellationToken);
         return Results.Created($"/api/assets/{asset.Id}", new { asset.Id, asset.Name });
     }
@@ -211,16 +146,39 @@ public static class AssetEndpoints
         if (asset is null)
             return Results.NotFound();
 
+        var originalCompanyId = asset.CompanyId;
         if (await CompanyEndpoints.ApplyCompanyIdOnUpdateAsync(
                 db, user, request.CompanyId, request.CompanyIdClear, value => asset.CompanyId = value, cancellationToken)
             is { } badCompany)
             return badCompany;
 
+        var layoutChanged = request.AssetTypeId is Guid requested && requested != asset.AssetTypeId;
+        if (layoutChanged || asset.CompanyId != originalCompanyId)
+        {
+            var layoutId = request.AssetTypeId ?? asset.AssetTypeId;
+            var layout = await db.AssetTypes.ForTenant(user).FirstOrDefaultAsync(t => t.Id == layoutId, cancellationToken);
+            if (layout is null)
+                return Results.BadRequest(LayoutNotFoundMessage);
+            if (layoutChanged)
+            {
+                if (await db.CustomFieldValues.AnyAsync(v => v.AssetId == id, cancellationToken))
+                    return Results.Conflict(new { error = LayoutChangeWithValuesMessage });
+                if (await AssetLayoutEndpoints.EnsureUsableAsync(db, user, layout, asset.CompanyId, cancellationToken) is { } unusable)
+                    return unusable;
+            }
+            else if (await AssetLayoutEndpoints.EnsureAvailableAsync(db, user, layout, asset.CompanyId, cancellationToken) is { } unavailable)
+            {
+                // Moving to another company: a layout limited to chosen companies must be enabled there.
+                return unavailable;
+            }
+
+            asset.AssetTypeId = layout.Id;
+        }
+
         asset.Name = request.Name ?? asset.Name;
         asset.Location = request.Location ?? asset.Location;
         asset.Notes = request.Notes ?? asset.Notes;
         asset.Status = request.Status ?? asset.Status;
-        asset.AssetTypeId = request.AssetTypeId ?? asset.AssetTypeId;
         if (request.ExpiresAt.HasValue)
             asset.ExpiresAt = request.ExpiresAt;
         if (request.HaloAssetUrl is not null)
@@ -232,6 +190,105 @@ public static class AssetEndpoints
 
         await db.SaveChangesAsync(cancellationToken);
         return Results.NoContent();
+    }
+
+    /// <summary>
+    /// Sets or clears field values. Only the fields submitted change; a value of null or empty
+    /// clears one, which a required field refuses. Values are checked and stored per field type.
+    /// </summary>
+    public static async Task<IResult> PutFieldsAsync(
+        Guid id,
+        [FromBody] UpdateAssetFieldsRequest request,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        IResourceAuthorizationService authorization,
+        CancellationToken cancellationToken = default)
+    {
+        if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
+            return denied;
+
+        var asset = await db.Assets
+            .ForTenant(user)
+            .Include(a => a.AssetType)
+                .ThenInclude(t => t!.Fields)
+            .Include(a => a.CustomFieldValues)
+            .FirstOrDefaultAsync(a => a.Id == id, cancellationToken);
+        if (asset?.AssetType is null)
+            return Results.NotFound();
+
+        var checkedValues = await NormalizeValuesAsync(db, user, asset.AssetType, request.Values, creating: false, cancellationToken);
+        if (checkedValues.Error is { } invalid)
+            return invalid;
+
+        foreach (var (fieldId, value) in checkedValues.Values!)
+        {
+            var existing = asset.CustomFieldValues.FirstOrDefault(v => v.FieldDefinitionId == fieldId);
+            if (value is null)
+            {
+                if (existing is not null)
+                    db.CustomFieldValues.Remove(existing);
+            }
+            else if (existing is null)
+            {
+                db.CustomFieldValues.Add(new CustomFieldValue { AssetId = asset.Id, FieldDefinitionId = fieldId, Value = value });
+            }
+            else
+            {
+                existing.Value = value;
+            }
+        }
+
+        await db.SaveChangesAsync(cancellationToken);
+        return await GetAsync(id, db, user, cancellationToken);
+    }
+
+    /// <summary>
+    /// Checks submitted values against the layout and returns each one normalized (null = clear).
+    /// When <paramref name="creating"/>, every required field must be given a value; otherwise only
+    /// the submitted fields are checked, and a required one cannot be cleared.
+    /// </summary>
+    private static async Task<(Dictionary<Guid, string?>? Values, IResult? Error)> NormalizeValuesAsync(
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        AssetType layout,
+        Dictionary<Guid, JsonElement>? submitted,
+        bool creating,
+        CancellationToken cancellationToken)
+    {
+        submitted ??= new Dictionary<Guid, JsonElement>();
+        var fields = layout.Fields.ToDictionary(f => f.Id);
+        var errors = new Dictionary<string, string>();
+        foreach (var unknown in submitted.Keys.Where(k => !fields.ContainsKey(k)))
+            errors[unknown.ToString()] = "This field is not part of the asset's layout.";
+
+        var lists = await AssetLayoutEndpoints.LoadListsAsync(db, user, layout.Fields.Select(f => f.OptionListId), cancellationToken);
+        var values = new Dictionary<Guid, string?>();
+        foreach (var (fieldId, raw) in submitted)
+        {
+            if (!fields.TryGetValue(fieldId, out var field))
+                continue;
+            var options = field.OptionListId is Guid listId && lists.TryGetValue(listId, out var list) ? list : null;
+            if (!AssetFieldRules.TryNormalize(field, raw, options, out var stored, out var error))
+                errors[fieldId.ToString()] = error!;
+            else if (stored is null && field.IsRequired)
+                errors[fieldId.ToString()] = $"{field.Name} is required.";
+            else
+                values[fieldId] = stored;
+        }
+
+        if (creating)
+        {
+            foreach (var missing in layout.Fields.Where(f => f.IsRequired && !submitted.ContainsKey(f.Id)))
+                errors[missing.Id.ToString()] = $"{missing.Name} is required.";
+        }
+
+        if (errors.Count > 0)
+        {
+            var message = errors.Count == 1 ? errors.Values.First() : "Some field values are not valid.";
+            return (null, Results.BadRequest(new { error = message, fields = errors }));
+        }
+
+        return (values, null);
     }
 
     public static async Task<IResult> ListAsync(
@@ -282,6 +339,29 @@ public static class AssetEndpoints
 
     private static object MapAsset(Asset asset)
     {
+        var values = asset.CustomFieldValues.ToDictionary(v => v.FieldDefinitionId, v => v.Value);
+        IEnumerable<FieldDefinition> layoutFields = asset.AssetType?.Fields ?? Enumerable.Empty<FieldDefinition>();
+        var layoutFieldIds = layoutFields.Select(f => f.Id).ToHashSet();
+        var fields = layoutFields
+            .OrderBy(f => f.SortOrder)
+            .ThenBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(f => new AssetFieldValueView(
+                f.Id, f.Name, f.FieldType, f.Section, f.HelpText, f.IsRequired, f.OptionListId, values.GetValueOrDefault(f.Id)))
+            // Values whose field is no longer on the layout (legacy data) are still shown, never dropped.
+            .Concat(asset.CustomFieldValues
+                .Where(v => !layoutFieldIds.Contains(v.FieldDefinitionId))
+                .Select(v => new AssetFieldValueView(
+                    v.FieldDefinitionId,
+                    v.FieldDefinition?.Name ?? "Field",
+                    v.FieldDefinition?.FieldType ?? AssetFieldType.Text,
+                    null,
+                    null,
+                    false,
+                    null,
+                    v.Value,
+                    OnLayout: false)))
+            .ToList();
+
         return new
         {
             asset.Id,
@@ -295,12 +375,7 @@ public static class AssetEndpoints
             asset.NinjaDeviceUrl,
             asset.ExternalIdsJson,
             AssetType = new { asset.AssetType?.Id, asset.AssetType?.Name },
-            Fields = asset.CustomFieldValues.Select(v => new
-            {
-                v.FieldDefinition?.Name,
-                v.FieldDefinition?.FieldType,
-                v.Value,
-            }),
+            Fields = fields,
         };
     }
 
@@ -391,9 +466,43 @@ public static class ResourceWriteGuard
         RequireWriteAsync(authorization, user, Guid.Empty, resourceType, cancellationToken);
 }
 
-public record CreateAssetTypeRequest(string Name, string? Description, string? Icon, List<AssetTypeFieldRequest>? Fields);
-public record AssetTypeFieldRequest(string Name, string Type, bool IsRequired, bool IsExpiration = false);
-public record UpdateFieldDefinitionRequest(string? Name = null, string? FieldType = null, bool? IsRequired = null, bool? IsExpiration = null, int? SortOrder = null);
+public record CreateAssetTypeRequest(
+    string Name,
+    string? Description = null,
+    string? Icon = null,
+    List<AssetTypeFieldRequest>? Fields = null,
+    bool AvailableToAllCompanies = true);
+public record AssetTypeFieldRequest(
+    string Name,
+    string Type,
+    bool IsRequired = false,
+    bool IsExpiration = false,
+    string? Section = null,
+    string? HelpText = null,
+    Guid? OptionListId = null);
+public record UpdateFieldDefinitionRequest(
+    string? Name = null,
+    string? FieldType = null,
+    bool? IsRequired = null,
+    bool? IsExpiration = null,
+    int? SortOrder = null,
+    string? Section = null,
+    string? HelpText = null,
+    Guid? OptionListId = null,
+    bool OptionListClear = false);
+/// <summary>Field values keyed by field id. A JSON null or empty value clears the field.</summary>
+public record UpdateAssetFieldsRequest(Dictionary<Guid, JsonElement>? Values);
+/// <param name="OnLayout">False for a value whose field is no longer on the asset's layout (older data): shown, not editable.</param>
+public record AssetFieldValueView(
+    Guid FieldId,
+    string Name,
+    string FieldType,
+    string? Section,
+    string? HelpText,
+    bool IsRequired,
+    Guid? OptionListId,
+    string? Value,
+    bool OnLayout = true);
 public record CreateAssetRequest(
     string Name,
     Guid AssetTypeId,
@@ -404,7 +513,8 @@ public record CreateAssetRequest(
     DateTimeOffset? ExpiresAt = null,
     string? HaloAssetUrl = null,
     string? NinjaDeviceUrl = null,
-    string? ExternalIdsJson = null);
+    string? ExternalIdsJson = null,
+    Dictionary<Guid, JsonElement>? Fields = null);
 public record UpdateAssetRequest(
     string? Name,
     Guid? AssetTypeId,
