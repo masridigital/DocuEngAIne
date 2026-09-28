@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using DocuEngAIne.Api.Endpoints;
+using DocuEngAIne.Api.Middleware;
 using DocuEngAIne.Infrastructure;
 using DocuEngAIne.Infrastructure.Configuration;
 
@@ -56,6 +57,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseAuthentication();
+app.UseMiddleware<IpAllowlistMiddleware>();
 app.UseAuthorization();
 
 app.MapHealthChecks("/api/health/live").AllowAnonymous();
@@ -85,6 +87,7 @@ app.MapApiTokenEndpoints();
 app.MapAuditEndpoints();
 app.MapArchiveEndpoints();
 app.MapAccessReviewEndpoints();
+app.MapIpAccessEndpoints();
 app.MapPortalEndpoints();
 app.MapOutboundMcpEndpoints();
 app.MapLlmEndpoints();

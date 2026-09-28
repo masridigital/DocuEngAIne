@@ -1,9 +1,8 @@
 # DocuEngAIne — Next Items
 
-Working plan as of 2026-08-31, at `8c03d4e` (all ten reviewed PRs merged) plus the review-fix
-branch. Previous revision of this document described the repo at `be7465b` (2026-08-28) and had
-drifted badly — most of its "next" items have since shipped. History is in git; this file
-describes now.
+Working plan as of 2026-09-28. The 2026-08-31 revision covered the batch-merge clean-up (PR #68,
+merged); this revision adds the port of the Shuvouits/Docuengine prototype. History is in git;
+this file describes now.
 
 This is a build-stage plan, not a launch checklist. It supplements
 [`MASRI-NATIVE-PLAN.md`](MASRI-NATIVE-PLAN.md) §8 rather than replacing it — that document still
@@ -36,33 +35,49 @@ Since `be7465b`, roughly fifty PRs landed in two days. The wave was wide and mos
   (`list_keeper_links` returns titles and ids only; tokens support optional expiry).
 - **One-click promote shipped**: runbook runs / sync results / flags promote into Documents.
 
-## Blockers
+## Docuengine port
 
-### 0. GitHub Actions is not running — nothing since 2026-08-30 20:38 UTC compiles in CI
+[Shuvouits/Docuengine](https://github.com/Shuvouits/Docuengine) (Laravel 12 + React 18) was a
+parallel prototype of this product. It is being ported feature by feature — natively, as one PR
+per slice through the normal build → test → review loop — not copied: its tenant scoping has no
+global safety net, it returns invitation / reset tokens in API responses, and its IP allowlist
+middleware was never attached to a route. Those are not carried over.
 
-Runner never starts: jobs "complete" in 2–4 seconds with zero steps and no logs, and open PRs get
-zero check runs. That is the billing / spending-limit failure signature, not a workflow bug (the
-workflow is unchanged since the last green run). **Only the org owner can fix it** — GitHub org
-Settings → Billing → Actions. Until then ~23 merged pushes (~12.5k lines) and every open PR are
-unverified by any compiler; there is no .NET SDK in the dev container to compensate.
+Shipped:
+
+- **Audit v2** — before/after diffs, actor name + target label, categories, request context,
+  per-record activity feed, CSV export (formula-escaped), retention purge. Also fixed a
+  cross-tenant document-version read found while porting.
+- **Museum** — soft delete + archive registry + restore / permanent delete for assets, documents,
+  runbooks and Keeper links. Company archive is deliberately excluded until sync, portal and
+  import semantics for an archived company are decided.
+- **Deactivation that means something** — a suspended user is refused everywhere, including with
+  an Entra Admin app role; Owner invariants guard suspend / reactivate.
+- **Access reviews** — snapshot, decide (applied immediately), complete, CSV evidence.
+- **Tenant IP allowlist** — enforced on `/api/*` and `/mcp`, fails closed, with Docuengine's four
+  anti-lockout rules and a host-level break-glass (`Security:DisableIpAllowlist`).
+
+Next, in order:
+
+1. **Security-group company scoping** — groups, members, per-company access grants; no
+   restriction means full access, the highest grant wins, Admin/Owner bypass. Has to reach every
+   company-scoped query (lists, rollups, search, portal, MCP), so it is its own slice.
+2. **Asset layouts** — versioned field layouts, option lists, per-company activation, typed field
+   values validated before publish.
+3. **Tenant configuration** — feature flags from a registered catalog, terminology map
+   (white-label names), branding (blocked on blob storage).
+4. **Tenant status lifecycle** — suspended / archived tenants.
+5. **Company archive** — the Museum slice deferred above.
+
+Not ported: MFA, password, session and invitation-token mechanics (Entra owns authentication);
+role-carrying invitations are optional later work on top of Entra.
 
 ## Sequence
 
-### 1. Restore CI, then clean up after the batch-merge
+### 1. Decisions left over from the batch-merge
 
-All ten open PRs were merged on 2026-08-31 before CI was restored, so none of them ever compiled
-in CI, and the known issues they carried are now on `main`. The review-fix branch (PR #68)
-addresses the code-level ones:
-
-- **#66's per-pass status re-check** — a child pass ran after an earlier failed pass and could
-  stamp `LastSyncAt` on a Failed run.
-- **#65's retired Anthropic model default** (`claude-sonnet-4-20250514`) and its two blocking
-  `GetAwaiter().GetResult()` test asserts (xUnit1031 — CI enforces 0 warnings).
-- **#50's dead portal expirations widget** — `[FromQuery] bool showExpired` with no default is a
-  required parameter in minimal APIs, and the SPA never sends it (same latent bug on
-  `/api/expirations`).
-
-Two things remain decisions, not fixes:
+CI is running again, and the code-level issues the 2026-08-31 batch-merge carried onto `main` were
+fixed in PR #68. Two things remain decisions, not fixes:
 
 - **#50 shipped without a portal identity.** `/api/portal` is plain `RequireAuthorization()` —
   any tenant user sees every portal-enabled company, and a client onboarded as a Reader "to try

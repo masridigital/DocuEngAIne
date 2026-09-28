@@ -1,8 +1,10 @@
 using System.Text.Json;
 using DocuEngAIne.Api.Mcp;
+using DocuEngAIne.Api.Middleware;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
 using DocuEngAIne.Infrastructure.Identity;
+using DocuEngAIne.Infrastructure.Security;
 
 namespace DocuEngAIne.Api.Endpoints;
 
@@ -57,6 +59,7 @@ public static class OutboundMcpEndpoints
         HttpContext http,
         DocuEngAIneDbContext db,
         IAuditService audit,
+        IpAllowlistService allowlist,
         CancellationToken cancellationToken)
     {
         var presented = ApiTokenAuthenticator.ReadPresentedToken(
@@ -66,6 +69,15 @@ public static class OutboundMcpEndpoints
         var user = await ApiTokenAuthenticator.AuthenticateAsync(presented, db, cancellationToken);
         if (user is null)
             return Results.Unauthorized();
+
+        // The allowlist middleware only sees /api; this endpoint authenticates here, so it checks here.
+        if (user.TenantId is Guid tenantId
+            && !await allowlist.IsAllowedAsync(tenantId, http.Connection.RemoteIpAddress, cancellationToken))
+        {
+            return Results.Json(
+                new { error = IpAllowlistMiddleware.BlockedError, ip = IpAllowlist.Normalize(http.Connection.RemoteIpAddress)?.ToString() },
+                statusCode: StatusCodes.Status403Forbidden);
+        }
 
         using var scope = CurrentUserScope.Use(user);
 

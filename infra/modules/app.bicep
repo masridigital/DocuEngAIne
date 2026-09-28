@@ -108,6 +108,12 @@ resource webApp 'Microsoft.Web/sites@2024-04-01' = {
           name: 'ASPNETCORE_ENVIRONMENT'
           value: 'Production'
         }
+        {
+          // The IP allowlist matches the client address. Behind the App Service front end that
+          // arrives in X-Forwarded-For; this makes ASP.NET Core use the entry the front end appended.
+          name: 'ASPNETCORE_FORWARDEDHEADERS_ENABLED'
+          value: 'true'
+        }
       ]
     }
   }

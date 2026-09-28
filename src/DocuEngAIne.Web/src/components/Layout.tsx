@@ -1,14 +1,16 @@
 import { useMsal } from '@azure/msal-react'
 import { Link, NavLink, Outlet } from 'react-router-dom'
-import { ApiError, canManageUsers, useProfile } from '../hooks/useApi'
+import { ApiError, canManageUsers, ipBlockedAddress, useProfile } from '../hooks/useApi'
 
 export function Layout() {
   const { data: profile, error: profileError, isLoading } = useProfile()
   const { instance } = useMsal()
   const account = instance.getActiveAccount() ?? instance.getAllAccounts()[0]
   const showUsers = canManageUsers(profile?.role)
-  // The API refuses a suspended user on every route; say so once instead of failing every page.
-  const suspended = profileError instanceof ApiError && profileError.status === 403
+  // The API refuses a suspended user, or an address outside the tenant's IP allowlist, on every
+  // route; say which once instead of failing every page.
+  const blockedIp = ipBlockedAddress(profileError)
+  const suspended = !blockedIp && profileError instanceof ApiError && profileError.status === 403
 
   return (
     <div className="app-shell">
@@ -30,6 +32,7 @@ export function Layout() {
           {showUsers ? <NavLink to="/users">Users</NavLink> : null}
           {showUsers ? <NavLink to="/audit">Audit</NavLink> : null}
           {showUsers ? <NavLink to="/access-reviews">Access reviews</NavLink> : null}
+          {showUsers ? <NavLink to="/ip-access">IP access</NavLink> : null}
         </nav>
         <div className="profile">
           <span>{isLoading ? '…' : profile?.displayName ?? profile?.email ?? account?.name ?? account?.username ?? 'Guest'}</span>
@@ -41,7 +44,15 @@ export function Layout() {
         </div>
       </header>
       <main className="app-main">
-        {suspended ? (
+        {blockedIp ? (
+          <div className="page">
+            <h1>Network not allowed</h1>
+            <p>
+              This tenant only accepts requests from approved networks, and your address (<code>{blockedIp}</code>) is
+              not one of them. Connect from an approved network, or ask a tenant administrator to add this address.
+            </p>
+          </div>
+        ) : suspended ? (
           <div className="page">
             <h1>Access suspended</h1>
             <p>Your access to this tenant has been suspended. Contact a tenant administrator to have it restored.</p>

@@ -9,6 +9,13 @@ public class Tenant : EntityBase
     public string? PrimaryDomain { get; set; }
     public bool IsActive { get; set; } = true;
 
+    /// <summary>
+    /// When on, API requests for this tenant are refused unless they come from an active
+    /// <see cref="IpAllowlistEntry"/>. Off by default; turning it on is guarded against locking out
+    /// the administrator doing it.
+    /// </summary>
+    public bool IpAllowlistEnabled { get; set; }
+
     public ICollection<User> Users { get; set; } = [];
     public ICollection<Company> Companies { get; set; } = [];
     public ICollection<AssetType> AssetTypes { get; set; } = [];

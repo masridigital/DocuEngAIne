@@ -43,6 +43,7 @@ public class DocuEngAIneDbContext : DbContext
     public DbSet<ArchiveEntry> ArchiveEntries => Set<ArchiveEntry>();
     public DbSet<AccessReview> AccessReviews => Set<AccessReview>();
     public DbSet<AccessReviewItem> AccessReviewItems => Set<AccessReviewItem>();
+    public DbSet<IpAllowlistEntry> IpAllowlistEntries => Set<IpAllowlistEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
