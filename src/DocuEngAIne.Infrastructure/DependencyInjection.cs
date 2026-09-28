@@ -44,6 +44,7 @@ public static class DependencyInjection
         services.AddMemoryCache();
         services.AddScoped<IpAllowlistService>();
         services.AddScoped<TenantFeatureService>();
+        services.AddScoped<TenantStatusService>();
 
         var connectionString = SqlConnectionDefaults.Resolve(
             configuration.GetConnectionString("DocuEngAIne"),

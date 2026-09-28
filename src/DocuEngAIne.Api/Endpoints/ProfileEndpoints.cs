@@ -2,7 +2,9 @@ using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
+using DocuEngAIne.Infrastructure.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace DocuEngAIne.Api.Endpoints;
 
@@ -29,6 +31,7 @@ public static class ProfileEndpoints
         group.MapGet("/me", async (
             DocuEngAIneDbContext db,
             ICurrentUser user,
+            IOptions<PlatformOptions> platform,
             CancellationToken cancellationToken) =>
         {
             if (user.TenantId is null)
@@ -86,6 +89,8 @@ public static class ProfileEndpoints
                 dbUser.Role,
                 dbUser.LastSeenAt,
                 Tenant = tenant is null ? null : new { tenant.Id, tenant.Name, tenant.Slug, tenant.PrimaryDomain },
+                // Shows the platform console link; the console itself checks the same configuration.
+                IsPlatformOperator = platform.Value.IsOperator(user.TenantId, user.ObjectId),
             });
         });
 

@@ -324,6 +324,34 @@ public class IntegrationSyncSchedulerTests
         }
     }
 
+    [Fact]
+    public async Task A_Suspended_Or_Archived_Tenant_Is_Never_Pulled()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        await using var sp = BuildProvider(dbName);
+        var active = Guid.NewGuid();
+        var suspended = Guid.NewGuid();
+        var archived = Guid.NewGuid();
+
+        var due = new Dictionary<Guid, Guid>();
+        foreach (var (tenantId, status) in new[] { (active, TenantStatus.Active), (suspended, TenantStatus.Suspended), (archived, TenantStatus.Archived) })
+        {
+            await using var seed = OpenBound(sp, tenantId);
+            seed.Db.Tenants.Add(new Tenant { Id = tenantId, Name = status.ToString(), Slug = $"t-{tenantId:N}", Status = status });
+            var server = await AddCompactServerAsync(seed.Db, tenantId);
+            var connection = DueHalo(tenantId, server.Id);
+            seed.Db.IntegrationConnections.Add(connection);
+            await seed.Db.SaveChangesAsync();
+            due[tenantId] = connection.Id;
+        }
+
+        var result = await CreateRunner(sp).RunDueAsync();
+
+        Assert.Contains(due[active], result.QueuedConnectionIds);
+        Assert.DoesNotContain(due[suspended], result.QueuedConnectionIds);
+        Assert.DoesNotContain(due[archived], result.QueuedConnectionIds);
+    }
+
     private static IntegrationSyncRunner CreateRunner(ServiceProvider sp)
         => new(sp.GetRequiredService<IServiceScopeFactory>(), NullLogger<IntegrationSyncRunner>.Instance);
 

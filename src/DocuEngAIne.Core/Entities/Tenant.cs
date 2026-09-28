@@ -1,4 +1,5 @@
 using DocuEngAIne.Core.Common;
+using DocuEngAIne.Core.Enums;
 
 namespace DocuEngAIne.Core.Entities;
 
@@ -7,7 +8,20 @@ public class Tenant : EntityBase
     public required string Name { get; set; }
     public required string Slug { get; set; }
     public string? PrimaryDomain { get; set; }
-    public bool IsActive { get; set; } = true;
+
+    /// <summary>Changed only by a platform operator; see <c>/api/platform/tenants</c>.</summary>
+    public TenantStatus Status { get; set; } = TenantStatus.Active;
+
+    /// <summary>Why the tenant is suspended or archived, shown to its users. Null while active.</summary>
+    public string? StatusReason { get; set; }
+    public DateTimeOffset? StatusChangedAt { get; set; }
+    public string? StatusChangedByObjectId { get; set; }
+
+    /// <summary>
+    /// Only an active tenant can be used — by browsers, API tokens and background sync. Derived from
+    /// <see cref="Status"/>, never stored: in queries, compare <see cref="Status"/> instead.
+    /// </summary>
+    public bool IsActive => Status == TenantStatus.Active;
 
     /// <summary>
     /// When on, API requests for this tenant are refused unless they come from an active

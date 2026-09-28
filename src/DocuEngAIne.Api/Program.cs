@@ -58,6 +58,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseAuthentication();
 app.UseMiddleware<IpAllowlistMiddleware>();
+app.UseMiddleware<TenantStatusMiddleware>();
 app.UseAuthorization();
 app.UseMiddleware<CompanyScopeMiddleware>();
 
@@ -69,6 +70,7 @@ app.MapHealthChecks("/api/health/ready", new Microsoft.AspNetCore.Diagnostics.He
 
 app.MapTenantEndpoints();
 app.MapTenantConfigurationEndpoints();
+app.MapPlatformEndpoints();
 app.MapCompanyEndpoints();
 app.MapIntegrationEndpoints();
 app.MapItGlueMigrationEndpoints();

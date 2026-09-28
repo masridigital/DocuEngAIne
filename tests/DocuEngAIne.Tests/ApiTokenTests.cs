@@ -46,7 +46,7 @@ public class ApiTokenTests
     private static async Task SeedTenantAsync(DocuEngAIneDbContext db, Guid tenantId, string slug)
     {
         if (!await db.Tenants.AnyAsync(t => t.Id == tenantId))
-            db.Tenants.Add(new Tenant { Id = tenantId, Name = slug, Slug = slug, IsActive = true });
+            db.Tenants.Add(new Tenant { Id = tenantId, Name = slug, Slug = slug });
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
     }

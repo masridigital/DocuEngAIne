@@ -8,6 +8,7 @@ import {
   DEFAULT_PRODUCT_NAME,
   featureEnabled,
   ipBlockedAddress,
+  tenantClosed,
   useProfile,
   useTenantConfiguration,
   useTerms,
@@ -35,7 +36,8 @@ export function Layout() {
   // The API refuses a suspended user, or an address outside the tenant's IP allowlist, on every
   // route; say which once instead of failing every page.
   const blockedIp = ipBlockedAddress(profileError)
-  const suspended = !blockedIp && profileError instanceof ApiError && profileError.status === 403
+  const closed = blockedIp ? null : tenantClosed(profileError)
+  const suspended = !blockedIp && !closed && profileError instanceof ApiError && profileError.status === 403
 
   return (
     <div className="app-shell">
@@ -62,6 +64,7 @@ export function Layout() {
           {showUsers ? <NavLink to="/security-groups">Security groups</NavLink> : null}
           {showUsers ? <NavLink to="/ip-access">IP access</NavLink> : null}
           {showUsers ? <NavLink to="/settings">Settings</NavLink> : null}
+          {profile?.isPlatformOperator ? <NavLink to="/platform">Platform</NavLink> : null}
         </nav>
         <div className="profile">
           <span>{isLoading ? '…' : profile?.displayName ?? profile?.email ?? account?.name ?? account?.username ?? 'Guest'}</span>
@@ -80,6 +83,16 @@ export function Layout() {
               This tenant only accepts requests from approved networks, and your address (<code>{blockedIp}</code>) is
               not one of them. Connect from an approved network, or ask a tenant administrator to add this address.
             </p>
+          </div>
+        ) : closed ? (
+          <div className="page">
+            <h1>{closed.status === 'Suspended' ? 'Tenant suspended' : 'Tenant archived'}</h1>
+            <p>{closed.message}</p>
+            {closed.reason ? (
+              <p className="banner">
+                Reason: <strong>{closed.reason}</strong>
+              </p>
+            ) : null}
           </div>
         ) : suspended ? (
           <div className="page">
