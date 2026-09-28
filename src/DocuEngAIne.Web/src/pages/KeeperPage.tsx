@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { ArchiveButton } from '../components/ArchiveButton'
 import { revealKeeperLink, useKeeperLinks } from '../hooks/useApi'
 
 export function KeeperPage() {
@@ -34,7 +35,8 @@ export function KeeperPage() {
                 }}
               >
                 Open in Keeper
-              </a>
+              </a>{' '}
+              <ArchiveButton type="KeeperLink" id={l.id} label={l.name} onError={setRevealError} />
             </article>
           ))}
         </div>

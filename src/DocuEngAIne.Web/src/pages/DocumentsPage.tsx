@@ -1,4 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react'
+import { ArchiveButton } from '../components/ArchiveButton'
 import {
   assistDocument,
   createFolder,
@@ -191,6 +192,7 @@ export function DocumentsPage() {
                     >
                       {assistBusyId === d.id ? 'Working…' : 'Rewrite'}
                     </button>
+                    <ArchiveButton type="Document" id={d.id} label={d.title} onError={setAssistError} />
                   </div>
                   {preview?.documentId === d.id && (
                     <div className="assist-preview">

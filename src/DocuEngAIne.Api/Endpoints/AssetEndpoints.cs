@@ -169,11 +169,14 @@ public static class AssetEndpoints
         return await UpdateAsync(id, request, db, user, cancellationToken);
     }
 
+    /// <summary>Archives to the Museum (restorable); permanent deletion is <c>DELETE /api/archive/{entryId}</c>.</summary>
     public static async Task<IResult> DeleteAsync(
         Guid id,
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        IAuditService? audit = null,
+        [FromQuery] string? reason = null,
         CancellationToken cancellationToken = default)
     {
         if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Asset, cancellationToken) is { } denied)
@@ -186,8 +189,7 @@ public static class AssetEndpoints
         if (asset is null)
             return Results.NotFound();
 
-        db.Assets.Remove(asset);
-        await db.SaveChangesAsync(cancellationToken);
+        await ArchiveEndpoints.ArchiveAsync(db, user, audit, asset, ResourceType.Asset, asset.Id, asset.Name, reason, cancellationToken);
         return Results.NoContent();
     }
 

@@ -3,9 +3,12 @@ using DocuEngAIne.Core.Interfaces;
 
 namespace DocuEngAIne.Core.Entities;
 
-public class Runbook : EntityBase, ITenantScoped
+public class Runbook : EntityBase, ITenantScoped, ISoftDeletable
 {
     public Guid TenantId { get; set; }
+
+    /// <summary>Archived when set. See <see cref="ISoftDeletable"/>.</summary>
+    public DateTimeOffset? DeletedAt { get; set; }
     public Tenant Tenant { get; set; } = null!;
 
     public Guid? CompanyId { get; set; }

@@ -206,6 +206,18 @@ public class HttpPipelineTests : IClassFixture<TestHost>
     }
 
     [Fact]
+    public async Task Museum_List_Is_Open_To_Readers_But_Permanent_Delete_Requires_Admin()
+    {
+        using var reader = _host.CreateReaderClient();
+
+        var list = await reader.GetAsync("/api/archive");
+        Assert.Equal(HttpStatusCode.OK, list.StatusCode);
+
+        var destroy = await reader.DeleteAsync($"/api/archive/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.Forbidden, destroy.StatusCode);
+    }
+
+    [Fact]
     public async Task Audit_Events_Require_Admin()
     {
         using (var reader = _host.CreateReaderClient())

@@ -10,6 +10,7 @@ import { ExpirationsPage } from './pages/ExpirationsPage'
 import { FlagsPage } from './pages/FlagsPage'
 import { IntegrationsPage } from './pages/IntegrationsPage'
 import { KeeperPage } from './pages/KeeperPage'
+import { MuseumPage } from './pages/MuseumPage'
 import { RunbooksPage } from './pages/RunbooksPage'
 import { RunsPage } from './pages/RunsPage'
 import { UsersPage } from './pages/UsersPage'
@@ -33,6 +34,7 @@ function App() {
           <Route path="integrations" element={<IntegrationsPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="audit" element={<AuditPage />} />
+          <Route path="museum" element={<MuseumPage />} />
           <Route path="portal" element={<PortalPage />} />
           <Route path="portal/:companyId" element={<PortalPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

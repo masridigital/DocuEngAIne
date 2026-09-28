@@ -217,11 +217,14 @@ public static class RunbookEndpoints
         return await UpdateAsync(id, request, db, user, cancellationToken);
     }
 
+    /// <summary>Archives to the Museum (restorable); permanent deletion is <c>DELETE /api/archive/{entryId}</c>.</summary>
     public static async Task<IResult> DeleteAsync(
         Guid id,
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
+        IAuditService? audit = null,
+        [FromQuery] string? reason = null,
         CancellationToken cancellationToken = default)
     {
         if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Runbook, cancellationToken) is { } denied)
@@ -231,8 +234,7 @@ public static class RunbookEndpoints
         if (runbook is null)
             return Results.NotFound();
 
-        db.Runbooks.Remove(runbook);
-        await db.SaveChangesAsync(cancellationToken);
+        await ArchiveEndpoints.ArchiveAsync(db, user, audit, runbook, ResourceType.Runbook, runbook.Id, runbook.Title, reason, cancellationToken);
         return Results.NoContent();
     }
 

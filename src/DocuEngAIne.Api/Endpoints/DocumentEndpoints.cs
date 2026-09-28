@@ -134,12 +134,15 @@ public static class DocumentEndpoints
         return await UpdateAsync(id, request, db, user, cancellationToken, search);
     }
 
+    /// <summary>Archives to the Museum (restorable); permanent deletion is <c>DELETE /api/archive/{entryId}</c>.</summary>
     public static async Task<IResult> DeleteAsync(
         Guid id,
         DocuEngAIneDbContext db,
         ICurrentUser user,
         IResourceAuthorizationService authorization,
         ISearchService? search = null,
+        IAuditService? audit = null,
+        [FromQuery] string? reason = null,
         CancellationToken cancellationToken = default)
     {
         if (await ResourceWriteGuard.RequireWriteAsync(authorization, user, id, ResourceType.Document, cancellationToken) is { } denied)
@@ -152,11 +155,9 @@ public static class DocumentEndpoints
         if (doc is null)
             return Results.NotFound();
 
-        var tenantId = doc.TenantId;
-        db.Documents.Remove(doc);
-        await db.SaveChangesAsync(cancellationToken);
+        await ArchiveEndpoints.ArchiveAsync(db, user, audit, doc, ResourceType.Document, doc.Id, doc.Title, reason, cancellationToken);
         if (search is not null)
-            await search.RemoveDocumentAsync(id, tenantId, cancellationToken);
+            await search.RemoveDocumentAsync(doc.Id, doc.TenantId, cancellationToken);
         return Results.NoContent();
     }
 
@@ -451,7 +452,7 @@ public static class DocumentEndpoints
             doc.Content = content;
     }
 
-    private static Task IndexDocumentAsync(
+    internal static Task IndexDocumentAsync(
         ISearchService? search,
         Document doc,
         CancellationToken cancellationToken)

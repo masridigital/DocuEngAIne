@@ -5,6 +5,9 @@ namespace DocuEngAIne.Infrastructure.Data;
 
 public static class ModelBuilderExtensions
 {
+    /// <summary>Unique-slug index filter for soft-deletable rows: only live rows with a slug compete.</summary>
+    public const string ActiveSlugFilter = "[Slug] IS NOT NULL AND [DeletedAt] IS NULL";
+
     public static void ApplyDocuEngAIneConfiguration(this ModelBuilder modelBuilder)
     {
         modelBuilder.Entity<Tenant>(t =>
@@ -99,6 +102,7 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<Asset>(a =>
         {
+            a.HasQueryFilter(x => x.DeletedAt == null);
             a.HasIndex(x => x.AssetTypeId);
             a.HasIndex(x => new { x.TenantId, x.Name });
             a.HasIndex(x => x.ExpiresAt);
@@ -108,6 +112,8 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<CustomFieldValue>(v =>
         {
+            // Vanishes with its archived asset (and keeps EF's required-navigation filter warning quiet).
+            v.HasQueryFilter(x => x.Asset.DeletedAt == null);
             v.HasIndex(x => new { x.AssetId, x.FieldDefinitionId }).IsUnique();
             // Restrict: Asset already cascades to CustomFieldValue via AssetType — SQL Server forbids multiple cascade paths.
             v.HasOne(x => x.FieldDefinition).WithMany().HasForeignKey(x => x.FieldDefinitionId).OnDelete(DeleteBehavior.Restrict);
@@ -125,7 +131,10 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<Document>(d =>
         {
-            d.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
+            d.HasQueryFilter(x => x.DeletedAt == null);
+            // Archived rows must not hold their slug, or a new document could never reuse it. The
+            // explicit filter replaces EF's implicit "[Slug] IS NOT NULL", so it restates it.
+            d.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique().HasFilter(ActiveSlugFilter);
             d.HasIndex(x => x.Tags);
             d.HasIndex(x => x.FolderId);
             // Restrict: Asset already cascades to AssetDocumentLink — SQL Server forbids multiple cascade paths.
@@ -137,33 +146,39 @@ public static class ModelBuilderExtensions
 
         modelBuilder.Entity<DocumentVersion>(v =>
         {
+            v.HasQueryFilter(x => x.Document.DeletedAt == null);
             v.HasIndex(x => new { x.DocumentId, x.VersionNumber });
         });
 
         modelBuilder.Entity<AssetDocumentLink>(l =>
         {
+            l.HasQueryFilter(x => x.Asset.DeletedAt == null && x.Document.DeletedAt == null);
             l.HasIndex(x => new { x.AssetId, x.DocumentId }).IsUnique();
         });
 
         modelBuilder.Entity<KeeperLink>(k =>
         {
+            k.HasQueryFilter(x => x.DeletedAt == null);
             k.HasIndex(x => new { x.TenantId, x.Name });
         });
 
         modelBuilder.Entity<Runbook>(r =>
         {
-            r.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique();
+            r.HasQueryFilter(x => x.DeletedAt == null);
+            r.HasIndex(x => new { x.TenantId, x.Slug }).IsUnique().HasFilter(ActiveSlugFilter);
             r.HasMany(x => x.Steps).WithOne(s => s.Runbook).HasForeignKey(s => s.RunbookId).OnDelete(DeleteBehavior.Cascade);
             r.HasMany(x => x.Runs).WithOne(s => s.Runbook).HasForeignKey(s => s.RunbookId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<RunbookStep>(s =>
         {
+            s.HasQueryFilter(x => x.Runbook.DeletedAt == null);
             s.HasIndex(x => new { x.RunbookId, x.Order }).IsUnique();
         });
 
         modelBuilder.Entity<RunbookRun>(r =>
         {
+            r.HasQueryFilter(x => x.Runbook.DeletedAt == null);
             r.HasIndex(x => new { x.RunbookId, x.StartedAt });
             r.HasIndex(x => new { x.TenantId, x.StartedAt });
             // Restrict: Runbook already cascades from Tenant — SQL Server forbids multiple cascade paths.
@@ -221,6 +236,20 @@ public static class ModelBuilderExtensions
             a.HasIndex(x => x.CreatedAt);
             // The per-record activity feed reads by target.
             a.HasIndex(x => new { x.TenantId, x.EntityType, x.EntityId });
+        });
+
+        modelBuilder.Entity<ArchiveEntry>(a =>
+        {
+            a.Property(x => x.ResourceType).HasMaxLength(50);
+            a.Property(x => x.ResourceLabel).HasMaxLength(450);
+            a.Property(x => x.Reason).HasMaxLength(1000);
+            a.Property(x => x.ArchivedByObjectId).HasMaxLength(128);
+            a.Property(x => x.ArchivedByName).HasMaxLength(200);
+            a.Property(x => x.RestoredByObjectId).HasMaxLength(128);
+            a.Property(x => x.PermanentlyDeletedByObjectId).HasMaxLength(128);
+            a.HasIndex(x => new { x.TenantId, x.ResourceType, x.ResourceId });
+            a.HasIndex(x => new { x.TenantId, x.ArchivedAt });
+            a.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<ApiToken>(a =>

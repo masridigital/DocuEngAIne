@@ -281,6 +281,31 @@ public class NinjaDeviceMapperTests
     }
 
     [Fact]
+    public async Task Ninja_SyncAsync_Skips_A_Device_Whose_Asset_Was_Archived_Instead_Of_Recreating_It()
+    {
+        var mcp = NinjaMcp();
+        var (db, user, sync) = Create(mcp);
+        var (_, connection) = await SeedNinjaCompactAsync(db, user);
+
+        await sync.SyncAsync(connection.Id);
+        var archived = await db.Assets.FirstAsync();
+        archived.DeletedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync();
+
+        var second = await sync.SyncAsync(connection.Id);
+
+        Assert.Equal(SyncRunStatus.Succeeded, second.Status);
+        // Without the archive check the hidden asset read as "mapping outlived its asset" and a
+        // duplicate was created on every sync.
+        Assert.Equal(0, second.ItemsCreated);
+        // 5 companies + 3 live devices updated; the orphan-org device and the archived one skipped.
+        Assert.Equal(8, second.ItemsUpdated);
+        Assert.Equal(2, second.ItemsSkipped);
+        Assert.Equal(3, await db.Assets.CountAsync());
+        Assert.Equal(4, await db.Assets.IgnoreQueryFilters().CountAsync());
+    }
+
+    [Fact]
     public async Task Ninja_SyncAsync_Does_Not_Clobber_Asset_Name_When_AutoUpdateAssetNames_False()
     {
         var mcp = NinjaMcp();

@@ -40,6 +40,7 @@ public class DocuEngAIneDbContext : DbContext
     public DbSet<FlagAssignment> FlagAssignments => Set<FlagAssignment>();
     public DbSet<ResourceLink> ResourceLinks => Set<ResourceLink>();
     public DbSet<ApiToken> ApiTokens => Set<ApiToken>();
+    public DbSet<ArchiveEntry> ArchiveEntries => Set<ArchiveEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
