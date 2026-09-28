@@ -54,46 +54,9 @@ public static class DocumentEndpoints
         group.MapPut("/{id:guid}", PutAsync);
         group.MapDelete("/{id:guid}", DeleteAsync);
 
-        group.MapGet("/{id:guid}/versions", async (
-            Guid id,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            CancellationToken cancellationToken) =>
-        {
-            var versions = await db.DocumentVersions
-                .AsNoTracking()
-                .Where(v => v.DocumentId == id)
-                .OrderByDescending(v => v.VersionNumber)
-                .Select(v => new { v.Id, v.VersionNumber, v.ChangeNote, v.Title, v.CreatedAt })
-                .ToListAsync(cancellationToken);
+        group.MapGet("/{id:guid}/versions", ListVersionsAsync);
 
-            return Results.Ok(versions);
-        });
-
-        group.MapGet("/{id:guid}/versions/{versionId:guid}", async (
-            Guid id,
-            Guid versionId,
-            DocuEngAIneDbContext db,
-            ICurrentUser user,
-            CancellationToken cancellationToken) =>
-        {
-            var version = await db.DocumentVersions
-                .AsNoTracking()
-                .FirstOrDefaultAsync(v => v.DocumentId == id && v.Id == versionId, cancellationToken);
-
-            return version is null ? Results.NotFound() : Results.Ok(new
-            {
-                version.Id,
-                version.VersionNumber,
-                version.Title,
-                version.Slug,
-                version.Summary,
-                version.Content,
-                version.Tags,
-                version.ChangeNote,
-                version.CreatedAt,
-            });
-        });
+        group.MapGet("/{id:guid}/versions/{versionId:guid}", GetVersionAsync);
 
         group.MapPost("/{id:guid}/restore", RestoreAsync);
         group.MapPost("/{id:guid}/assist", AssistAsync);
@@ -195,6 +158,54 @@ public static class DocumentEndpoints
         if (search is not null)
             await search.RemoveDocumentAsync(id, tenantId, cancellationToken);
         return Results.NoContent();
+    }
+
+    // DocumentVersion carries no TenantId, so a version is only ever reachable through its parent:
+    // the document must resolve ForTenant first. Querying versions by DocumentId alone let any
+    // tenant read another tenant's full document history given the document's id.
+    public static async Task<IResult> ListVersionsAsync(
+        Guid id,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await db.Documents.ForTenant(user).AnyAsync(d => d.Id == id, cancellationToken))
+            return Results.NotFound();
+
+        var versions = await db.DocumentVersions
+            .AsNoTracking()
+            .Where(v => v.DocumentId == id)
+            .OrderByDescending(v => v.VersionNumber)
+            .Select(v => new DocumentVersionListItem(v.Id, v.VersionNumber, v.ChangeNote, v.Title, v.CreatedAt))
+            .ToListAsync(cancellationToken);
+
+        return Results.Ok(versions);
+    }
+
+    public static async Task<IResult> GetVersionAsync(
+        Guid id,
+        Guid versionId,
+        DocuEngAIneDbContext db,
+        ICurrentUser user,
+        CancellationToken cancellationToken = default)
+    {
+        if (!await db.Documents.ForTenant(user).AnyAsync(d => d.Id == id, cancellationToken))
+            return Results.NotFound();
+
+        var version = await db.DocumentVersions
+            .AsNoTracking()
+            .FirstOrDefaultAsync(v => v.DocumentId == id && v.Id == versionId, cancellationToken);
+
+        return version is null ? Results.NotFound() : Results.Ok(new DocumentVersionDetail(
+            version.Id,
+            version.VersionNumber,
+            version.Title,
+            version.Slug,
+            version.Summary,
+            version.Content,
+            version.Tags,
+            version.ChangeNote,
+            version.CreatedAt));
     }
 
     public static async Task<IResult> RestoreAsync(
@@ -487,6 +498,24 @@ public record UpdateDocumentRequest(
     bool CompanyIdClear = false);
 
 public record RestoreVersionRequest(Guid VersionId);
+
+public sealed record DocumentVersionListItem(
+    Guid Id,
+    int VersionNumber,
+    string? ChangeNote,
+    string Title,
+    DateTimeOffset CreatedAt);
+
+public sealed record DocumentVersionDetail(
+    Guid Id,
+    int VersionNumber,
+    string Title,
+    string? Slug,
+    string? Summary,
+    string? Content,
+    string? Tags,
+    string? ChangeNote,
+    DateTimeOffset CreatedAt);
 
 public enum DocumentAssistAction
 {

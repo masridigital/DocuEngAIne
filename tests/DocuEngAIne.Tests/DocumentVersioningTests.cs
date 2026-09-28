@@ -1,7 +1,9 @@
+using DocuEngAIne.Api.Endpoints;
 using DocuEngAIne.Core.Entities;
 using DocuEngAIne.Core.Enums;
 using DocuEngAIne.Core.Interfaces;
 using DocuEngAIne.Infrastructure.Data;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 
 namespace DocuEngAIne.Tests;
@@ -86,5 +88,61 @@ public class DocumentVersioningTests
 
         var fetched = await db.Documents.Include(d => d.Versions).FirstAsync(d => d.Id == doc.Id);
         Assert.Empty(fetched.Versions);
+    }
+}
+
+public class DocumentVersionTenantIsolationTests
+{
+    private static DocuEngAIneDbContext Open(string dbName, FakeCurrentUser user) =>
+        new(new DbContextOptionsBuilder<DocuEngAIneDbContext>().UseInMemoryDatabase(dbName).Options, user);
+
+    [Fact]
+    public async Task Version_History_Is_Not_Readable_From_Another_Tenant()
+    {
+        var dbName = Guid.NewGuid().ToString();
+        var tenantA = Guid.NewGuid();
+        var tenantB = Guid.NewGuid();
+        var userA = new FakeCurrentUser { TenantId = tenantA, ObjectId = Guid.NewGuid().ToString() };
+        var userB = new FakeCurrentUser { TenantId = tenantB, ObjectId = Guid.NewGuid().ToString() };
+
+        Guid docId;
+        Guid versionId;
+        await using (var dbA = Open(dbName, userA))
+        {
+            var doc = new Document { TenantId = tenantA, Title = "A-Secret", Slug = "a-secret", Content = "current" };
+            dbA.Documents.Add(doc);
+            await dbA.SaveChangesAsync();
+            var version = new DocumentVersion
+            {
+                DocumentId = doc.Id,
+                VersionNumber = 1,
+                Title = "A-Secret",
+                Content = "tenant-a-confidential-history",
+            };
+            dbA.DocumentVersions.Add(version);
+            await dbA.SaveChangesAsync();
+            docId = doc.Id;
+            versionId = version.Id;
+        }
+
+        await using (var dbA = Open(dbName, userA))
+        {
+            var own = await DocumentEndpoints.ListVersionsAsync(docId, dbA, userA);
+            var list = Assert.IsAssignableFrom<IValueHttpResult>(own);
+            Assert.Single(Assert.IsAssignableFrom<IEnumerable<DocumentVersionListItem>>(list.Value));
+
+            var detail = await DocumentEndpoints.GetVersionAsync(docId, versionId, dbA, userA);
+            var body = Assert.IsType<DocumentVersionDetail>(Assert.IsAssignableFrom<IValueHttpResult>(detail).Value);
+            Assert.Equal("tenant-a-confidential-history", body.Content);
+        }
+
+        await using (var dbB = Open(dbName, userB))
+        {
+            var foreignList = await DocumentEndpoints.ListVersionsAsync(docId, dbB, userB);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(foreignList).StatusCode);
+
+            var foreignDetail = await DocumentEndpoints.GetVersionAsync(docId, versionId, dbB, userB);
+            Assert.Equal(StatusCodes.Status404NotFound, Assert.IsAssignableFrom<IStatusCodeHttpResult>(foreignDetail).StatusCode);
+        }
     }
 }
