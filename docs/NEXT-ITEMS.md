@@ -194,8 +194,13 @@ apply via the `migrate` job's EF bundle.
   route-auth-shaped; per-endpoint other-tenant behaviour is still mostly asserted at the service
   layer.
 - No mapper has ever been run against live Compact output that wasn't first pasted into a fixture
-  — that is item 3, not more unit tests.
+  — that is item 3, not more unit tests. What could be checked without it has been: every wired
+  tool's arguments match its live input schema (`stackjack_describe_tools`, 2026-09-28). Datto's
+  0-based pages were the one mismatch, fixed in PR #82. CIPP's schema asks for the tenant domain
+  as `tenantFilter`; the device and user passes send the `customerId`, which CIPP is expected to accept but has not been seen to —
+  confirm on the first live pull.
 - The unwired mappers carry full test suites that will silently rot if item 2 lands on
   "stop building".
-- #67's document-assist apply path (`Apply=true`: version snapshot + write) has no test — preview,
-  403, and cross-tenant cases are covered.
+- #67's document-assist apply path is now covered: a rewrite snapshots the old content as the next
+  version before replacing it, a summarize replaces only the summary, and a model failure writes
+  nothing.

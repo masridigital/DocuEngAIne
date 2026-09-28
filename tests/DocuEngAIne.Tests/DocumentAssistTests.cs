@@ -129,6 +129,87 @@ public class DocumentAssistTests : IClassFixture<TestHost>
     }
 
     [Fact]
+    public async Task Apply_Rewrite_Snapshots_The_Old_Content_Then_Replaces_It()
+    {
+        const string body = "original-rewrite-body";
+        var id = await SeedDocumentAsync(_host.TenantAId, "Apply rewrite", body);
+        var stub = _host.Services.GetRequiredService<StubLlmClient>();
+        stub.Reset();
+        stub.Result = new("applied-rewrite-body", "llama3.1", DocuEngAIne.Core.Enums.LlmProvider.Ollama);
+
+        using var client = _host.CreateOwnerClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/documents/{id}/assist",
+            new { action = "rewrite", apply = true });
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DocuEngAIneDbContext>();
+        var version = Assert.Single(db.DocumentVersions.AsNoTracking().Where(v => v.DocumentId == id));
+        Assert.Equal(1, version.VersionNumber);
+        Assert.Equal(body, version.Content);
+        Assert.Equal("Apply rewrite", version.Title);
+        Assert.Equal("LLM rewrite", version.ChangeNote);
+
+        var doc = await db.Documents.AsNoTracking().SingleAsync(d => d.Id == id);
+        Assert.Equal("applied-rewrite-body", doc.Content);
+        Assert.Null(doc.Summary);
+    }
+
+    [Fact]
+    public async Task Apply_Summarize_Replaces_Only_The_Summary_And_Numbers_The_Next_Version()
+    {
+        const string body = "body-kept-by-summarize";
+        var id = await SeedDocumentAsync(_host.TenantAId, "Apply summarize", body);
+        var stub = _host.Services.GetRequiredService<StubLlmClient>();
+        stub.Reset();
+
+        using var client = _host.CreateOwnerClient();
+        stub.Result = new("first-summary", "llama3.1", DocuEngAIne.Core.Enums.LlmProvider.Ollama);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/documents/{id}/assist", new { action = "summarize", apply = true })).StatusCode);
+        stub.Result = new("second-summary", "llama3.1", DocuEngAIne.Core.Enums.LlmProvider.Ollama);
+        Assert.Equal(HttpStatusCode.OK, (await client.PostAsJsonAsync($"/api/documents/{id}/assist", new { action = "summarize", apply = true })).StatusCode);
+
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DocuEngAIneDbContext>();
+        var versions = await db.DocumentVersions.AsNoTracking()
+            .Where(v => v.DocumentId == id).OrderBy(v => v.VersionNumber).ToListAsync();
+        Assert.Equal(new[] { 1, 2 }, versions.Select(v => v.VersionNumber));
+        // Each snapshot holds what the apply replaced: no summary, then the first one.
+        Assert.Null(versions[0].Summary);
+        Assert.Equal("first-summary", versions[1].Summary);
+        Assert.All(versions, v => Assert.Equal(body, v.Content));
+        Assert.All(versions, v => Assert.Equal("LLM summarize", v.ChangeNote));
+
+        var doc = await db.Documents.AsNoTracking().SingleAsync(d => d.Id == id);
+        Assert.Equal("second-summary", doc.Summary);
+        Assert.Equal(body, doc.Content);
+    }
+
+    [Fact]
+    public async Task Apply_When_The_Model_Fails_Writes_Nothing()
+    {
+        const string body = "untouched-on-failure";
+        var id = await SeedDocumentAsync(_host.TenantAId, "Apply failure", body);
+        var stub = _host.Services.GetRequiredService<StubLlmClient>();
+        stub.Reset();
+        stub.ThrowOnChat = new InvalidOperationException("No LLM provider is configured.");
+
+        using var client = _host.CreateOwnerClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/documents/{id}/assist",
+            new { action = "rewrite", apply = true });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DocuEngAIneDbContext>();
+        Assert.Empty(db.DocumentVersions.Where(v => v.DocumentId == id));
+        Assert.Equal(body, (await db.Documents.AsNoTracking().SingleAsync(d => d.Id == id)).Content);
+    }
+
+    [Fact]
     public async Task Assist_Reader_Returns_403()
     {
         var id = await SeedDocumentAsync(_host.TenantAId, "Reader blocked", "body");
