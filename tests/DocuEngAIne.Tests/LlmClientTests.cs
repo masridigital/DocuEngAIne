@@ -374,20 +374,55 @@ public class LlmClientTests
         Assert.Null(result.Usage);
     }
 
-    [Fact]
-    public async Task Anthropic_Usage_Treats_Missing_And_Negative_Fields_As_Zero()
+    [Theory]
+    [InlineData("""{"input_tokens":-5,"output_tokens":7,"cache_creation_input_tokens":null}""")]
+    [InlineData("""{"input_tokens":"lots","output_tokens":7,"cache_read_input_tokens":99999999999}""")]
+    [InlineData("""{"input_tokens":0.5,"output_tokens":7,"cache_creation_input_tokens":{"a":1}}""")]
+    public async Task Anthropic_Usage_Treats_Missing_Negative_And_Malformed_Fields_As_Zero_And_Never_Fails_The_Call(string usage)
     {
-        const string reply = """{"model":"claude-reply","content":[{"type":"text","text":"ok"}],"usage":{"input_tokens":-5,"output_tokens":7,"cache_creation_input_tokens":null}}""";
+        var reply = $$"""{"model":"claude-reply","content":[{"type":"text","text":"ok"}],"usage":{{usage}}}""";
         var handler = new RecordingHandler().EnqueueJson(reply);
         var client = CachingClient(handler, enabled: true);
 
         var result = await client.ChatAsync(DocumentPrompt);
 
+        Assert.Equal("ok", result.Content);
         Assert.Equal(new LlmUsage(0, 7, 0, 0), result.Usage);
     }
 
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"oops\"")]
+    [InlineData("[1,2]")]
+    public async Task Anthropic_Usage_That_Is_Not_An_Object_Reports_None_And_Never_Fails_The_Call(string usage)
+    {
+        var reply = $$"""{"model":"claude-reply","content":[{"type":"text","text":"ok"}],"usage":{{usage}}}""";
+        var handler = new RecordingHandler().EnqueueJson(reply);
+        var client = CachingClient(handler, enabled: true);
+
+        var result = await client.ChatAsync(DocumentPrompt);
+
+        Assert.Equal("ok", result.Content);
+        Assert.Null(result.Usage);
+    }
+
     [Fact]
-    public async Task Anthropic_Logs_Usage_As_Integers_Without_The_Key_Or_Any_Content()
+    public async Task Anthropic_With_Caching_On_Does_Not_Wrap_A_Whitespace_Only_Marked_Turn()
+    {
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReply);
+        var client = CachingClient(handler, enabled: true);
+
+        await client.ChatAsync(
+        [
+            new LlmMessage("system", "s"),
+            new LlmMessage("user", "   ", CacheBreakpoint: true),
+        ]);
+
+        Assert.DoesNotContain("cache_control", Assert.Single(handler.Requests).Body);
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Caching_On_Logs_Neither_The_Key_Nor_Any_Content()
     {
         var handler = new RecordingHandler().EnqueueJson(AnthropicReplyWithUsage);
         var logger = new CapturingLogger<AnthropicLlmClient>();
@@ -396,7 +431,6 @@ public class LlmClientTests
         await client.ChatAsync(DocumentPrompt);
 
         var logs = string.Join('\n', logger.Messages);
-        Assert.Contains("in=61 out=482 cacheRead=3400 cacheWrite=1200", logs);
         Assert.Contains("x-api-key=[redacted]", logs, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(AnthropicSecret, logs);
         Assert.DoesNotContain("the-document-body", logs);

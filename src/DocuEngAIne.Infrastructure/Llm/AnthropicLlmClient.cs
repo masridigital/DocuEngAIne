@@ -78,23 +78,31 @@ public sealed class AnthropicLlmClient : ILlmClient
 
         // Usage is captured only with caching switched on, so the off state changes nothing in prod.
         var usage = cache ? ReadUsage(parsed.Usage) : null;
-        if (usage is not null)
-        {
-            _logger.LogInformation("Anthropic chat usage {Usage}", usage.ToAuditDetails());
-        }
 
         return new LlmChatResult(content, parsed.Model ?? model, LlmProvider.Anthropic, usage);
     }
 
-    private static LlmUsage? ReadUsage(AnthropicUsage? usage) => usage is null
-        ? null
-        : new LlmUsage(
-            NonNegative(usage.InputTokens),
-            NonNegative(usage.OutputTokens),
-            NonNegative(usage.CacheCreationInputTokens),
-            NonNegative(usage.CacheReadInputTokens));
+    // Tolerant on purpose: usage is telemetry, so a missing, null, non-numeric or out-of-range field reads
+    // as 0 rather than failing a call that already succeeded and was billed.
+    private static LlmUsage? ReadUsage(JsonElement? usage)
+    {
+        if (usage is not { ValueKind: JsonValueKind.Object } element)
+            return null;
 
-    private static int NonNegative(int? value) => value is > 0 ? value.Value : 0;
+        return new LlmUsage(
+            Count(element, "input_tokens"),
+            Count(element, "output_tokens"),
+            Count(element, "cache_creation_input_tokens"),
+            Count(element, "cache_read_input_tokens"));
+    }
+
+    private static int Count(JsonElement usage, string name)
+        => usage.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out var count)
+            && count > 0
+                ? count
+                : 0;
 
     internal static (string? System, List<AnthropicTurn> Turns) SplitSystem(
         IReadOnlyList<LlmMessage> messages,
@@ -117,7 +125,7 @@ public sealed class AnthropicLlmClient : ILlmClient
             turns.Add(new AnthropicTurn
             {
                 Role = message.Role,
-                Content = cache && message.CacheBreakpoint && !string.IsNullOrEmpty(message.Content)
+                Content = cache && message.CacheBreakpoint && !string.IsNullOrWhiteSpace(message.Content)
                     ? new List<AnthropicTextBlock>
                     {
                         new() { Text = message.Content, CacheControl = new AnthropicCacheControl() },
@@ -201,25 +209,10 @@ internal sealed class AnthropicMessageResponse
     public string? Model { get; set; }
 
     [JsonPropertyName("usage")]
-    public AnthropicUsage? Usage { get; set; }
+    public JsonElement? Usage { get; set; }
 
     [JsonPropertyName("content")]
     public List<AnthropicContentBlock>? Content { get; set; }
-}
-
-internal sealed class AnthropicUsage
-{
-    [JsonPropertyName("input_tokens")]
-    public int? InputTokens { get; set; }
-
-    [JsonPropertyName("output_tokens")]
-    public int? OutputTokens { get; set; }
-
-    [JsonPropertyName("cache_creation_input_tokens")]
-    public int? CacheCreationInputTokens { get; set; }
-
-    [JsonPropertyName("cache_read_input_tokens")]
-    public int? CacheReadInputTokens { get; set; }
 }
 
 internal sealed class AnthropicContentBlock

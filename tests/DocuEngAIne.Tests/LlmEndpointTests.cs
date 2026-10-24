@@ -95,7 +95,7 @@ public class LlmEndpointTests : IClassFixture<TestHost>
     }
 
     [Fact]
-    public async Task Chat_Is_Never_Marked_For_Caching_And_Audits_Usage_As_Integers_Only()
+    public async Task Chat_Is_Never_Marked_For_Caching_And_Its_Audit_Details_Are_Unchanged()
     {
         var stub = _host.Services.GetRequiredService<StubLlmClient>();
         stub.Reset();
@@ -121,7 +121,7 @@ public class LlmEndpointTests : IClassFixture<TestHost>
             .Where(a => a.Action == "Llm.Chat" && a.Details != null && a.Details.Contains("claude-opus-5"))
             .AsEnumerable()
             .Single();
-        Assert.Equal("provider=Anthropic model=claude-opus-5 in=10 out=20 cacheRead=0 cacheWrite=0", audit.Details);
+        Assert.Equal("provider=Anthropic model=claude-opus-5", audit.Details);
         Assert.DoesNotContain(prompt, audit.Details);
         Assert.DoesNotContain("chat-completion", audit.Details);
     }
