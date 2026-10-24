@@ -54,7 +54,8 @@ public static class LlmEndpoints
                 "Llm.Chat",
                 "Llm",
                 entityId: null,
-                details: $"provider={result.Provider} model={result.Model}",
+                details: $"provider={result.Provider} model={result.Model}"
+                    + (result.Usage is { } usage ? $" {usage.ToAuditDetails()}" : string.Empty),
                 cancellationToken);
 
             return Results.Ok(new LlmChatResponse(result.Content, result.Model, result.Provider.ToString()));

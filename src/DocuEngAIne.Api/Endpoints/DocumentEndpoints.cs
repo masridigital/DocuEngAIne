@@ -383,7 +383,8 @@ public static class DocumentEndpoints
                 "Document.Assist",
                 nameof(Document),
                 doc.Id,
-                $"action={request.Action} provider={result.Provider} model={result.Model} apply={request.Apply}",
+                $"action={request.Action} provider={result.Provider} model={result.Model} apply={request.Apply}"
+                    + (result.Usage is { } usage ? $" {usage.ToAuditDetails()}" : string.Empty),
                 cancellationToken);
 
             if (request.Apply)
@@ -415,7 +416,10 @@ public static class DocumentEndpoints
         var messages = new List<LlmMessage>
         {
             new("system", $"{AssistSystemPrompt} {actionLine}"),
-            new("user", doc.Content ?? string.Empty),
+            // The document is the large, per-document part of the prompt. Marking it ends the cacheable
+            // prefix (system prompt + action line + document) for providers that cache; the technician's
+            // instruction below varies per call, so it stays after the marker.
+            new("user", doc.Content ?? string.Empty, CacheBreakpoint: true),
         };
 
         if (request.Action == DocumentAssistAction.Rewrite

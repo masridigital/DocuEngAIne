@@ -36,6 +36,15 @@ Environment variables (double-underscore binds to the JSON section):
 | `TogetherApiKey` | Together AI key (config or Key Vault secret name `TogetherApiKey`) |
 | `AnthropicApiKey` | Anthropic key (config or Key Vault secret name `AnthropicApiKey`) |
 
+### Anthropic prompt caching and usage (off by default)
+
+`Llm:Anthropic:PromptCaching:Enabled` (env `LLM__ANTHROPIC__PROMPTCACHING__ENABLED`) defaults to **`false`**, so a deployment that does not set it sends exactly the request it always did. When `true` and the provider is Anthropic:
+
+- Document assist marks the document turn with `cache_control: {"type":"ephemeral"}` (default 5-minute TTL, no `ttl`, no beta header). The cached prefix is the system prompt (which includes the action line) plus the document body; the technician's rewrite instruction comes after it and is not cached. `/api/llm/chat` is never marked.
+- The reply's `usage` is read and written to the audit `details` as integers only: `in=<input_tokens> out=<output_tokens> cacheRead=<cache_read_input_tokens> cacheWrite=<cache_creation_input_tokens>`. `in` excludes cache reads and writes. No prompt, completion or key is logged.
+- A prompt below the model's minimum cacheable length (512 tokens on Opus 5 / Opus 5.5 / Sonnet 5.5 / Haiku 5.5; more on older models) is silently not cached, so `cacheRead` and `cacheWrite` are both `0`. Ollama and Together ignore the marker.
+- Reading the hit rate from `Document.Assist` audit rows: hit rate = rows with `cacheRead>0` / rows with `cacheRead>0` or `cacheWrite>0`. A cache write costs 1.25x the input price and a read costs 0.1x (0.05x on Opus 5.5 / Sonnet 5.5), so it breaks even at roughly a 22% hit rate.
+
 Ollama has no API key. Together and Anthropic keys are never written to SQL and never logged (Authorization / `x-api-key` are `[redacted]`).
 
 If Together or Anthropic is selected and the key is missing, the host still starts. `ChatAsync` throws `InvalidOperationException` naming the missing secret.
@@ -52,7 +61,7 @@ Authenticated technician routes (same `RequireAuthorization` gate as documents):
 
 `messages` is `{ role, content }[]`. A successful chat is audit-logged as `Llm.Chat` with provider and model only — not the prompt or completion.
 
-Document assist loads the article with `ForTenant` (404 if missing) and uses the same technician write gate as other document writes (403). The model receives an MSP-documentation system prompt (no secrets, no invented credentials) and the document body as the user turn. Rewrite may send an extra user turn with `instruction`. `apply` defaults to `false` (preview only). `apply: true` creates a version snapshot of the current article, then writes the model output to `Summary` (summarize) or `Content` (rewrite). Assist is audit-logged as `Document.Assist` with action, provider, model, and apply — not the prompt or completion.
+Document assist loads the article with `ForTenant` (404 if missing) and uses the same technician write gate as other document writes (403). The model receives an MSP-documentation system prompt (no secrets, no invented credentials) and the document body as the user turn. Rewrite may send an extra user turn with `instruction`. `apply` defaults to `false` (preview only). `apply: true` creates a version snapshot of the current article, then writes the model output to `Summary` (summarize) or `Content` (rewrite). Assist is audit-logged as `Document.Assist` with action, provider, model, and apply — plus integer token counts when prompt caching is enabled — not the prompt or completion.
 
 ## Local Ollama
 

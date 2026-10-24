@@ -12,6 +12,23 @@ public sealed class LlmOptions
     public string? Model { get; set; }
 
     public OllamaLlmOptions Ollama { get; set; } = new();
+
+    public AnthropicLlmOptions Anthropic { get; set; } = new();
+}
+
+public sealed class AnthropicLlmOptions
+{
+    public AnthropicPromptCachingOptions PromptCaching { get; set; } = new();
+}
+
+/// <summary>
+/// Anthropic prompt caching (<c>cache_control</c> on the document turn) plus capture of the reported
+/// token counts. <b>Off by default</b>: production keeps sending exactly the request it always did.
+/// Turn it on per environment with <c>Llm__Anthropic__PromptCaching__Enabled=true</c>.
+/// </summary>
+public sealed class AnthropicPromptCachingOptions
+{
+    public bool Enabled { get; set; }
 }
 
 public sealed class OllamaLlmOptions

@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using DocuEngAIne.Api.Endpoints;
 using DocuEngAIne.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace DocuEngAIne.Tests;
@@ -91,6 +92,38 @@ public class LlmEndpointTests : IClassFixture<TestHost>
         Assert.All(audits, a => Assert.DoesNotContain(prompt, a.Details ?? string.Empty));
         Assert.DoesNotContain(db.Documents.AsEnumerable(), d => (d.Content ?? string.Empty).Contains(prompt));
         Assert.DoesNotContain(db.Companies.AsEnumerable(), c => (c.Notes ?? string.Empty).Contains(prompt));
+    }
+
+    [Fact]
+    public async Task Chat_Is_Never_Marked_For_Caching_And_Audits_Usage_As_Integers_Only()
+    {
+        var stub = _host.Services.GetRequiredService<StubLlmClient>();
+        stub.Reset();
+        stub.Result = new(
+            "chat-completion-not-for-audit",
+            "claude-opus-5",
+            DocuEngAIne.Core.Enums.LlmProvider.Anthropic,
+            new DocuEngAIne.Core.Interfaces.LlmUsage(10, 20, 0, 0));
+        const string prompt = "chat-usage-prompt-not-for-audit";
+        using var client = _host.CreateOwnerClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/llm/chat",
+            new LlmChatRequest([new LlmChatMessageRequest("user", prompt)]));
+
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        // /api/llm/chat has no stable server-defined prefix: it must never set a cache breakpoint.
+        Assert.All(stub.LastMessages!, m => Assert.False(m.CacheBreakpoint));
+
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DocuEngAIneDbContext>();
+        var audit = db.AuditLogs.AsNoTracking()
+            .Where(a => a.Action == "Llm.Chat" && a.Details != null && a.Details.Contains("claude-opus-5"))
+            .AsEnumerable()
+            .Single();
+        Assert.Equal("provider=Anthropic model=claude-opus-5 in=10 out=20 cacheRead=0 cacheWrite=0", audit.Details);
+        Assert.DoesNotContain(prompt, audit.Details);
+        Assert.DoesNotContain("chat-completion", audit.Details);
     }
 
     [Fact]
