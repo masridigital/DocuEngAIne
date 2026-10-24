@@ -69,7 +69,11 @@ public sealed class AnthropicLlmClient : ILlmClient
         using var response = await _http.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Anthropic chat failed ({(int)response.StatusCode}): {body}");
+        {
+            // Status code only: the upstream body is neither logged nor returned to the caller.
+            _logger.LogWarning("Anthropic chat failed with HTTP {StatusCode}", (int)response.StatusCode);
+            throw new LlmProviderException((int)response.StatusCode);
+        }
 
         var parsed = JsonSerializer.Deserialize<AnthropicMessageResponse>(body)
             ?? throw new InvalidOperationException("Anthropic returned an empty message.");

@@ -471,6 +471,113 @@ public class LlmClientTests
         Assert.Null(ollamaResult.Usage);
     }
 
+    [Fact]
+    public async Task Anthropic_With_Caching_Off_Sends_Exactly_The_Pre_Change_Request_Body()
+    {
+        // Golden body: the shape the client produced before prompt caching existed. A change here changes
+        // what production sends with the flag off.
+        const string golden = """{"model":"claude-opus-5","max_tokens":1024,"system":"You are a doc assistant.","messages":[{"role":"user","content":"the-document-body"},{"role":"user","content":"shorten-it"}]}""";
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReplyWithUsage);
+        var client = CachingClient(handler, enabled: false);
+
+        await client.ChatAsync(DocumentPrompt);
+
+        Assert.Equal(golden, Assert.Single(handler.Requests).Body);
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Default_Options_Sends_The_Same_Golden_Body()
+    {
+        const string golden = """{"model":"claude-opus-5","max_tokens":1024,"system":"You are a doc assistant.","messages":[{"role":"user","content":"the-document-body"},{"role":"user","content":"shorten-it"}]}""";
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReply);
+        var client = new AnthropicLlmClient(
+            new HttpClient(handler, disposeHandler: false),
+            Config(("AnthropicApiKey", AnthropicSecret)),
+            Options.Create(new LlmOptions { Provider = LlmProvider.Anthropic }),
+            NullLogger<AnthropicLlmClient>.Instance);
+
+        await client.ChatAsync(DocumentPrompt);
+
+        Assert.Equal(golden, Assert.Single(handler.Requests).Body);
+    }
+
+    [Fact]
+    public async Task LlmHttpLoggingHandler_Logs_Neither_The_Key_Nor_Any_Content_For_An_Anthropic_Call()
+    {
+        var inner = new RecordingHandler().EnqueueJson(AnthropicReplyWithUsage);
+        var handlerLogger = new CapturingLogger<LlmHttpLoggingHandler>();
+        var pipeline = new LlmHttpLoggingHandler(handlerLogger) { InnerHandler = inner };
+        var client = new AnthropicLlmClient(
+            new HttpClient(pipeline, disposeHandler: false),
+            Config(("AnthropicApiKey", AnthropicSecret)),
+            Options.Create(new LlmOptions
+            {
+                Provider = LlmProvider.Anthropic,
+                Anthropic = new AnthropicLlmOptions
+                {
+                    PromptCaching = new AnthropicPromptCachingOptions { Enabled = true },
+                },
+            }),
+            NullLogger<AnthropicLlmClient>.Instance);
+
+        await client.ChatAsync(DocumentPrompt);
+
+        var logs = string.Join('\n', handlerLogger.Messages);
+        Assert.NotEmpty(handlerLogger.Messages);
+        Assert.Contains("x-api-key=[redacted]", logs, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(LlmDefaults.AnthropicEndpoint, logs);
+        Assert.DoesNotContain(AnthropicSecret, logs);
+        Assert.DoesNotContain("the-document-body", logs);
+        Assert.DoesNotContain("shorten-it", logs);
+        Assert.DoesNotContain("hello from anthropic", logs);
+        Assert.DoesNotContain("cache_control", logs);
+    }
+
+    private const string UpstreamErrorBody = """{"type":"error","error":{"type":"invalid_request_error","message":"UPSTREAM-BODY-SECRET echoes the-document-body and sk-ant-leaked"}}""";
+
+    [Fact]
+    public async Task Anthropic_Provider_Error_Is_Generic_And_Only_The_Status_Is_Logged()
+    {
+        var handler = new RecordingHandler().EnqueueStatus(HttpStatusCode.TooManyRequests, UpstreamErrorBody);
+        var logger = new CapturingLogger<AnthropicLlmClient>();
+        var client = CachingClient(handler, enabled: true, logger);
+
+        var ex = await Assert.ThrowsAsync<LlmProviderException>(() => client.ChatAsync(DocumentPrompt));
+
+        Assert.Equal(429, ex.StatusCode);
+        Assert.Equal("The AI provider returned an error.", ex.Message);
+        Assert.DoesNotContain("UPSTREAM-BODY-SECRET", ex.ToString());
+        Assert.DoesNotContain("the-document-body", ex.Message);
+        var logs = string.Join('\n', logger.Messages);
+        Assert.Contains("HTTP 429", logs);
+        Assert.DoesNotContain("UPSTREAM-BODY-SECRET", logs);
+        Assert.DoesNotContain("sk-ant-leaked", logs);
+        Assert.DoesNotContain(AnthropicSecret, logs);
+    }
+
+    [Fact]
+    public async Task Together_And_Ollama_Provider_Errors_Are_Generic_Too()
+    {
+        var togetherHandler = new RecordingHandler().EnqueueStatus(HttpStatusCode.BadGateway, UpstreamErrorBody);
+        var together = new TogetherLlmClient(
+            new HttpClient(togetherHandler, disposeHandler: false),
+            Config(("TogetherApiKey", TogetherSecret)),
+            Options.Create(new LlmOptions { Provider = LlmProvider.Together }),
+            NullLogger<TogetherLlmClient>.Instance);
+        var ollamaHandler = new RecordingHandler().EnqueueStatus(HttpStatusCode.InternalServerError, UpstreamErrorBody);
+        var ollama = new OllamaLlmClient(
+            new HttpClient(ollamaHandler, disposeHandler: false),
+            Options.Create(new LlmOptions { Provider = LlmProvider.Ollama }),
+            NullLogger<OllamaLlmClient>.Instance);
+
+        var t = await Assert.ThrowsAsync<LlmProviderException>(() => together.ChatAsync(DocumentPrompt));
+        var o = await Assert.ThrowsAsync<LlmProviderException>(() => ollama.ChatAsync(DocumentPrompt));
+
+        Assert.Equal(502, t.StatusCode);
+        Assert.Equal(500, o.StatusCode);
+        Assert.DoesNotContain("UPSTREAM-BODY-SECRET", t.Message + o.Message);
+    }
+
     private static int CountOccurrences(string text, string needle)
     {
         var count = 0;
@@ -493,6 +600,15 @@ public class LlmClientTests
         private readonly Queue<HttpResponseMessage> _responses = new();
 
         public List<RecordedRequest> Requests { get; } = [];
+
+        public RecordingHandler EnqueueStatus(HttpStatusCode status, string body)
+        {
+            _responses.Enqueue(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+            return this;
+        }
 
         public RecordingHandler EnqueueJson(string body)
         {

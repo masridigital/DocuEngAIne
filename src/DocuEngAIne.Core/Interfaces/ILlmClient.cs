@@ -41,3 +41,13 @@ public sealed record LlmUsage(int InputTokens, int OutputTokens, int CacheCreati
 
 /// <param name="Usage">Null when the provider reported none or usage capture is off.</param>
 public sealed record LlmChatResult(string Content, string Model, LlmProvider Provider, LlmUsage? Usage = null);
+
+/// <summary>
+/// The provider answered with a non-success status. <see cref="Exception.Message"/> is deliberately generic
+/// because endpoints return it to the caller: the upstream response body is never carried here (it can echo
+/// request content or provider internals). Only the numeric status is kept, for logging.
+/// </summary>
+public sealed class LlmProviderException(int statusCode) : InvalidOperationException("The AI provider returned an error.")
+{
+    public int StatusCode { get; } = statusCode;
+}

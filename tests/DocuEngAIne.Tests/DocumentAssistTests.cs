@@ -287,6 +287,23 @@ public class DocumentAssistTests : IClassFixture<TestHost>
     }
 
     [Fact]
+    public async Task Assist_Provider_Error_Returns_A_Generic_Message_Without_The_Upstream_Body()
+    {
+        var id = await SeedDocumentAsync(_host.TenantAId, "Provider error", "body");
+        var stub = _host.Services.GetRequiredService<StubLlmClient>();
+        stub.Reset();
+        stub.ThrowOnChat = new DocuEngAIne.Core.Interfaces.LlmProviderException(429);
+
+        using var client = _host.CreateOwnerClient();
+        var response = await client.PostAsJsonAsync($"/api/documents/{id}/assist", new { action = "summarize" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.Contains("The AI provider returned an error.", text);
+        Assert.DoesNotContain("429", text);
+    }
+
+    [Fact]
     public async Task Assist_Reader_Returns_403()
     {
         var id = await SeedDocumentAsync(_host.TenantAId, "Reader blocked", "body");
