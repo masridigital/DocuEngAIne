@@ -17,6 +17,7 @@ public class LlmClientTests
 {
     private const string OpenAiReply = """{"id":"cmpl","model":"reply-model","choices":[{"message":{"role":"assistant","content":"hello from provider"}}]}""";
     private const string AnthropicReply = """{"id":"msg","model":"claude-reply","content":[{"type":"text","text":"hello from anthropic"}]}""";
+    private const string AnthropicReplyWithUsage = """{"id":"msg","model":"claude-reply","content":[{"type":"text","text":"hello from anthropic"}],"usage":{"input_tokens":61,"output_tokens":482,"cache_creation_input_tokens":1200,"cache_read_input_tokens":3400}}""";
     private const string TogetherSecret = "together-secret-do-not-log";
     private const string AnthropicSecret = "anthropic-secret-do-not-log";
 
@@ -235,6 +236,357 @@ public class LlmClientTests
         Assert.DoesNotContain(TogetherSecret, described);
     }
 
+    private static AnthropicLlmClient CachingClient(
+        RecordingHandler handler,
+        bool enabled,
+        ILogger<AnthropicLlmClient>? logger = null) => new(
+        new HttpClient(handler, disposeHandler: false),
+        Config(("AnthropicApiKey", AnthropicSecret)),
+        Options.Create(new LlmOptions
+        {
+            Provider = LlmProvider.Anthropic,
+            Anthropic = new AnthropicLlmOptions
+            {
+                PromptCaching = new AnthropicPromptCachingOptions { Enabled = enabled },
+            },
+        }),
+        logger ?? NullLogger<AnthropicLlmClient>.Instance);
+
+    private static readonly LlmMessage[] DocumentPrompt =
+    [
+        new LlmMessage("system", "You are a doc assistant."),
+        new LlmMessage("user", "the-document-body", CacheBreakpoint: true),
+        new LlmMessage("user", "shorten-it"),
+    ];
+
+    [Fact]
+    public void Prompt_Caching_Is_Off_By_Default()
+    {
+        Assert.False(new LlmOptions().Anthropic.PromptCaching.Enabled);
+
+        var services = new ServiceCollection();
+        var configuration = Config();
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddLogging();
+        services.AddLlmClients(configuration);
+        using var provider = services.BuildServiceProvider();
+        Assert.False(provider.GetRequiredService<IOptions<LlmOptions>>().Value.Anthropic.PromptCaching.Enabled);
+    }
+
+    [Fact]
+    public void Prompt_Caching_Binds_From_The_Environment_Style_Setting()
+    {
+        var services = new ServiceCollection();
+        var configuration = Config(("Llm:Anthropic:PromptCaching:Enabled", "true"));
+        services.AddSingleton<IConfiguration>(configuration);
+        services.AddLogging();
+        services.AddLlmClients(configuration);
+        using var provider = services.BuildServiceProvider();
+        Assert.True(provider.GetRequiredService<IOptions<LlmOptions>>().Value.Anthropic.PromptCaching.Enabled);
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Caching_Off_Sends_The_Same_Request_As_Before_And_Reports_No_Usage()
+    {
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReplyWithUsage);
+        var client = CachingClient(handler, enabled: false);
+
+        var result = await client.ChatAsync(DocumentPrompt);
+
+        var recorded = Assert.Single(handler.Requests);
+        Assert.DoesNotContain("cache_control", recorded.Body);
+        using var doc = JsonDocument.Parse(recorded.Body);
+        var root = doc.RootElement;
+        Assert.Equal(JsonValueKind.String, root.GetProperty("system").ValueKind);
+        var turns = root.GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(2, turns.Count);
+        Assert.All(turns, t => Assert.Equal(JsonValueKind.String, t.GetProperty("content").ValueKind));
+        Assert.Null(result.Usage);
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Caching_On_Marks_Only_The_Document_Turn()
+    {
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReplyWithUsage);
+        var client = CachingClient(handler, enabled: true);
+
+        var result = await client.ChatAsync(DocumentPrompt);
+
+        var recorded = Assert.Single(handler.Requests);
+        using var doc = JsonDocument.Parse(recorded.Body);
+        var root = doc.RootElement;
+
+        // system stays a plain string, so the cached prefix is system + document.
+        Assert.Equal("You are a doc assistant.", root.GetProperty("system").GetString());
+
+        var turns = root.GetProperty("messages").EnumerateArray().ToList();
+        Assert.Equal(2, turns.Count);
+
+        var marked = turns[0].GetProperty("content");
+        Assert.Equal(JsonValueKind.Array, marked.ValueKind);
+        var block = Assert.Single(marked.EnumerateArray());
+        Assert.Equal("text", block.GetProperty("type").GetString());
+        Assert.Equal("the-document-body", block.GetProperty("text").GetString());
+        var control = block.GetProperty("cache_control");
+        Assert.Equal("ephemeral", control.GetProperty("type").GetString());
+        Assert.False(control.TryGetProperty("ttl", out _), "default 5-minute cache: no ttl is sent");
+
+        // The per-call instruction comes after the breakpoint and is not cached.
+        Assert.Equal(JsonValueKind.String, turns[1].GetProperty("content").ValueKind);
+        Assert.Equal("shorten-it", turns[1].GetProperty("content").GetString());
+        Assert.Equal(1, CountOccurrences(recorded.Body, "cache_control"));
+
+        Assert.Equal(new LlmUsage(61, 482, 1200, 3400), result.Usage);
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Caching_On_Sends_No_Beta_Header()
+    {
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReplyWithUsage);
+        var client = CachingClient(handler, enabled: true);
+
+        await client.ChatAsync(DocumentPrompt);
+
+        var recorded = Assert.Single(handler.Requests);
+        Assert.Equal(AnthropicSecret, recorded.Headers.GetValues("x-api-key").Single());
+        Assert.Equal(LlmDefaults.AnthropicVersion, recorded.Headers.GetValues("anthropic-version").Single());
+        Assert.False(recorded.Headers.Contains("anthropic-beta"));
+        Assert.DoesNotContain(
+            recorded.Headers,
+            h => h.Key.Contains("beta", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Caching_On_And_No_Marked_Turn_Sends_No_Cache_Control()
+    {
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReply);
+        var client = CachingClient(handler, enabled: true);
+
+        var result = await client.ChatAsync(
+        [
+            new LlmMessage("system", "You are a doc assistant."),
+            new LlmMessage("user", "free chat turn"),
+        ]);
+
+        var recorded = Assert.Single(handler.Requests);
+        Assert.DoesNotContain("cache_control", recorded.Body);
+        // No usage block in the reply: nothing to report, and nothing is invented.
+        Assert.Null(result.Usage);
+    }
+
+    [Theory]
+    [InlineData("""{"input_tokens":-5,"output_tokens":7,"cache_creation_input_tokens":null}""")]
+    [InlineData("""{"input_tokens":"lots","output_tokens":7,"cache_read_input_tokens":99999999999}""")]
+    [InlineData("""{"input_tokens":0.5,"output_tokens":7,"cache_creation_input_tokens":{"a":1}}""")]
+    public async Task Anthropic_Usage_Treats_Missing_Negative_And_Malformed_Fields_As_Zero_And_Never_Fails_The_Call(string usage)
+    {
+        var reply = $$"""{"model":"claude-reply","content":[{"type":"text","text":"ok"}],"usage":{{usage}}}""";
+        var handler = new RecordingHandler().EnqueueJson(reply);
+        var client = CachingClient(handler, enabled: true);
+
+        var result = await client.ChatAsync(DocumentPrompt);
+
+        Assert.Equal("ok", result.Content);
+        Assert.Equal(new LlmUsage(0, 7, 0, 0), result.Usage);
+    }
+
+    [Theory]
+    [InlineData("null")]
+    [InlineData("\"oops\"")]
+    [InlineData("[1,2]")]
+    public async Task Anthropic_Usage_That_Is_Not_An_Object_Reports_None_And_Never_Fails_The_Call(string usage)
+    {
+        var reply = $$"""{"model":"claude-reply","content":[{"type":"text","text":"ok"}],"usage":{{usage}}}""";
+        var handler = new RecordingHandler().EnqueueJson(reply);
+        var client = CachingClient(handler, enabled: true);
+
+        var result = await client.ChatAsync(DocumentPrompt);
+
+        Assert.Equal("ok", result.Content);
+        Assert.Null(result.Usage);
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Caching_On_Does_Not_Wrap_A_Whitespace_Only_Marked_Turn()
+    {
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReply);
+        var client = CachingClient(handler, enabled: true);
+
+        await client.ChatAsync(
+        [
+            new LlmMessage("system", "s"),
+            new LlmMessage("user", "   ", CacheBreakpoint: true),
+        ]);
+
+        Assert.DoesNotContain("cache_control", Assert.Single(handler.Requests).Body);
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Caching_On_Logs_Neither_The_Key_Nor_Any_Content()
+    {
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReplyWithUsage);
+        var logger = new CapturingLogger<AnthropicLlmClient>();
+        var client = CachingClient(handler, enabled: true, logger);
+
+        await client.ChatAsync(DocumentPrompt);
+
+        var logs = string.Join('\n', logger.Messages);
+        Assert.Contains("x-api-key=[redacted]", logs, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain(AnthropicSecret, logs);
+        Assert.DoesNotContain("the-document-body", logs);
+        Assert.DoesNotContain("shorten-it", logs);
+        Assert.DoesNotContain("hello from anthropic", logs);
+    }
+
+    [Fact]
+    public void Usage_Audit_Details_Are_Invariant_Integers()
+    {
+        var details = new LlmUsage(1, 2, 3, 4).ToAuditDetails();
+
+        Assert.Equal("in=1 out=2 cacheRead=4 cacheWrite=3", details);
+        Assert.Matches(@"^in=\d+ out=\d+ cacheRead=\d+ cacheWrite=\d+$", details);
+    }
+
+    [Fact]
+    public async Task Together_And_Ollama_Ignore_The_Cache_Breakpoint()
+    {
+        var togetherHandler = new RecordingHandler().EnqueueJson(OpenAiReply);
+        var together = new TogetherLlmClient(
+            new HttpClient(togetherHandler, disposeHandler: false),
+            Config(("TogetherApiKey", TogetherSecret)),
+            Options.Create(new LlmOptions { Provider = LlmProvider.Together }),
+            NullLogger<TogetherLlmClient>.Instance);
+        var ollamaHandler = new RecordingHandler().EnqueueJson(OpenAiReply);
+        var ollama = new OllamaLlmClient(
+            new HttpClient(ollamaHandler, disposeHandler: false),
+            Options.Create(new LlmOptions { Provider = LlmProvider.Ollama }),
+            NullLogger<OllamaLlmClient>.Instance);
+
+        var togetherResult = await together.ChatAsync(DocumentPrompt);
+        var ollamaResult = await ollama.ChatAsync(DocumentPrompt);
+
+        Assert.DoesNotContain("cache_control", Assert.Single(togetherHandler.Requests).Body);
+        Assert.DoesNotContain("cache_control", Assert.Single(ollamaHandler.Requests).Body);
+        Assert.Null(togetherResult.Usage);
+        Assert.Null(ollamaResult.Usage);
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Caching_Off_Sends_Exactly_The_Pre_Change_Request_Body()
+    {
+        // Golden body: the shape the client produced before prompt caching existed. A change here changes
+        // what production sends with the flag off.
+        const string golden = """{"model":"claude-opus-5","max_tokens":1024,"system":"You are a doc assistant.","messages":[{"role":"user","content":"the-document-body"},{"role":"user","content":"shorten-it"}]}""";
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReplyWithUsage);
+        var client = CachingClient(handler, enabled: false);
+
+        await client.ChatAsync(DocumentPrompt);
+
+        Assert.Equal(golden, Assert.Single(handler.Requests).Body);
+    }
+
+    [Fact]
+    public async Task Anthropic_With_Default_Options_Sends_The_Same_Golden_Body()
+    {
+        const string golden = """{"model":"claude-opus-5","max_tokens":1024,"system":"You are a doc assistant.","messages":[{"role":"user","content":"the-document-body"},{"role":"user","content":"shorten-it"}]}""";
+        var handler = new RecordingHandler().EnqueueJson(AnthropicReply);
+        var client = new AnthropicLlmClient(
+            new HttpClient(handler, disposeHandler: false),
+            Config(("AnthropicApiKey", AnthropicSecret)),
+            Options.Create(new LlmOptions { Provider = LlmProvider.Anthropic }),
+            NullLogger<AnthropicLlmClient>.Instance);
+
+        await client.ChatAsync(DocumentPrompt);
+
+        Assert.Equal(golden, Assert.Single(handler.Requests).Body);
+    }
+
+    [Fact]
+    public async Task LlmHttpLoggingHandler_Logs_Neither_The_Key_Nor_Any_Content_For_An_Anthropic_Call()
+    {
+        var inner = new RecordingHandler().EnqueueJson(AnthropicReplyWithUsage);
+        var handlerLogger = new CapturingLogger<LlmHttpLoggingHandler>();
+        var pipeline = new LlmHttpLoggingHandler(handlerLogger) { InnerHandler = inner };
+        var client = new AnthropicLlmClient(
+            new HttpClient(pipeline, disposeHandler: false),
+            Config(("AnthropicApiKey", AnthropicSecret)),
+            Options.Create(new LlmOptions
+            {
+                Provider = LlmProvider.Anthropic,
+                Anthropic = new AnthropicLlmOptions
+                {
+                    PromptCaching = new AnthropicPromptCachingOptions { Enabled = true },
+                },
+            }),
+            NullLogger<AnthropicLlmClient>.Instance);
+
+        await client.ChatAsync(DocumentPrompt);
+
+        var logs = string.Join('\n', handlerLogger.Messages);
+        Assert.NotEmpty(handlerLogger.Messages);
+        Assert.Contains("x-api-key=[redacted]", logs, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(LlmDefaults.AnthropicEndpoint, logs);
+        Assert.DoesNotContain(AnthropicSecret, logs);
+        Assert.DoesNotContain("the-document-body", logs);
+        Assert.DoesNotContain("shorten-it", logs);
+        Assert.DoesNotContain("hello from anthropic", logs);
+        Assert.DoesNotContain("cache_control", logs);
+    }
+
+    private const string UpstreamErrorBody = """{"type":"error","error":{"type":"invalid_request_error","message":"UPSTREAM-BODY-SECRET echoes the-document-body and sk-ant-leaked"}}""";
+
+    [Fact]
+    public async Task Anthropic_Provider_Error_Is_Generic_And_Only_The_Status_Is_Logged()
+    {
+        var handler = new RecordingHandler().EnqueueStatus(HttpStatusCode.TooManyRequests, UpstreamErrorBody);
+        var logger = new CapturingLogger<AnthropicLlmClient>();
+        var client = CachingClient(handler, enabled: true, logger);
+
+        var ex = await Assert.ThrowsAsync<LlmProviderException>(() => client.ChatAsync(DocumentPrompt));
+
+        Assert.Equal(429, ex.StatusCode);
+        Assert.Equal("The AI provider returned an error.", ex.Message);
+        Assert.DoesNotContain("UPSTREAM-BODY-SECRET", ex.ToString());
+        Assert.DoesNotContain("the-document-body", ex.Message);
+        var logs = string.Join('\n', logger.Messages);
+        Assert.Contains("HTTP 429", logs);
+        Assert.DoesNotContain("UPSTREAM-BODY-SECRET", logs);
+        Assert.DoesNotContain("sk-ant-leaked", logs);
+        Assert.DoesNotContain(AnthropicSecret, logs);
+    }
+
+    [Fact]
+    public async Task Together_And_Ollama_Provider_Errors_Are_Generic_Too()
+    {
+        var togetherHandler = new RecordingHandler().EnqueueStatus(HttpStatusCode.BadGateway, UpstreamErrorBody);
+        var together = new TogetherLlmClient(
+            new HttpClient(togetherHandler, disposeHandler: false),
+            Config(("TogetherApiKey", TogetherSecret)),
+            Options.Create(new LlmOptions { Provider = LlmProvider.Together }),
+            NullLogger<TogetherLlmClient>.Instance);
+        var ollamaHandler = new RecordingHandler().EnqueueStatus(HttpStatusCode.InternalServerError, UpstreamErrorBody);
+        var ollama = new OllamaLlmClient(
+            new HttpClient(ollamaHandler, disposeHandler: false),
+            Options.Create(new LlmOptions { Provider = LlmProvider.Ollama }),
+            NullLogger<OllamaLlmClient>.Instance);
+
+        var t = await Assert.ThrowsAsync<LlmProviderException>(() => together.ChatAsync(DocumentPrompt));
+        var o = await Assert.ThrowsAsync<LlmProviderException>(() => ollama.ChatAsync(DocumentPrompt));
+
+        Assert.Equal(502, t.StatusCode);
+        Assert.Equal(500, o.StatusCode);
+        Assert.DoesNotContain("UPSTREAM-BODY-SECRET", t.Message + o.Message);
+    }
+
+    private static int CountOccurrences(string text, string needle)
+    {
+        var count = 0;
+        for (var i = text.IndexOf(needle, StringComparison.Ordinal); i >= 0;
+             i = text.IndexOf(needle, i + needle.Length, StringComparison.Ordinal))
+            count++;
+        return count;
+    }
+
     private static IConfiguration Config(params (string Key, string? Value)[] pairs)
     {
         var data = pairs.ToDictionary(p => p.Key, p => p.Value);
@@ -248,6 +600,15 @@ public class LlmClientTests
         private readonly Queue<HttpResponseMessage> _responses = new();
 
         public List<RecordedRequest> Requests { get; } = [];
+
+        public RecordingHandler EnqueueStatus(HttpStatusCode status, string body)
+        {
+            _responses.Enqueue(new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            });
+            return this;
+        }
 
         public RecordingHandler EnqueueJson(string body)
         {

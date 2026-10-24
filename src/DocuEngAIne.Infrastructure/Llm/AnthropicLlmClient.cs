@@ -40,7 +40,8 @@ public sealed class AnthropicLlmClient : ILlmClient
     {
         var apiKey = LlmSecretResolver.Require(_configuration, LlmSecretNames.AnthropicApiKey);
         var model = LlmDefaults.ResolveModel(LlmProvider.Anthropic, _options.Model, options?.Model);
-        var (system, turns) = SplitSystem(messages);
+        var cache = _options.Anthropic.PromptCaching.Enabled;
+        var (system, turns) = SplitSystem(messages, cache);
         if (turns.Count == 0)
             throw new InvalidOperationException("Anthropic chat requires at least one user or assistant message.");
 
@@ -68,17 +69,48 @@ public sealed class AnthropicLlmClient : ILlmClient
         using var response = await _http.SendAsync(request, cancellationToken);
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Anthropic chat failed ({(int)response.StatusCode}): {body}");
+        {
+            // Status code only: the upstream body is neither logged nor returned to the caller.
+            _logger.LogWarning("Anthropic chat failed with HTTP {StatusCode}", (int)response.StatusCode);
+            throw new LlmProviderException((int)response.StatusCode);
+        }
 
         var parsed = JsonSerializer.Deserialize<AnthropicMessageResponse>(body)
             ?? throw new InvalidOperationException("Anthropic returned an empty message.");
         var content = ReadText(parsed)
             ?? throw new InvalidOperationException("Anthropic returned no text content.");
 
-        return new LlmChatResult(content, parsed.Model ?? model, LlmProvider.Anthropic);
+        // Usage is captured only with caching switched on, so the off state changes nothing in prod.
+        var usage = cache ? ReadUsage(parsed.Usage) : null;
+
+        return new LlmChatResult(content, parsed.Model ?? model, LlmProvider.Anthropic, usage);
     }
 
-    internal static (string? System, List<AnthropicTurn> Turns) SplitSystem(IReadOnlyList<LlmMessage> messages)
+    // Tolerant on purpose: usage is telemetry, so a missing, null, non-numeric or out-of-range field reads
+    // as 0 rather than failing a call that already succeeded and was billed.
+    private static LlmUsage? ReadUsage(JsonElement? usage)
+    {
+        if (usage is not { ValueKind: JsonValueKind.Object } element)
+            return null;
+
+        return new LlmUsage(
+            Count(element, "input_tokens"),
+            Count(element, "output_tokens"),
+            Count(element, "cache_creation_input_tokens"),
+            Count(element, "cache_read_input_tokens"));
+    }
+
+    private static int Count(JsonElement usage, string name)
+        => usage.TryGetProperty(name, out var value)
+            && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out var count)
+            && count > 0
+                ? count
+                : 0;
+
+    internal static (string? System, List<AnthropicTurn> Turns) SplitSystem(
+        IReadOnlyList<LlmMessage> messages,
+        bool cache = false)
     {
         var systemParts = new List<string>();
         var turns = new List<AnthropicTurn>();
@@ -92,7 +124,18 @@ public sealed class AnthropicLlmClient : ILlmClient
                 continue;
             }
 
-            turns.Add(new AnthropicTurn { Role = message.Role, Content = message.Content });
+            // Plain string unless this turn ends a cacheable prefix. The system field stays a string, and
+            // it sits before the marked turn, so the cached prefix covers system + everything up to here.
+            turns.Add(new AnthropicTurn
+            {
+                Role = message.Role,
+                Content = cache && message.CacheBreakpoint && !string.IsNullOrWhiteSpace(message.Content)
+                    ? new List<AnthropicTextBlock>
+                    {
+                        new() { Text = message.Content, CacheControl = new AnthropicCacheControl() },
+                    }
+                    : message.Content,
+            });
         }
 
         var system = systemParts.Count == 0 ? null : string.Join("\n\n", systemParts);
@@ -139,14 +182,38 @@ internal sealed class AnthropicTurn
     [JsonPropertyName("role")]
     public required string Role { get; init; }
 
+    // string, or List<AnthropicTextBlock> for a turn that carries a cache breakpoint.
     [JsonPropertyName("content")]
-    public required string Content { get; init; }
+    public required object Content { get; init; }
+}
+
+internal sealed class AnthropicTextBlock
+{
+    [JsonPropertyName("type")]
+    public string Type { get; init; } = "text";
+
+    [JsonPropertyName("text")]
+    public required string Text { get; init; }
+
+    [JsonPropertyName("cache_control")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public AnthropicCacheControl? CacheControl { get; init; }
+}
+
+/// <summary>Default 5-minute ephemeral cache. No <c>ttl</c> is sent, and no beta header is needed.</summary>
+internal sealed class AnthropicCacheControl
+{
+    [JsonPropertyName("type")]
+    public string Type { get; init; } = "ephemeral";
 }
 
 internal sealed class AnthropicMessageResponse
 {
     [JsonPropertyName("model")]
     public string? Model { get; set; }
+
+    [JsonPropertyName("usage")]
+    public JsonElement? Usage { get; set; }
 
     [JsonPropertyName("content")]
     public List<AnthropicContentBlock>? Content { get; set; }

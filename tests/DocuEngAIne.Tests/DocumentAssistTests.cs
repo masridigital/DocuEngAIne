@@ -80,6 +80,83 @@ public class DocumentAssistTests : IClassFixture<TestHost>
     }
 
     [Fact]
+    public async Task Assist_Marks_Only_The_Document_Turn_As_The_Cache_Breakpoint()
+    {
+        const string body = "cache-breakpoint-body";
+        const string instruction = "per-call-instruction";
+        var id = await SeedDocumentAsync(_host.TenantAId, "Cache marker", body);
+        var stub = _host.Services.GetRequiredService<StubLlmClient>();
+        stub.Reset();
+
+        using var client = _host.CreateOwnerClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/documents/{id}/assist",
+            new { action = "rewrite", instruction });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        var messages = stub.LastMessages!.ToList();
+        Assert.Equal(3, messages.Count);
+        // Stable first, variable last: system, then the document (the cacheable prefix ends here),
+        // then the instruction that changes per call.
+        Assert.Equal("system", messages[0].Role);
+        Assert.False(messages[0].CacheBreakpoint);
+        Assert.Equal(body, messages[1].Content);
+        Assert.True(messages[1].CacheBreakpoint);
+        Assert.Equal(instruction, messages[2].Content);
+        Assert.False(messages[2].CacheBreakpoint);
+    }
+
+    [Fact]
+    public async Task Assist_Audit_Details_Carry_Integer_Usage_Counts_Only()
+    {
+        const string body = "usage-audit-body-must-not-be-logged";
+        var id = await SeedDocumentAsync(_host.TenantAId, "Usage audit", body);
+        var stub = _host.Services.GetRequiredService<StubLlmClient>();
+        stub.Reset();
+        stub.Result = new(
+            "usage-audit-completion-must-not-be-logged",
+            "claude-opus-5",
+            DocuEngAIne.Core.Enums.LlmProvider.Anthropic,
+            new DocuEngAIne.Core.Interfaces.LlmUsage(61, 482, 1200, 3400));
+
+        using var client = _host.CreateOwnerClient();
+        var response = await client.PostAsJsonAsync($"/api/documents/{id}/assist", new { action = "summarize" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DocuEngAIneDbContext>();
+        var audit = db.AuditLogs.AsNoTracking()
+            .Where(a => a.Action == "Document.Assist" && a.EntityId == id)
+            .AsEnumerable()
+            .Single();
+        Assert.Equal(
+            "action=Summarize provider=Anthropic model=claude-opus-5 apply=False in=61 out=482 cacheRead=3400 cacheWrite=1200",
+            audit.Details);
+        Assert.DoesNotContain(body, audit.Details);
+        Assert.DoesNotContain("completion-must-not", audit.Details);
+    }
+
+    [Fact]
+    public async Task Assist_Audit_Details_Are_Unchanged_When_The_Provider_Reports_No_Usage()
+    {
+        var id = await SeedDocumentAsync(_host.TenantAId, "No usage audit", "body");
+        var stub = _host.Services.GetRequiredService<StubLlmClient>();
+        stub.Reset();
+
+        using var client = _host.CreateOwnerClient();
+        var response = await client.PostAsJsonAsync($"/api/documents/{id}/assist", new { action = "summarize" });
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+        using var scope = _host.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<DocuEngAIneDbContext>();
+        var audit = db.AuditLogs.AsNoTracking()
+            .Where(a => a.Action == "Document.Assist" && a.EntityId == id)
+            .AsEnumerable()
+            .Single();
+        Assert.Equal("action=Summarize provider=Ollama model=llama3.1 apply=False", audit.Details);
+    }
+
+    [Fact]
     public async Task Rewrite_Passes_Instruction()
     {
         const string body = "original-procedure";
@@ -207,6 +284,23 @@ public class DocumentAssistTests : IClassFixture<TestHost>
         var db = scope.ServiceProvider.GetRequiredService<DocuEngAIneDbContext>();
         Assert.Empty(db.DocumentVersions.Where(v => v.DocumentId == id));
         Assert.Equal(body, (await db.Documents.AsNoTracking().SingleAsync(d => d.Id == id)).Content);
+    }
+
+    [Fact]
+    public async Task Assist_Provider_Error_Returns_A_Generic_Message_Without_The_Upstream_Body()
+    {
+        var id = await SeedDocumentAsync(_host.TenantAId, "Provider error", "body");
+        var stub = _host.Services.GetRequiredService<StubLlmClient>();
+        stub.Reset();
+        stub.ThrowOnChat = new DocuEngAIne.Core.Interfaces.LlmProviderException(429);
+
+        using var client = _host.CreateOwnerClient();
+        var response = await client.PostAsJsonAsync($"/api/documents/{id}/assist", new { action = "summarize" });
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var text = await response.Content.ReadAsStringAsync();
+        Assert.Contains("The AI provider returned an error.", text);
+        Assert.DoesNotContain("429", text);
     }
 
     [Fact]
